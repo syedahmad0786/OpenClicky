@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup>
+    <!-- Allow restoring/compiling net*-windows TFMs on Linux CI agents. Runtime still requires Windows. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+</Project>
