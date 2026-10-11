@@ -6,9 +6,9 @@ public sealed class ChatGptTalkClient : ITalkClient
 {
     private readonly ChatGptResponsesClient _responses;
 
-    public ChatGptTalkClient(Func<CancellationToken, Task<string>> accessTokenFactory, HttpClient? httpClient = null)
+    public ChatGptTalkClient(Func<CancellationToken, Task<string>> accessTokenFactory, HttpClient? httpClient = null, Action<string>? log = null)
     {
-        _responses = new ChatGptResponsesClient(accessTokenFactory, httpClient);
+        _responses = new ChatGptResponsesClient(accessTokenFactory, httpClient, log);
     }
 
     public Task<string> CompleteVisionTalkAsync(
@@ -25,7 +25,7 @@ public sealed class ChatGptTalkClient : ITalkClient
             input.Add(new
             {
                 role,
-                content = new object[] { new { type = "input_text", text } },
+                content = new object[] { new { type = role == "assistant" ? "output_text" : "input_text", text } },
             });
         }
 

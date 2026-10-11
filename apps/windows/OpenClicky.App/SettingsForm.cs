@@ -16,7 +16,10 @@ internal sealed class SettingsForm : Form
     private readonly RadioButton _providerChatGpt;
     private readonly TextBox _apiKeyBox;
     private readonly TextBox _modelBox;
-    private readonly TextBox _chatGptModelBox;
+    private readonly ComboBox _chatGptModelBox;
+    private readonly FlowLayoutPanel _chatGptPanel;
+    private readonly FlowLayoutPanel _openRouterPanel;
+    private readonly Button _refreshModels;
     private readonly Label _chatGptStatus;
     private readonly Button _chatGptSignIn;
     private readonly Button _chatGptSignOut;
@@ -57,27 +60,47 @@ internal sealed class SettingsForm : Form
         var privacy = Page(tabs, "Privacy");
         var advanced = Page(tabs, "Advanced");
 
-        AddHeading(provider, "Connect your AI", "Choose where your screen and requests go. Provider usage may have its own cost.");
+        AddHeading(provider, "Use your ChatGPT plan", "Connect your eligible ChatGPT Plus or Pro account. No API key needed. Screen images and requests go to OpenAI.");
         var providers = new FlowLayoutPanel { AutoSize = true, Width = 560, Margin = new Padding(0, 0, 0, 16) };
         _providerOpenRouter = new RadioButton { Text = "OpenRouter", Checked = settings.AuthProvider != AuthProvider.ChatGPT, AutoSize = true };
-        _providerChatGpt = new RadioButton { Text = "ChatGPT (experimental)", Checked = settings.AuthProvider == AuthProvider.ChatGPT, AutoSize = true, Margin = new Padding(20,3,3,3) };
-        providers.Controls.AddRange(new Control[] { _providerOpenRouter, _providerChatGpt });
+        _providerChatGpt = new RadioButton { Text = "ChatGPT plan", Checked = settings.AuthProvider == AuthProvider.ChatGPT, AutoSize = true };
+        _providerOpenRouter.Margin = new Padding(20,3,3,3);
+        providers.Controls.AddRange(new Control[] { _providerChatGpt, _providerOpenRouter });
         provider.Controls.Add(providers);
-        _apiKeyBox = Field(provider, "OpenRouter API key", settings.OpenRouterApiKey ?? "");
+        _openRouterPanel = new FlowLayoutPanel { AutoSize = true, Width = 560, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = Padding.Empty };
+        _chatGptPanel = new FlowLayoutPanel { AutoSize = true, Width = 560, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = Padding.Empty };
+        provider.Controls.AddRange(new Control[] { _chatGptPanel, _openRouterPanel });
+        _apiKeyBox = Field(_openRouterPanel, "OpenRouter API key", settings.OpenRouterApiKey ?? "");
         _apiKeyBox.UseSystemPasswordChar = true;
         _apiKeyBox.AccessibleName = "OpenRouter API key";
-        provider.Controls.Add(AppTheme.Label("Saved securely with Windows. Never included in settings or logs.", 8));
-        _modelBox = Field(provider, "Vision model", settings.OpenRouterModel);
+        _openRouterPanel.Controls.Add(AppTheme.Label("Saved securely with Windows. Never included in settings or logs.", 8));
+        _modelBox = Field(_openRouterPanel, "Vision model", settings.OpenRouterModel);
         _chatGptStatus = AppTheme.Label(ChatGptStatusText(), 9);
-        provider.Controls.Add(_chatGptStatus);
+        _chatGptStatus.MaximumSize = new Size(530, 0);
+        _chatGptPanel.Controls.Add(_chatGptStatus);
         var authButtons = new FlowLayoutPanel { AutoSize = true, Width = 560, Margin = Padding.Empty };
         _chatGptSignIn = AppTheme.Button("Continue with ChatGPT");
+        _chatGptSignIn.BackColor = Color.Black;
+        _chatGptSignIn.ForeColor = Color.White;
         _chatGptSignIn.Click += async (_, _) => await SignInChatGptAsync();
         _chatGptSignOut = AppTheme.Button("Sign out");
         _chatGptSignOut.Click += async (_, _) => await SignOutChatGptAsync();
         authButtons.Controls.AddRange(new Control[] { _chatGptSignIn, _chatGptSignOut });
-        provider.Controls.Add(authButtons);
-        _chatGptModelBox = Field(provider, "ChatGPT model", settings.ChatGptModel);
+        _chatGptPanel.Controls.Add(authButtons);
+        _chatGptPanel.Controls.Add(AppTheme.Label("Model · available after sign-in", 9, true));
+        _chatGptModelBox = new ComboBox { Width = 550, DropDownStyle = ComboBoxStyle.DropDownList, DisplayMember = nameof(ChatGptModel.DisplayName), ValueMember = nameof(ChatGptModel.Slug), AccessibleName = "ChatGPT model", Margin = new Padding(0,6,0,12) };
+        _chatGptPanel.Controls.Add(_chatGptModelBox);
+        var usageButtons = new FlowLayoutPanel { Width = 560, AutoSize = true, Margin = Padding.Empty };
+        _refreshModels = AppTheme.Button("Refresh models");
+        _refreshModels.Click += async (_, _) => await RefreshModelsAsync();
+        var manageUsage = AppTheme.Button("Manage usage");
+        manageUsage.Click += (_, _) => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("https://chatgpt.com/settings/usage") { UseShellExecute = true });
+        usageButtons.Controls.AddRange(new Control[] { _refreshModels, manageUsage });
+        _chatGptPanel.Controls.Add(usageButtons);
+        var speechNote = AppTheme.Label("Your ChatGPT plan powers Ask and Agent. Voice recognition and spoken replies run locally on Windows. Sign-in does not give OpenClicky access to your ChatGPT conversations.", 9);
+        speechNote.MaximumSize = new Size(530, 0);
+        _chatGptPanel.Controls.Add(speechNote);
+        _providerChatGpt.CheckedChanged += (_, _) => RefreshProviderPanels();
 
         AddHeading(voice, "Talk from any app", "Hold your shortcut while speaking, then release. You can always type in Home.");
         _hotkeyBox = Field(voice, "Shortcut · click the field and press your combination", _draft.DisplayName);
@@ -135,6 +158,7 @@ internal sealed class SettingsForm : Form
         Controls.Add(header);
         Controls.Add(footer);
         RefreshChatGptButtons();
+        RefreshProviderPanels();
         ResumeLayout(true);
     }
 
@@ -167,11 +191,12 @@ internal sealed class SettingsForm : Form
 
     private string ChatGptStatusText()
     {
-        var signedIn = ProviderFactory.IsChatGptSignedIn(_secrets);
-        if (signedIn)
+        var credential = ChatGptCredentialStore.Load(_secrets);
+        if (credential?.AccessToken is { Length: > 0 })
         {
-            var email = _settings.ChatGptAccountEmail ?? "(signed in)";
-            return $"Signed in as {email}. Tokens in OS secret store (DPAPI / Credential Manager).";
+            var email = credential.Email ?? "your account";
+            return credential.HasUsableSession ? $"Connected as {email} · Using ChatGPT plan."
+                : $"Connected as {email}. Plan usage is disabled. Continue with ChatGPT to enable it.";
         }
 
         return "Not signed in. Continue with ChatGPT opens the official OpenAI browser login.";
@@ -181,9 +206,48 @@ internal sealed class SettingsForm : Form
     {
         var signedIn = ProviderFactory.IsChatGptSignedIn(_secrets);
         _chatGptStatus.Text = ChatGptStatusText();
-        _chatGptSignOut.Enabled = signedIn && !_signInBusy;
+        _chatGptSignOut.Enabled = ChatGptCredentialStore.Load(_secrets)?.AccessToken is { Length: > 0 } && !_signInBusy;
         _chatGptSignIn.Enabled = !_signInBusy;
-        _chatGptSignIn.Text = signedIn ? "Re-authorize ChatGPT" : "Continue with ChatGPT";
+        _refreshModels.Enabled = signedIn && !_signInBusy;
+        _chatGptModelBox.Enabled = signedIn && !_signInBusy && _chatGptModelBox.Items.Count > 0;
+    }
+
+    private void RefreshProviderPanels()
+    {
+        _chatGptPanel.Visible = _providerChatGpt.Checked;
+        _openRouterPanel.Visible = !_providerChatGpt.Checked;
+        if (_providerChatGpt.Checked) _windowsSpeech.Checked = true;
+        _windowsSpeech.Enabled = !_providerChatGpt.Checked;
+        _transcriptionModelBox.Enabled = !_providerChatGpt.Checked;
+    }
+
+    private async Task RefreshModelsAsync()
+    {
+        if (!ProviderFactory.IsChatGptSignedIn(_secrets)) return;
+        _refreshModels.Enabled = false;
+        _chatGptStatus.Text = "Connected · loading your available models…";
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+            var client = new ChatGptResponsesClient(ct => _chatGptOAuth.GetAccessTokenAsync(_settings, _secrets, ct));
+            var models = await client.ListModelsAsync(cts.Token);
+            if (models.Count == 0) throw new InvalidOperationException("No models are available for this ChatGPT account.");
+            var selected = (_chatGptModelBox.SelectedItem as ChatGptModel)?.Slug ?? _settings.ChatGptModel;
+            _chatGptModelBox.DataSource = models.ToList();
+            _chatGptModelBox.SelectedItem = models.FirstOrDefault(m => m.Slug == selected)
+                ?? models.FirstOrDefault(m => m.Slug == "gpt-5.6-terra") ?? models[0];
+            _settings.ChatGptModel = ((ChatGptModel)_chatGptModelBox.SelectedItem!).Slug;
+            SettingsStore.Save(_settings);
+            RefreshChatGptButtons();
+            _onApplied();
+        }
+        catch (Exception ex)
+        {
+            _chatGptModelBox.DataSource = null;
+            RefreshChatGptButtons();
+            _chatGptStatus.Text = "Model list unavailable. " + ex.Message;
+            DebugLog.Append($"chatgpt_models_error={ex.GetType().Name}");
+        }
     }
 
     private async Task SignInChatGptAsync()
@@ -197,19 +261,24 @@ internal sealed class SettingsForm : Form
         RefreshChatGptButtons();
         try
         {
-            ApplyFormToSettings(persistSecrets: true);
             using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
-            await _chatGptOAuth.SignInAsync(_settings, _secrets, cts.Token).ConfigureAwait(true);
+            var credential = await _chatGptOAuth.SignInAsync(_settings, _secrets, cts.Token).ConfigureAwait(true);
             _providerChatGpt.Checked = true;
             _settings.AuthProvider = AuthProvider.ChatGPT;
             SettingsStore.Save(_settings);
             RefreshChatGptButtons();
             _onApplied();
-            MessageBox.Show(
-                "Signed in with ChatGPT. Talk/Agent will use your ChatGPT plan when that provider is selected.",
-                Text,
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
+            if (credential.HasUsableSession)
+            {
+                await RefreshModelsAsync();
+                if (!_settings.ChatGptPlanWelcomeShown)
+                {
+                    MessageBox.Show("You're using your ChatGPT plan. Eligible Ask and Agent requests use your plan allowance or available credits. Manage usage in ChatGPT settings.", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    _settings.ChatGptPlanWelcomeShown = true;
+                    SettingsStore.Save(_settings);
+                }
+            }
+            else MessageBox.Show("Signed in, but ChatGPT plan usage is disabled. Enable it using Continue with ChatGPT or Manage usage before making AI requests.", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch (OperationCanceledException)
         {
@@ -217,7 +286,7 @@ internal sealed class SettingsForm : Form
         }
         catch (Exception ex)
         {
-            DebugLog.Append($"chatgpt_signin_error={ex.Message}");
+            DebugLog.Append($"chatgpt_signin_error={ex.GetType().Name}");
             MessageBox.Show(ex.Message, "Sign in with ChatGPT failed", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
         finally
@@ -238,13 +307,12 @@ internal sealed class SettingsForm : Form
         RefreshChatGptButtons();
         try
         {
-            await _chatGptOAuth.SignOutAsync(_settings, _secrets).ConfigureAwait(true);
-            _providerOpenRouter.Checked = true;
-            _settings.AuthProvider = AuthProvider.OpenRouter;
+            var revoked = await _chatGptOAuth.SignOutAsync(_settings, _secrets).ConfigureAwait(true);
+            _chatGptModelBox.DataSource = null;
             SettingsStore.Save(_settings);
             RefreshChatGptButtons();
             _onApplied();
-            MessageBox.Show("Signed out of ChatGPT.", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show(revoked ? "Signed out of ChatGPT." : "Signed out locally. Remote revocation was not confirmed. Disconnect OpenClicky in ChatGPT settings if needed.", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch (Exception ex)
         {
@@ -262,7 +330,7 @@ internal sealed class SettingsForm : Form
         _settings.PushToTalk = _draft;
         _settings.AuthProvider = _providerChatGpt.Checked ? AuthProvider.ChatGPT : AuthProvider.OpenRouter;
         var key = string.IsNullOrWhiteSpace(_apiKeyBox.Text) ? null : _apiKeyBox.Text.Trim();
-        if (persistSecrets)
+        if (persistSecrets && _providerOpenRouter.Checked)
         {
             if (string.IsNullOrEmpty(key))
             {
@@ -275,14 +343,14 @@ internal sealed class SettingsForm : Form
                 _settings.OpenRouterApiKey = key;
             }
         }
-        else
+        else if (_providerOpenRouter.Checked)
         {
             _settings.OpenRouterApiKey = key;
         }
 
         _settings.OpenRouterModel = string.IsNullOrWhiteSpace(_modelBox.Text) ? "openai/gpt-4o-mini" : _modelBox.Text.Trim();
-        _settings.ChatGptModel = string.IsNullOrWhiteSpace(_chatGptModelBox.Text) ? "gpt-4o" : _chatGptModelBox.Text.Trim();
-        _settings.UseWindowsSpeech = _windowsSpeech.Checked;
+        if (_chatGptModelBox.SelectedItem is ChatGptModel model) _settings.ChatGptModel = model.Slug;
+        _settings.UseWindowsSpeech = _providerChatGpt.Checked || _windowsSpeech.Checked;
         _settings.SpeakReplies = _speakReplies.Checked;
         _settings.TranscriptionModel = string.IsNullOrWhiteSpace(_transcriptionModelBox.Text) ? "openai/whisper-1" : _transcriptionModelBox.Text.Trim();
         _settings.UseLocalProxy = _useProxy.Checked;
@@ -316,20 +384,13 @@ internal sealed class SettingsForm : Form
         {
             if (_useProxy.Checked) ProviderFactory.ResolveBaseUrl(new AppSettings { UseLocalProxy = true, LocalProxyBaseUrl = _proxyBox.Text });
             ApplyFormToSettings(persistSecrets: true);
-            if (_settings.AuthProvider == AuthProvider.ChatGPT && !ProviderFactory.IsChatGptSignedIn(_secrets))
-            {
-            MessageBox.Show(
-                "ChatGPT provider selected but you are not signed in. Click Continue with ChatGPT, or switch back to OpenRouter.",
-                Text,
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Warning);
-            }
-
             SettingsStore.Save(_settings);
             _onApplied();
             SetHotkeyHint($"Active now: {_draft.DisplayName}.", isError: false);
             MessageBox.Show(
-            $"Saved. Push-to-talk is now {_draft.DisplayName}.",
+            _settings.AuthProvider == AuthProvider.ChatGPT && !ProviderFactory.IsChatGptSignedIn(_secrets)
+                ? "Saved. Click Continue with ChatGPT to connect your account."
+                : $"Saved. Push-to-talk is now {_draft.DisplayName}.",
             Text,
             MessageBoxButtons.OK,
             MessageBoxIcon.Information);
@@ -398,7 +459,7 @@ internal sealed class SettingsForm : Form
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern short GetAsyncKeyState(int vKey);
 
-    protected override void OnShown(EventArgs e)
+    protected override async void OnShown(EventArgs e)
     {
         base.OnShown(e);
         // Drop unsaved capture edits when the dialog is reopened.
@@ -407,5 +468,6 @@ internal sealed class SettingsForm : Form
         SetHotkeyHint(null);
         _logBox.Text = DebugLog.Snapshot();
         RefreshChatGptButtons();
+        await RefreshModelsAsync();
     }
 }

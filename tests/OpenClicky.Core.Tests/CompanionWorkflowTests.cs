@@ -55,7 +55,7 @@ public class CompanionWorkflowTests
             new Tts(), () => new AppSettings(), log: _ => { });
         talk.MessageReceived += (_, text) => messages.Add(text);
         await talk.SubmitTextAsync("help", false);
-        Assert.Contains(messages, m => m.Contains("Connect OpenRouter"));
+        Assert.Contains(messages, m => m.Contains("Continue with ChatGPT"));
         Assert.Equal(0, capture.Calls);
     }
 

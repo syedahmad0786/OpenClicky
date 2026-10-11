@@ -19,7 +19,7 @@ Replies → Home conversation + local SAPI voice + click-through pointing overla
 | `OpenClicky.Capture` | WGC/D3D11 monitor capture with GDI fallback; in-memory JPEGs |
 | `OpenClicky.Input` | Remappable global push-to-talk and Escape cancellation |
 | `OpenClicky.Overlay` | Click-through companion, fly-to, labels, speech bubble |
-| `OpenClicky.Providers` | OpenRouter vision/transcription and experimental ChatGPT OAuth/Responses |
+| `OpenClicky.Providers` | ChatGPT OAuth, account-specific model discovery, and streamed Responses; optional OpenRouter vision/transcription |
 | `OpenClicky.Agent` | UIA snapshots, focus restoration, SendInput tools |
 | `OpenClicky.Sandbox` | Reversible action test window |
 | `*.Smoke` | Separate capture, overlay, action, and secret-store/speech checks |

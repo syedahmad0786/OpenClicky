@@ -77,6 +77,7 @@ public static class SettingsStore
             ChatGptIssuedClientId = settings.ChatGptIssuedClientId,
             ChatGptAccountEmail = settings.ChatGptAccountEmail,
             ChatGptModel = settings.ChatGptModel,
+            ChatGptPlanWelcomeShown = settings.ChatGptPlanWelcomeShown,
             DebugTranscriptOverride = settings.DebugTranscriptOverride,
             PersistConversationHistory = settings.PersistConversationHistory,
             ForceGdiCapture = settings.ForceGdiCapture,

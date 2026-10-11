@@ -12,13 +12,13 @@ Windows 11, x64. The portable release includes its runtime; no .NET installation
 
 1. Extract the published folder and open **OpenClicky.exe**.
 2. Try **Pointing demo** or **Test desktop actions**. These clearly labeled demos work without an account. Approve each test action and inspect the green button count and the exact text `hello`.
-3. In **Settings → Connection**, add your OpenRouter API key yourself, choose a vision model, and save. Keys are stored using Windows Credential Manager.
+3. In **Settings → Connection**, select **ChatGPT plan** and click **Continue with ChatGPT**. Finish the official browser sign-in yourself and enable plan usage. Eligible ChatGPT Plus or Pro accounts can power this local app without an API key. Choose from your account's available models; **Manage usage** opens ChatGPT's usage settings. OpenRouter remains an explicit alternative for existing users.
 4. Type a request in **Ask**, or hold **Win+Alt+Space**, speak, and release. Typed requests give you three seconds to select the app you want help with.
 5. For a short task, select **Agent**. Review each proposed click, typing action, hotkey, or scroll. **Stop** or **Escape** cancels the task; declining an action ends the run.
 
 The window closes to the tray. Double-click the tray icon to reopen it; choose **Quit** from the tray menu to exit. The voice shortcut can be changed in Settings. Escape is reserved for stopping.
 
-Windows speech recognition and spoken replies run locally by default. An installed Windows speech recognizer is required for voice input; typing always remains available. Optional OpenRouter transcription sends recorded audio to that provider. ChatGPT sign-in is an experimental alternative and has not been verified live in this release.
+Windows speech recognition and spoken replies run locally with ChatGPT. An installed Windows speech recognizer is required for voice input; typing always remains available. ChatGPT plan usage supports screen images and text, but excludes audio transcription. Optional OpenRouter transcription sends recorded audio only when that alternative is selected and local recognition is turned off. See [OpenAI's supported inputs](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations).
 
 ## Release status
 
@@ -32,7 +32,8 @@ Windows speech recognition and spoken replies run locally by default. An install
 | Desktop actions with human approval | Built-in test clicked the green button and typed exact `hello`; decline stops input |
 | Screen capture | Actual in-memory JPEG capture on two monitors using WGC |
 | Local speech | Installed recognizer tested with generated speech; real TTS cancellation tested |
-| OpenRouter Talk / Agent | Implemented; no live request verified for this release yet |
+| ChatGPT sign-in, model discovery, Talk / Agent | Official OAuth/Responses flow implemented; protocol checks passed; human sign-in and live inference acceptance pending |
+| OpenRouter Talk / Agent | Preserved as an alternative; no live request verified for this release yet |
 | Physical microphone / voice shortcut | Requires the human acceptance check |
 | Portable EXE / MSIX | Built locally; unsigned; MSIX installation not verified |
 
@@ -43,6 +44,7 @@ OpenClicky does not yet provide HeyClicky's persistent named companions, drawing
 - Requests capture **all connected monitors** and send their images to your selected AI provider. Choose what is visible before starting. Images are held in memory rather than saved by OpenClicky.
 - There is no OpenClicky-hosted service. Providers have their own processing and retention policies; local capture does not make the AI request local.
 - API keys use Credential Manager. Oversized ChatGPT token records use a DPAPI-protected file. Non-secret settings live in `%AppData%\OpenClicky\settings.json`.
+- ChatGPT credentials are accepted only after signature, issuer, audience, expiry, nonce, and returning-account identity checks. AI requests require granted plan-usage permission and a completed Responses stream. Sign-out clears tokens and retains the account registration; remote revocation failures are reported.
 - Optional text history is enabled by default and saved in `%AppData%\OpenClicky\history.json`; turn it off or clear it in Settings. Routine logs contain sizes, states, and error classes rather than request or response contents. Existing logs from older versions are not deleted automatically.
 - Every input action requires approval. The window-title deny-list is a convenience guard, not a security boundary. Review the destination and action each time. See [agent safety](docs/agent-safety.md).
 

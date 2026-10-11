@@ -183,7 +183,7 @@ public sealed class TalkOrchestrator : IDisposable
             var talk = _talkFactory();
             if (talk is null)
             {
-                ReportAssistantMessage("Connect OpenRouter or ChatGPT in Settings to ask about your screen. Try the offline demo first if you'd like.");
+                ReportAssistantMessage("Continue with ChatGPT in Settings to ask about your screen. The pointing demo works before sign-in.");
                 return;
             }
             _overlay.Hide();

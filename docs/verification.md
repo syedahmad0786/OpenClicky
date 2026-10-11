@@ -7,7 +7,9 @@ Local run: 11 October 2026 on Windows 11 x64. Working branch: `codex/windows-pro
 | Check | Actual evidence |
 | --- | --- |
 | Release solution build | Zero warnings and errors |
-| Unit tests | 95 passed, zero failed or skipped |
+| Unit tests | 128 passed, zero failed or skipped after ChatGPT integration changes |
+| ChatGPT protocol checks | Signed/forged/unsigned identity tokens, nonce/audience/issuer/expiry rejection, JWKS failure, exact loopback callback, account binding, rotating refresh/sign-out serialization, permission loss, ordered model catalog, image/history request format, and interrupted/failed stream rejection tested with isolated fixtures |
+| ChatGPT connection screen | Published app visually inspected; ChatGPT selected and saved, local speech enabled, Continue with ChatGPT visible; human authentication still pending |
 | Full-app action demonstration | Three separate visible approvals; real sandbox green-button count became one and the field contained exactly `hello` |
 | Full-app external Notepad | Typed Agent request, target selected during countdown, normal approval dialog, visible `hello` and five-character status; saved owned test file verified equal to exact `hello` |
 | Published app decline | Declined the first approval; sandbox stayed Ready and its field remained empty; Home reported that the agent stopped |
@@ -56,7 +58,7 @@ To repeat the external-editor check without a provider, open a fresh harmless fi
 
 ## Pending acceptance
 
-1. **Connect a provider yourself.** No key or signed-in ChatGPT session was available. Enter a key in Settings rather than chat. Close or cover private content on every connected monitor before a live test.
+1. **Connect ChatGPT yourself.** No signed-in ChatGPT session was available. Open Settings → Connection → ChatGPT plan → Continue with ChatGPT, finish the official browser sign-in, and enable plan usage. Do not paste credentials into chat. Close or cover private content on every connected monitor before a live test.
 2. **Live Ask and POINT.** Put harmless sample text in a test window, ask about a visible control, and verify the reply and pointing match the actual UI. Record the selected provider/model and observed response without logging secrets.
 3. **Live Agent.** Use the standalone sandbox. Select it during the three-second countdown, request a button click and `hello`, approve each action, then inspect the exact result. Also decline a proposed action and cancel a pending request.
 4. **Physical voice.** Hold the default shortcut, speak a request, release, and inspect the recognized text. Repeat with a remapped shortcut. Test Escape while listening and during speech.

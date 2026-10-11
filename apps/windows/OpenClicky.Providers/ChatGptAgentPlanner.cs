@@ -6,9 +6,9 @@ public sealed class ChatGptAgentPlanner : IAgentPlanner
 {
     private readonly ChatGptResponsesClient _responses;
 
-    public ChatGptAgentPlanner(Func<CancellationToken, Task<string>> accessTokenFactory, HttpClient? httpClient = null)
+    public ChatGptAgentPlanner(Func<CancellationToken, Task<string>> accessTokenFactory, HttpClient? httpClient = null, Action<string>? log = null)
     {
-        _responses = new ChatGptResponsesClient(accessTokenFactory, httpClient);
+        _responses = new ChatGptResponsesClient(accessTokenFactory, httpClient, log);
     }
 
     public async Task<AgentPlanStep> NextStepAsync(

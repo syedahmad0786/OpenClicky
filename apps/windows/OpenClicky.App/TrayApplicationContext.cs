@@ -51,8 +51,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
             _overlay,
             _capture,
             _mic,
-            () => _settings.UseWindowsSpeech ? new LocalSpeechSttClient() : ProviderFactory.CreateSttClient(_settings, _secrets),
-            () => _demoTalk ? new OfflineTalkClient() : ProviderFactory.CreateTalkClient(_settings, _secrets),
+            () => _settings.UseWindowsSpeech || _settings.AuthProvider == AuthProvider.ChatGPT ? new LocalSpeechSttClient() : ProviderFactory.CreateSttClient(_settings, _secrets),
+            () => _demoTalk ? new OfflineTalkClient() : ProviderFactory.CreateTalkClient(_settings, _secrets, Log),
             _tts,
             () => _settings,
             RunAgentAsync,
@@ -116,7 +116,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         var status = OfflineTalkClient.IsEnvEnabled() || OfflineAgentPlanner.IsEnvEnabled()
             ? "Offline fixture launch · canned responses"
             : _settings.AuthProvider == AuthProvider.ChatGPT
-                ? (ProviderFactory.IsChatGptSignedIn(_secrets) ? "ChatGPT signed in · live request not yet verified" : "ChatGPT · sign in in Settings")
+                ? (ProviderFactory.IsChatGptSignedIn(_secrets) ? "Using ChatGPT plan · " + (string.IsNullOrWhiteSpace(_settings.ChatGptModel) ? "choose a model in Settings" : _settings.ChatGptModel) : "ChatGPT · Continue with ChatGPT in Settings")
                 : string.IsNullOrWhiteSpace(_settings.OpenRouterApiKey) ? "Connect a provider in Settings · demos work without a key" : "OpenRouter key saved · " + _settings.ResolveVisionModel();
         _home.SetConnection(status);
     }
@@ -201,12 +201,12 @@ internal sealed class TrayApplicationContext : ApplicationContext
     {
         var planner = _sandboxDemo && _sandbox is not null
             ? new SandboxPlanner(_sandbox)
-            : ProviderFactory.CreateAgentPlanner(_settings, _secrets);
+            : ProviderFactory.CreateAgentPlanner(_settings, _secrets, Log);
         if (planner is null)
         {
             var msg = _settings.AuthProvider == AuthProvider.ChatGPT
-                ? "sign in with chatgpt in settings to run agents, or switch to openrouter."
-                : "add your openrouter api key in settings to run agents, or sign in with chatgpt.";
+                ? "Continue with ChatGPT in Settings to run Agent tasks."
+                : "Add your OpenRouter API key in Settings, or select ChatGPT plan.";
             _overlay.ShowResponding(msg);
             _talk.ReportAssistantMessage(msg);
             await _tts.SpeakAsync(msg, cancellationToken).ConfigureAwait(false);

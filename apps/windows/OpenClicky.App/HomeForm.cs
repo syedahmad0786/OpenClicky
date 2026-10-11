@@ -67,7 +67,7 @@ internal sealed class HomeForm : Form
             button.Padding = new Padding(6, 4, 6, 4);
         }
         sidebar.Controls.Add(nav);
-        var foot = AppTheme.Label("Open source.\nYour keys. Your control.\n\nv0.2 · Windows", 9);
+        var foot = AppTheme.Label("Open source.\nYour account. Your control.\n\nv0.2 · Windows", 9);
         foot.Dock = DockStyle.Bottom;
         sidebar.Controls.Add(foot);
         layout.Controls.Add(sidebar, 0, 0);

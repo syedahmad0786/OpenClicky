@@ -9,7 +9,7 @@ OpenClicky Agent can move the mouse, type, and send hotkeys. Treat it like handi
 - Click coordinates must fall inside a current screenshot or monitor. Unknown tools and coordinate spaces are rejected before approval.
 - Escape or Stop cancels pending work and approvals. Declined or failed actions end the run.
 - Max **8** steps per agent run.
-- Screenshots stay in memory; BYO OpenRouter keys stay on the client (or optional localhost proxy).
+- Screenshots stay in memory before being sent to the selected provider. ChatGPT OAuth tokens and optional OpenRouter keys stay in protected local storage; screen requests use the selected provider.
 - No credential scraping tools.
 
 ## Recommended practice

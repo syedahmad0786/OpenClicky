@@ -9,8 +9,8 @@ public sealed class AppSettings
 
     public bool UseLocalProxy { get; set; }
 
-    /// <summary>Which provider Talk/Agent call. OpenRouter key can still be kept for STT or as fallback.</summary>
-    public AuthProvider AuthProvider { get; set; } = AuthProvider.OpenRouter;
+    /// <summary>Which provider Talk/Agent call. OpenRouter remains an explicit alternative.</summary>
+    public AuthProvider AuthProvider { get; set; } = AuthProvider.ChatGPT;
 
     public string? OpenRouterApiKey { get; set; }
 
@@ -36,7 +36,9 @@ public sealed class AppSettings
     public string? ChatGptAccountEmail { get; set; }
 
     /// <summary>ChatGPT Responses API model slug (from <c>/v1/models</c> when signed in).</summary>
-    public string ChatGptModel { get; set; } = "gpt-4o";
+    public string ChatGptModel { get; set; } = "";
+
+    public bool ChatGptPlanWelcomeShown { get; set; }
 
     /// <summary>When set, skip STT and use this as the user utterance (debug / no-mic).</summary>
     public string? DebugTranscriptOverride { get; set; }
@@ -55,7 +57,7 @@ public sealed class AppSettings
 
     public string ResolveVisionModel() =>
         AuthProvider == AuthProvider.ChatGPT
-            ? (string.IsNullOrWhiteSpace(ChatGptModel) ? "gpt-4o" : ChatGptModel.Trim())
+            ? ChatGptModel.Trim()
             : (string.IsNullOrWhiteSpace(OpenRouterModel) ? "openai/gpt-4o-mini" : OpenRouterModel.Trim());
 
     public void EnsureChatGptHostId()

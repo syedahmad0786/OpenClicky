@@ -15,11 +15,19 @@ public class AuthProviderSettingsTests
     }
 
     [Fact]
-    public void ResolveVisionModel_UsesOpenRouterByDefault()
+    public void ResolveVisionModel_UsesOpenRouterWhenSelected()
     {
-        var settings = new AppSettings { OpenRouterModel = "openai/gpt-4o" };
+        var settings = new AppSettings { AuthProvider = AuthProvider.OpenRouter, OpenRouterModel = "openai/gpt-4o" };
         Assert.Equal(AuthProvider.OpenRouter, settings.AuthProvider);
         Assert.Equal("openai/gpt-4o", settings.ResolveVisionModel());
+    }
+
+    [Fact]
+    public void NewInstall_UsesChatGptAndRequiresCatalogSelection()
+    {
+        var settings = new AppSettings();
+        Assert.Equal(AuthProvider.ChatGPT, settings.AuthProvider);
+        Assert.Empty(settings.ResolveVisionModel());
     }
 
     [Fact]
