@@ -16,7 +16,45 @@ public sealed class BuddyOverlayController : IOverlayController
     public BuddyOverlayController()
     {
         _form = new OverlayForm();
+        _form.Text = "OpenClicky Overlay";
         _ = _form.Handle;
+    }
+
+    /// <summary>Underlying overlay HWND (full virtual-screen host). Smoke / diagnostics only.</summary>
+    public IntPtr WindowHandle => _form.IsHandleCreated ? _form.Handle : IntPtr.Zero;
+
+    /// <summary>
+    /// Small tip HWND parked at the buddy tip during POINT (for position asserts / a11y).
+    /// </summary>
+    public IntPtr BuddyTipHandle => InvokeRead(() => _form.BuddyTipHandle);
+
+    /// <summary>
+    /// True once a POINT fly-to has finished easing to its target (still in Pointing mode).
+    /// </summary>
+    public bool IsPointFlyComplete => InvokeRead(() => _form.IsFlyComplete);
+
+    /// <summary>
+    /// Buddy tip position in virtual-screen coordinates after / during POINT.
+    /// Returns false when not pointing.
+    /// </summary>
+    public bool TryGetBuddyVirtualPoint(out int virtualX, out int virtualY)
+    {
+        var x = 0;
+        var y = 0;
+        var ok = InvokeRead(() => _form.TryGetBuddyVirtual(out x, out y));
+        virtualX = x;
+        virtualY = y;
+        return ok;
+    }
+
+    private T InvokeRead<T>(Func<T> read)
+    {
+        if (_form.IsHandleCreated && _form.InvokeRequired)
+        {
+            return (T)_form.Invoke(read)!;
+        }
+
+        return read();
     }
 
     public void ShowListening()
@@ -117,6 +155,7 @@ public sealed class BuddyOverlayController : IOverlayController
         private PointF? _flyTo;
         private float _flyProgress = 1f;
         private PointF _buddyAnchor;
+        private BuddyTipForm? _buddyTip;
 
         public OverlayForm()
         {
@@ -147,10 +186,14 @@ public sealed class BuddyOverlayController : IOverlayController
                     }
                 }
 
+                SyncBuddyTipHwnd();
                 Invalidate();
             };
             _timer.Start();
         }
+
+        public IntPtr BuddyTipHandle =>
+            _buddyTip is { IsHandleCreated: true } ? _buddyTip.Handle : IntPtr.Zero;
 
         public OverlayMode Mode
         {
@@ -173,6 +216,27 @@ public sealed class BuddyOverlayController : IOverlayController
             || PointTarget is not null
             || _flyTo is not null;
 
+        public bool IsFlyComplete =>
+            _mode == OverlayMode.Pointing && _flyProgress >= 1f && _flyTo is not null;
+
+        public bool TryGetBuddyVirtual(out int virtualX, out int virtualY)
+        {
+            virtualX = 0;
+            virtualY = 0;
+            if (_mode != OverlayMode.Pointing && PointTarget is null && _flyTo is null)
+            {
+                return false;
+            }
+
+            var local = _flyProgress < 1f && _flyTo is { } to
+                ? new Point((int)Math.Round(_buddyAnchor.X), (int)Math.Round(_buddyAnchor.Y))
+                : PointTarget ?? new Point((int)Math.Round(_buddyAnchor.X), (int)Math.Round(_buddyAnchor.Y));
+            var screen = PointToScreen(local);
+            virtualX = screen.X;
+            virtualY = screen.Y;
+            return true;
+        }
+
         public void ClearPointing()
         {
             PointTarget = null;
@@ -180,6 +244,42 @@ public sealed class BuddyOverlayController : IOverlayController
             _flyFrom = null;
             _flyTo = null;
             _flyProgress = 1f;
+            HideBuddyTip();
+        }
+
+        private void SyncBuddyTipHwnd()
+        {
+            if (_mode != OverlayMode.Pointing)
+            {
+                HideBuddyTip();
+                return;
+            }
+
+            _buddyTip ??= new BuddyTipForm();
+            var screen = PointToScreen(new Point(
+                (int)Math.Round(_buddyAnchor.X),
+                (int)Math.Round(_buddyAnchor.Y)));
+            const int tip = 24;
+            NativeMethods.SetWindowPos(
+                _buddyTip.Handle,
+                NativeMethods.HwndTopMost,
+                screen.X,
+                screen.Y,
+                tip,
+                tip,
+                NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow);
+            if (!_buddyTip.Visible)
+            {
+                _buddyTip.ShowInactive();
+            }
+        }
+
+        private void HideBuddyTip()
+        {
+            if (_buddyTip is { IsHandleCreated: true, Visible: true })
+            {
+                _buddyTip.Hide();
+            }
         }
 
         public void BeginFlyTo(Point virtualTarget, string? label)
@@ -321,9 +421,61 @@ public sealed class BuddyOverlayController : IOverlayController
             if (disposing)
             {
                 _timer.Dispose();
+                _buddyTip?.Dispose();
+                _buddyTip = null;
             }
 
             base.Dispose(disposing);
+        }
+    }
+
+    /// <summary>
+    /// Click-through tip HWND parked at the buddy tip during POINT so callers can assert screen position.
+    /// </summary>
+    private sealed class BuddyTipForm : Form
+    {
+        public BuddyTipForm()
+        {
+            Text = "OpenClicky Buddy";
+            FormBorderStyle = FormBorderStyle.None;
+            ShowInTaskbar = false;
+            TopMost = true;
+            StartPosition = FormStartPosition.Manual;
+            Size = new Size(24, 24);
+            BackColor = Color.FromArgb(56, 132, 255);
+            Opacity = 0.01; // nearly invisible; position is what matters for asserts
+        }
+
+        protected override bool ShowWithoutActivation => true;
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                const int WsExTransparent = 0x00000020;
+                const int WsExToolWindow = 0x00000080;
+                const int WsExNoActivate = 0x08000000;
+                var cp = base.CreateParams;
+                cp.ExStyle |= WsExTransparent | WsExToolWindow | WsExNoActivate;
+                return cp;
+            }
+        }
+
+        public void ShowInactive()
+        {
+            if (!Visible)
+            {
+                Show();
+            }
+
+            NativeMethods.SetWindowPos(
+                Handle,
+                NativeMethods.HwndTopMost,
+                0,
+                0,
+                0,
+                0,
+                NativeMethods.SwpNoMove | NativeMethods.SwpNoSize | NativeMethods.SwpNoActivate);
         }
     }
 
@@ -333,6 +485,7 @@ public sealed class BuddyOverlayController : IOverlayController
         public const uint SwpNoMove = 0x0002;
         public const uint SwpNoSize = 0x0001;
         public const uint SwpNoActivate = 0x0010;
+        public const uint SwpShowWindow = 0x0040;
 
         [DllImport("user32.dll", SetLastError = true)]
         public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);
