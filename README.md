@@ -20,6 +20,8 @@ Inspired by the public UX of [HeyClicky](https://www.heyclicky.com/) and the MIT
 | Agent (plan → confirm → UIA/SendInput) | Done (needs Windows + key) |
 | Credential Manager for API keys | Done |
 | Soft agent deny-list | Done |
+| Text Talk history persistence | Done |
+| Agent sandbox demo app | Done |
 | Self-contained EXE publish scripts | Done (unsigned) |
 | MSIX | Manifest + pack script (unsigned stub) |
 
