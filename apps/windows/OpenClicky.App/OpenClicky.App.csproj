@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <RootNamespace>OpenClicky.App</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <StartupObject>OpenClicky.App.Program</StartupObject>
+    <!-- WGC/D3D + single-file publish target; matches sln x64 mapping. -->
+    <Platforms>AnyCPU;x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\OpenClicky.Core\OpenClicky.Core.csproj" />
+    <ProjectReference Include="..\OpenClicky.Capture\OpenClicky.Capture.csproj" />
+    <ProjectReference Include="..\OpenClicky.Input\OpenClicky.Input.csproj" />
+    <ProjectReference Include="..\OpenClicky.Overlay\OpenClicky.Overlay.csproj" />
+    <ProjectReference Include="..\OpenClicky.Providers\OpenClicky.Providers.csproj" />
+    <ProjectReference Include="..\OpenClicky.Agent\OpenClicky.Agent.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+    <PackageReference Include="System.Speech" Version="8.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="OpenClicky.App.SecretStore.Smoke" />
+  </ItemGroup>
+</Project>

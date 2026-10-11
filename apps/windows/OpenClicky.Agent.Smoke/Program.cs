@@ -1,0 +1,406 @@
+using System.Diagnostics;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Windows.Automation;
+using OpenClicky.Agent;
+
+namespace OpenClicky.Agent.Smoke;
+
+// Windows CI / local proof: launch OpenClicky.Sandbox, drive confirm-gated Agent
+// click + type (auto-confirm ONLY in this harness), assert the sandbox UI changed.
+// Does NOT exercise tray, PTT, overlay, STT, vision, or TTS.
+internal static class Program
+{
+    [STAThread]
+    private static async Task<int> Main(string[] args)
+    {
+        Console.WriteLine("OpenClicky agent↔sandbox smoke starting…");
+
+        var sandboxExe = ResolveSandboxExe(args);
+        if (sandboxExe is null)
+        {
+            Console.Error.WriteLine("FAIL: could not locate OpenClicky.Sandbox.exe (pass path as argv[0] or set OPENCLICKY_SANDBOX_EXE)");
+            return 1;
+        }
+
+        Console.WriteLine($"sandbox_exe={sandboxExe}");
+
+        Process? sandbox = null;
+        try
+        {
+            sandbox = Process.Start(new ProcessStartInfo
+            {
+                FileName = sandboxExe,
+                UseShellExecute = false,
+                WorkingDirectory = Path.GetDirectoryName(sandboxExe)!,
+            });
+            if (sandbox is null)
+            {
+                Console.Error.WriteLine("FAIL: Process.Start returned null");
+                return 2;
+            }
+
+            var window = await WaitForSandboxWindowAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(true);
+            if (window is null)
+            {
+                Console.Error.WriteLine("FAIL: sandbox window not found");
+                return 3;
+            }
+
+            NativeMethods.SetForegroundWindow(new IntPtr(window.Current.NativeWindowHandle));
+            await Task.Delay(400).ConfigureAwait(true);
+
+            var confirm = new AutoConfirm();
+            var executor = new CompositeAgentExecutor();
+
+            // Prove the confirm gate rejects mutating tools without confirmation.
+            var denied = await executor.ExecuteAsync(
+                new AgentActionRequest(
+                    AgentToolNames.Click,
+                    new Dictionary<string, string> { ["x"] = "0", ["y"] = "0" },
+                    "gate check"),
+                userConfirmed: false).ConfigureAwait(true);
+            if (denied.Success || !denied.RequiresConfirmation)
+            {
+                Console.Error.WriteLine(
+                    $"FAIL: expected confirmation gate; got success={denied.Success} requiresConfirm={denied.RequiresConfirmation} msg={denied.Message}");
+                return 4;
+            }
+
+            Console.WriteLine("confirm_gate=ok");
+
+            var button = FindDescendant(window, ControlType.Button, "Green button");
+            if (button is null)
+            {
+                Console.Error.WriteLine("FAIL: Green button not found via UIA");
+                return 5;
+            }
+
+            var clickPoint = button.GetClickablePoint();
+            var x = (int)Math.Round(clickPoint.X);
+            var y = (int)Math.Round(clickPoint.Y);
+            Console.WriteLine($"click_target=({x},{y})");
+
+            var clickResult = await ConfirmGatedRunner.RunAsync(
+                confirm,
+                executor,
+                new AgentActionRequest(
+                    AgentToolNames.Click,
+                    new Dictionary<string, string>
+                    {
+                        ["x"] = x.ToString(),
+                        ["y"] = y.ToString(),
+                        ["space"] = "virtual",
+                    },
+                    "click green button"),
+                CancellationToken.None).ConfigureAwait(true);
+
+            if (!clickResult.Success)
+            {
+                Console.Error.WriteLine($"FAIL: click failed: {clickResult.Message}");
+                return 6;
+            }
+
+            if (!await WaitUntilAsync(
+                    () => StatusTextContains(window, "clicked"),
+                    TimeSpan.FromSeconds(8)).ConfigureAwait(true))
+            {
+                Console.Error.WriteLine("FAIL: sandbox status did not show a click");
+                DumpUia(window);
+                return 7;
+            }
+
+            Console.WriteLine("click_assert=ok");
+
+            // Re-resolve the window/edit — UIA peers can go stale after the first click.
+            window = await WaitForSandboxWindowAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(true)
+                     ?? window;
+            NativeMethods.SetForegroundWindow(new IntPtr(window.Current.NativeWindowHandle));
+
+            var edit = FindDescendant(window, ControlType.Edit, "Type target")
+                       ?? FindFirstEdit(window);
+            if (edit is null)
+            {
+                Console.Error.WriteLine("FAIL: Type target edit not found via UIA");
+                return 8;
+            }
+
+            // Focus via real click (same path as agents) — UIA SetFocus alone is flaky for SendInput on CI.
+            var editPoint = edit.GetClickablePoint();
+            var editX = (int)Math.Round(editPoint.X);
+            var editY = (int)Math.Round(editPoint.Y);
+            Console.WriteLine($"edit_click_target=({editX},{editY})");
+
+            var focusClick = await ConfirmGatedRunner.RunAsync(
+                confirm,
+                executor,
+                new AgentActionRequest(
+                    AgentToolNames.Click,
+                    new Dictionary<string, string>
+                    {
+                        ["x"] = editX.ToString(),
+                        ["y"] = editY.ToString(),
+                        ["space"] = "virtual",
+                    },
+                    "focus type target"),
+                CancellationToken.None).ConfigureAwait(true);
+            if (!focusClick.Success)
+            {
+                Console.Error.WriteLine($"FAIL: focus click failed: {focusClick.Message}");
+                return 8;
+            }
+
+            await Task.Delay(300).ConfigureAwait(true);
+            try
+            {
+                edit.SetFocus();
+            }
+            catch
+            {
+                // optional; mouse click is the primary focus path
+            }
+
+            await Task.Delay(200).ConfigureAwait(true);
+
+            const string typed = "hello";
+            var typeResult = await ConfirmGatedRunner.RunAsync(
+                confirm,
+                executor,
+                new AgentActionRequest(
+                    AgentToolNames.TypeText,
+                    new Dictionary<string, string> { ["text"] = typed },
+                    "type into sandbox field"),
+                CancellationToken.None).ConfigureAwait(true);
+
+            if (!typeResult.Success)
+            {
+                Console.Error.WriteLine($"FAIL: type_text failed: {typeResult.Message}");
+                return 9;
+            }
+
+            // Refresh edit peer before reading value.
+            edit = FindDescendant(window, ControlType.Edit, "Type target")
+                   ?? FindFirstEdit(window)
+                   ?? edit;
+
+            if (!await WaitUntilAsync(
+                    () => ReadEditValue(edit)?.Contains(typed, StringComparison.Ordinal) == true,
+                    TimeSpan.FromSeconds(8)).ConfigureAwait(true))
+            {
+                Console.Error.WriteLine($"FAIL: sandbox edit value did not become '{typed}' (got '{ReadEditValue(edit)}')");
+                DumpUia(window);
+                return 10;
+            }
+
+            Console.WriteLine("type_assert=ok");
+
+            // click green + focus edit + type_text
+            if (confirm.ConfirmCalls < 3)
+            {
+                Console.Error.WriteLine($"FAIL: expected >=3 auto-confirm calls, got {confirm.ConfirmCalls}");
+                return 11;
+            }
+
+            Console.WriteLine($"PASS confirms={confirm.ConfirmCalls} click=ok type={typed}");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"FAIL: {ex}");
+            return 99;
+        }
+        finally
+        {
+            if (sandbox is { HasExited: false })
+            {
+                try
+                {
+                    sandbox.Kill(entireProcessTree: true);
+                }
+                catch
+                {
+                    // best-effort cleanup
+                }
+            }
+
+            sandbox?.Dispose();
+        }
+    }
+
+    private static string? ResolveSandboxExe(string[] args)
+    {
+        if (args.Length > 0 && File.Exists(args[0]))
+        {
+            return Path.GetFullPath(args[0]);
+        }
+
+        var env = Environment.GetEnvironmentVariable("OPENCLICKY_SANDBOX_EXE");
+        if (!string.IsNullOrWhiteSpace(env) && File.Exists(env))
+        {
+            return Path.GetFullPath(env);
+        }
+
+        // Walk up from the smoke output looking for a sibling Sandbox build.
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        for (var i = 0; i < 8 && dir is not null; i++, dir = dir.Parent)
+        {
+            var candidates = new[]
+            {
+                Path.Combine(dir.FullName, "OpenClicky.Sandbox", "bin", "Release", "net8.0-windows", "OpenClicky.Sandbox.exe"),
+                Path.Combine(dir.FullName, "apps", "windows", "OpenClicky.Sandbox", "bin", "Release", "net8.0-windows", "OpenClicky.Sandbox.exe"),
+                Path.Combine(dir.FullName, "OpenClicky.Sandbox", "bin", "Debug", "net8.0-windows", "OpenClicky.Sandbox.exe"),
+                Path.Combine(dir.FullName, "apps", "windows", "OpenClicky.Sandbox", "bin", "Debug", "net8.0-windows", "OpenClicky.Sandbox.exe"),
+            };
+            foreach (var c in candidates)
+            {
+                if (File.Exists(c))
+                {
+                    return c;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static async Task<AutomationElement?> WaitForSandboxWindowAsync(TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            var root = AutomationElement.RootElement;
+            var window = root.FindFirst(
+                TreeScope.Children,
+                new PropertyCondition(AutomationElement.NameProperty, "OpenClicky Agent Sandbox"));
+            if (window is not null)
+            {
+                return window;
+            }
+
+            await Task.Delay(200).ConfigureAwait(true);
+        }
+
+        return null;
+    }
+
+    private static AutomationElement? FindDescendant(AutomationElement root, ControlType type, string name)
+    {
+        try
+        {
+            return root.FindFirst(
+                TreeScope.Descendants,
+                new AndCondition(
+                    new PropertyCondition(AutomationElement.ControlTypeProperty, type),
+                    new PropertyCondition(AutomationElement.NameProperty, name)));
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static AutomationElement? FindFirstEdit(AutomationElement root)
+    {
+        try
+        {
+            return root.FindFirst(
+                TreeScope.Descendants,
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Edit));
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool StatusTextContains(AutomationElement window, string fragment)
+    {
+        try
+        {
+            var status = FindDescendant(window, ControlType.Text, "Sandbox status")
+                         ?? FindDescendant(window, ControlType.Text, "Ready.");
+            if (status is not null)
+            {
+                var name = status.Current.Name ?? string.Empty;
+                if (name.Contains(fragment, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            // Fallback: any text node mentioning the fragment (status AccessibleName updates with click count).
+            var texts = window.FindAll(
+                TreeScope.Descendants,
+                new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Text));
+            foreach (AutomationElement el in texts)
+            {
+                var name = el.Current.Name ?? string.Empty;
+                if (name.Contains(fragment, StringComparison.OrdinalIgnoreCase)
+                    || name.Contains("Green button clicked", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+        catch
+        {
+            // UIA race
+        }
+
+        return false;
+    }
+
+    private static string? ReadEditValue(AutomationElement edit)
+    {
+        try
+        {
+            if (edit.TryGetCurrentPattern(ValuePattern.Pattern, out var patternObj)
+                && patternObj is ValuePattern value)
+            {
+                return value.Current.Value;
+            }
+
+            return edit.Current.Name;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static async Task<bool> WaitUntilAsync(Func<bool> predicate, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            if (predicate())
+            {
+                return true;
+            }
+
+            await Task.Delay(150).ConfigureAwait(true);
+        }
+
+        return predicate();
+    }
+
+    private static void DumpUia(AutomationElement window)
+    {
+        try
+        {
+            Console.Error.WriteLine("--- uia dump ---");
+            Console.Error.WriteLine(new UiaSnapshotService().CaptureForeground(40));
+            _ = window;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"uia_dump_error={ex.Message}");
+        }
+    }
+
+    private static class NativeMethods
+    {
+        [DllImport("user32.dll")]
+        public static extern bool SetForegroundWindow(IntPtr hWnd);
+    }
+}

@@ -1,0 +1,33 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+[Dd]ebug/
+[Rr]elease/
+
+# Node
+node_modules/
+services/local-proxy/dist/
+*.log
+.env
+.dev.vars
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Capture dumps (must never commit screenshots)
+*.jpg
+*.jpeg
+*.png
+!docs/**/*.png
+
+# Publish output
+artifacts/
