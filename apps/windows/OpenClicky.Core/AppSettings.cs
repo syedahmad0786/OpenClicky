@@ -18,4 +18,7 @@ public sealed class AppSettings
 
     /// <summary>When set, skip STT and use this as the user utterance (debug / no-mic).</summary>
     public string? DebugTranscriptOverride { get; set; }
+
+    /// <summary>Persist last N Talk turns (text only) under %AppData%\OpenClicky\history.json.</summary>
+    public bool PersistConversationHistory { get; set; } = true;
 }

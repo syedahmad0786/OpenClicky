@@ -65,5 +65,6 @@ public static class SettingsStore
             OpenRouterModel = settings.OpenRouterModel,
             TranscriptionModel = settings.TranscriptionModel,
             DebugTranscriptOverride = settings.DebugTranscriptOverride,
+            PersistConversationHistory = settings.PersistConversationHistory,
         };
 }

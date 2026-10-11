@@ -47,10 +47,67 @@ public sealed class TalkOrchestrator : IDisposable
 
     public void Start()
     {
+        LoadPersistedHistory();
         _hotkey.Pressed += OnPressed;
         _hotkey.Released += OnReleased;
         _hotkey.Start();
         _log($"openclicky talk ready — hold {_hotkey.Chord.DisplayName}");
+    }
+
+    public void ClearHistory()
+    {
+        _history.Clear();
+        try
+        {
+            ConversationHistoryStore.Clear();
+            _log("history_cleared");
+        }
+        catch (Exception ex)
+        {
+            _log($"history_clear_error={ex.Message}");
+        }
+    }
+
+    private void LoadPersistedHistory()
+    {
+        var settings = _settings();
+        if (!settings.PersistConversationHistory)
+        {
+            return;
+        }
+
+        try
+        {
+            var loaded = ConversationHistoryStore.Load();
+            _history.Clear();
+            _history.AddRange(loaded);
+            if (_history.Count > 0)
+            {
+                _log($"history_loaded turns={_history.Count}");
+            }
+        }
+        catch (Exception ex)
+        {
+            _log($"history_load_error={ex.Message}");
+        }
+    }
+
+    private void PersistHistoryIfEnabled()
+    {
+        var settings = _settings();
+        if (!settings.PersistConversationHistory)
+        {
+            return;
+        }
+
+        try
+        {
+            ConversationHistoryStore.Save(_history);
+        }
+        catch (Exception ex)
+        {
+            _log($"history_save_error={ex.Message}");
+        }
     }
 
     private void OnPressed(object? sender, EventArgs e)
@@ -193,6 +250,8 @@ public sealed class TalkOrchestrator : IDisposable
             {
                 _history.RemoveAt(0);
             }
+
+            PersistHistoryIfEnabled();
 
             var mapped = CoordinateMapper.ToVirtualScreen(parsed, screens);
             if (mapped is { } point)

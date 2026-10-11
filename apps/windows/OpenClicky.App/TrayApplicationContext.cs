@@ -44,7 +44,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             RunAgentAsync,
             Log);
 
-        _settingsForm = new SettingsForm(_settings, _secrets, OnSettingsApplied);
+        _settingsForm = new SettingsForm(_settings, _secrets, OnSettingsApplied, () => _talk.ClearHistory());
 
         _tray = new NotifyIcon
         {

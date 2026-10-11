@@ -12,14 +12,16 @@ Inspired by the public UX of [HeyClicky](https://www.heyclicky.com/) and the MIT
 |------------|--------|
 | Tray + remappable PTT (`Win+Alt+Space`) | Done |
 | Click-through overlay buddy + POINT fly-to | Done |
-| In-memory screen capture | Done (GDI; WGC path next) |
+| In-memory screen capture | Done (GDI; WGC probed, frame-pool next) |
 | OpenRouter vision Talk + POINT parse | Done (needs API key) |
 | STT via OpenRouter Whisper-compatible API | Done (needs API key) |
 | Local Windows SAPI TTS | Done (no key) |
 | Optional localhost proxy | Done |
 | Agent (plan → confirm → UIA/SendInput) | Done (needs Windows + key) |
+| Credential Manager for API keys | Done |
+| Soft agent deny-list | Done |
 | Self-contained EXE publish scripts | Done (unsigned) |
-| MSIX | Deferred (docs stub) |
+| MSIX | Manifest + pack script (unsigned stub) |
 
 ## Quick start (Windows 11)
 
@@ -56,6 +58,7 @@ cd services/local-proxy && npm install && npm start
 - OpenRouter API key → **Windows Credential Manager** (`OpenClicky/openrouter-api-key`).  
 - Non-secret settings → `%AppData%\OpenClicky\settings.json` (never writes the API key).  
 - Screenshots stay in memory for the request.  
+- Optional text-only conversation history → `%AppData%\OpenClicky\history.json` (toggle/clear in Settings).  
 - Agent soft-blocks mutating actions over banking / password-manager window titles.
 
 ## License

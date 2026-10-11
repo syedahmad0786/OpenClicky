@@ -13,14 +13,17 @@ internal sealed class SettingsForm : Form
     private readonly TextBox _apiKeyBox;
     private readonly TextBox _modelBox;
     private readonly TextBox _debugTranscriptBox;
+    private readonly CheckBox _persistHistory;
     private readonly TextBox _logBox;
+    private readonly Action? _clearHistory;
     private HotkeyChord _draft;
 
-    public SettingsForm(AppSettings settings, ISecretStore secrets, Action onApplied)
+    public SettingsForm(AppSettings settings, ISecretStore secrets, Action onApplied, Action? onClearHistory = null)
     {
         _settings = settings;
         _secrets = secrets;
         _onApplied = onApplied;
+        _clearHistory = onClearHistory;
         _draft = settings.PushToTalk;
 
         Text = "OpenClicky Settings";
@@ -28,7 +31,7 @@ internal sealed class SettingsForm : Form
         MaximizeBox = false;
         MinimizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(520, 520);
+        ClientSize = new Size(520, 560);
 
         var y = 16;
         Controls.Add(LabelAt(y, "Push-to-talk hotkey (click field, then press the combo):"));
@@ -86,6 +89,24 @@ internal sealed class SettingsForm : Form
         Controls.Add(_debugTranscriptBox);
         y += 36;
 
+        _persistHistory = new CheckBox
+        {
+            Left = 16,
+            Top = y,
+            Width = 320,
+            Text = "Persist conversation history (text only)",
+            Checked = _settings.PersistConversationHistory,
+        };
+        Controls.Add(_persistHistory);
+        var clearHistoryButton = new Button { Left = 340, Top = y - 2, Width = 156, Text = "Clear history" };
+        clearHistoryButton.Click += (_, _) =>
+        {
+            _clearHistory?.Invoke();
+            MessageBox.Show("Conversation history cleared.", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+        };
+        Controls.Add(clearHistoryButton);
+        y += 36;
+
         _logBox = new TextBox
         {
             Left = 16,
@@ -139,6 +160,7 @@ internal sealed class SettingsForm : Form
         _settings.DebugTranscriptOverride = string.IsNullOrWhiteSpace(_debugTranscriptBox.Text)
             ? null
             : _debugTranscriptBox.Text.Trim();
+        _settings.PersistConversationHistory = _persistHistory.Checked;
         SettingsStore.Save(_settings);
         _onApplied();
         MessageBox.Show("Saved.", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
