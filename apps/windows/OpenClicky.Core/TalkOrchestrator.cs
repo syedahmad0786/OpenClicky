@@ -122,6 +122,19 @@ public sealed class TalkOrchestrator : IDisposable
                 return;
             }
 
+            if (AgentIntent.TryExtract(transcript, out var agentTask))
+            {
+                _log($"agent_intent task={agentTask}");
+                var spokenAgent =
+                    string.IsNullOrWhiteSpace(agentTask)
+                        ? "agent mode is ready, but i need a task. try saying openclicky agent, then what you want done."
+                        : $"agent mode heard you. computer-use actions are scaffolding now — next build will confirm each step for: {agentTask}";
+                _state = CompanionVoiceState.Responding;
+                _overlay.ShowResponding(spokenAgent);
+                await _tts.SpeakAsync(spokenAgent, token).ConfigureAwait(false);
+                return;
+            }
+
             var talk = _talkFactory();
             if (talk is null)
             {
