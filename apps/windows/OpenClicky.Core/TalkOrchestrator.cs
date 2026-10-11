@@ -265,13 +265,19 @@ public sealed class TalkOrchestrator : IDisposable
             var mapped = CoordinateMapper.ToVirtualScreen(parsed, screens);
             if (mapped is { } point)
             {
+                // Stay in Pointing for TTS: set spoken text in the same UI invoke as the
+                // fly-to. A follow-up ShowResponding used to flip Mode=Responding and
+                // re-anchor the buddy to the cursor every paint frame.
                 _state = CompanionVoiceState.Pointing;
-                _overlay.PointAt(point.virtualX, point.virtualY, parsed.ElementLabel);
+                _overlay.PointAt(point.virtualX, point.virtualY, parsed.ElementLabel, spoken);
                 _log($"point=({point.virtualX},{point.virtualY}) label={parsed.ElementLabel}");
             }
+            else
+            {
+                _state = CompanionVoiceState.Responding;
+                _overlay.ShowResponding(spoken);
+            }
 
-            _state = CompanionVoiceState.Responding;
-            _overlay.ShowResponding(spoken);
             await _tts.SpeakAsync(spoken, token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
