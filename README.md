@@ -4,6 +4,10 @@ Open-source Windows AI buddy — screen-aware voice help, cursor overlay pointin
 
 Inspired by the public UX of [HeyClicky](https://www.heyclicky.com/) and the MIT architecture of [farzaa/clicky](https://github.com/farzaa/clicky). **Clean-room:** we do not reverse-engineer commercial binaries.
 
+## CI
+
+GitHub Actions (`.github/workflows/windows-ci.yml`) on `windows-latest`: build solution, run unit tests, capture smoke, publish unsigned win-x64 EXE artifact `openclicky-win-x64`.
+
 ## Status
 
 **MVP in progress** — Talk + POINT fly-to + confirmed Agent on the Phase A shell.

@@ -18,6 +18,7 @@ Tray (WinForms) ── TalkOrchestrator ──► OpenRouter (vision/STT)
 | `OpenClicky.Providers` | OpenRouter clients |
 | `OpenClicky.Agent` | UIA + SendInput tools |
 | `OpenClicky.Sandbox` | Agent demo UI |
+| `OpenClicky.Capture.Smoke` | Headless capture smoke for Windows CI |
 | `services/local-proxy` | Optional localhost OpenRouter sidecar |
 
 **Privacy defaults:** BYO keys in Credential Manager; screenshots never written; history is text-only and optional.

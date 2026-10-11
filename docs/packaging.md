@@ -40,9 +40,13 @@ powershell -ExecutionPolicy Bypass -File scripts/pack-msix.ps1
 
 There is no CI signing secret in this repository — do not expect a signed Store package from `pack-msix.ps1` alone.
 
+## CI artifact
+
+Every push to `main` / `cursor/**` runs `.github/workflows/windows-ci.yml` on `windows-latest` and uploads `openclicky-win-x64` (contents of `artifacts/exe/win-x64/`). Download from the Actions run — still unsigned.
+
 ## Smoke checklist after publish
 
-1. Run EXE → tray icon appears.  
-2. Settings → OpenRouter key (Credential Manager).  
+1. Run EXE → tray icon appears (single-instance; second launch shows a dialog).  
+2. Settings → OpenRouter key (Credential Manager). Debug log also at `%AppData%\OpenClicky\debug.log`.  
 3. Hold Win+Alt+Space (or remapped chord) → Talk reply; log shows `capture_backend=wgc` when Graphics Capture works.  
 4. `dotnet run --project apps/windows/OpenClicky.Sandbox` + `openclicky agent click the green button` → confirm dialogs → act.

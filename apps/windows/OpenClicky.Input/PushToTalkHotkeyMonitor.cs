@@ -6,6 +6,7 @@ namespace OpenClicky.Input;
 
 /// <summary>
 /// Hold-to-talk via a low-level keyboard hook so modifier+key chords raise Pressed/Released.
+/// Swallows the chord's main key while held so Space (etc.) does not type into the focused app.
 /// </summary>
 public sealed class PushToTalkHotkeyMonitor : IPushToTalkMonitor
 {
@@ -51,19 +52,41 @@ public sealed class PushToTalkHotkeyMonitor : IPushToTalkMonitor
             return;
         }
 
-        using var curProcess = Process.GetCurrentProcess();
-        using var curModule = curProcess.MainModule
-            ?? throw new InvalidOperationException("Cannot resolve main module for keyboard hook.");
+        // Single-file publish often has a null/unusable MainModule — GetModuleHandle(NULL) is fine for LL hooks.
+        var moduleHandle = ResolveModuleHandle();
         _hookId = NativeMethods.SetWindowsHookEx(
             WhKeyboardLl,
             _hookProc,
-            NativeMethods.GetModuleHandle(curModule.ModuleName),
+            moduleHandle,
             0);
 
         if (_hookId == IntPtr.Zero)
         {
             throw new InvalidOperationException($"SetWindowsHookEx failed: {Marshal.GetLastWin32Error()}");
         }
+    }
+
+    private static IntPtr ResolveModuleHandle()
+    {
+        try
+        {
+            using var curProcess = Process.GetCurrentProcess();
+            var module = curProcess.MainModule;
+            if (module?.ModuleName is { Length: > 0 } name)
+            {
+                var handle = NativeMethods.GetModuleHandle(name);
+                if (handle != IntPtr.Zero)
+                {
+                    return handle;
+                }
+            }
+        }
+        catch
+        {
+            // MainModule can throw for single-file / trimmed hosts.
+        }
+
+        return NativeMethods.GetModuleHandle(IntPtr.Zero);
     }
 
     public void Stop()
@@ -92,16 +115,17 @@ public sealed class PushToTalkHotkeyMonitor : IPushToTalkMonitor
             var isDown = message is WmKeyDown or WmSysKeyDown;
             var isUp = message is WmKeyUp or WmSysKeyUp;
 
+            var wasDown = _isChordDown;
             if (isDown || isUp)
             {
                 EvaluateChordState();
             }
 
-            // Also re-check when only modifiers change.
-            if (vk is VkLWin or VkRWin or VkMenu or VkLMenu or VkRMenu
-                or VkControl or VkLControl or VkRControl or VkShift or VkLShift or VkRShift)
+            // Suppress the chord's primary key while PTT is active (and its matching key-up)
+            // so e.g. Win+Alt+Space does not insert spaces into the focused window.
+            if (vk == Chord.VirtualKey && (_isChordDown || wasDown))
             {
-                EvaluateChordState();
+                return (IntPtr)1;
             }
         }
 
@@ -169,6 +193,9 @@ public sealed class PushToTalkHotkeyMonitor : IPushToTalkMonitor
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         public static extern IntPtr GetModuleHandle(string lpModuleName);
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "GetModuleHandleW")]
+        public static extern IntPtr GetModuleHandle(IntPtr lpModuleName);
 
         [DllImport("user32.dll")]
         public static extern short GetAsyncKeyState(int vKey);

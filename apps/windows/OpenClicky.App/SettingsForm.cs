@@ -148,8 +148,30 @@ internal sealed class SettingsForm : Form
         apply.Click += (_, _) => Save();
         var refreshLog = new Button { Left = 152, Top = y, Width = 120, Text = "Refresh log" };
         refreshLog.Click += (_, _) => _logBox.Text = DebugLog.Snapshot();
+        var openLog = new Button { Left = 288, Top = y, Width = 140, Text = "Open log folder" };
+        openLog.Click += (_, _) =>
+        {
+            try
+            {
+                var dir = Path.GetDirectoryName(DebugLog.LogPath);
+                if (!string.IsNullOrEmpty(dir))
+                {
+                    Directory.CreateDirectory(dir);
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = dir,
+                        UseShellExecute = true,
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        };
         Controls.Add(apply);
         Controls.Add(refreshLog);
+        Controls.Add(openLog);
         Controls.Add(_logBox);
     }
 

@@ -237,6 +237,12 @@ internal static class DebugLog
 {
     private static readonly object Gate = new();
     private static readonly List<string> Lines = new();
+    private const long MaxLogBytes = 512 * 1024;
+
+    public static string LogPath { get; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "OpenClicky",
+        "debug.log");
 
     public static void Append(string line)
     {
@@ -247,6 +253,26 @@ internal static class DebugLog
             {
                 Lines.RemoveAt(0);
             }
+
+            try
+            {
+                var dir = Path.GetDirectoryName(LogPath);
+                if (!string.IsNullOrEmpty(dir))
+                {
+                    Directory.CreateDirectory(dir);
+                }
+
+                File.AppendAllText(LogPath, line + Environment.NewLine);
+                var info = new FileInfo(LogPath);
+                if (info.Exists && info.Length > MaxLogBytes)
+                {
+                    Rotate();
+                }
+            }
+            catch
+            {
+                // never break the tray on log I/O
+            }
         }
     }
 
@@ -255,6 +281,25 @@ internal static class DebugLog
         lock (Gate)
         {
             return string.Join(Environment.NewLine, Lines);
+        }
+    }
+
+    private static void Rotate()
+    {
+        try
+        {
+            var text = File.ReadAllText(LogPath);
+            if (text.Length <= MaxLogBytes / 2)
+            {
+                return;
+            }
+
+            var keep = (int)(MaxLogBytes / 2);
+            File.WriteAllText(LogPath, text[^keep..]);
+        }
+        catch
+        {
+            // ignore
         }
     }
 }
