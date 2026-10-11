@@ -38,6 +38,16 @@ public static partial class PointParser
             ? int.Parse(match.Groups[4].Value, CultureInfo.InvariantCulture)
             : null;
 
+        // Models sometimes emit [POINT:x,y:screen2] with no label — don't treat "screen2" as the label.
+        if (screen is null
+            && label is not null
+            && label.StartsWith("screen", StringComparison.OrdinalIgnoreCase)
+            && int.TryParse(label.AsSpan("screen".Length), NumberStyles.None, CultureInfo.InvariantCulture, out var screenOnly))
+        {
+            screen = screenOnly;
+            label = null;
+        }
+
         return new PointingParseResult(spoken, x, y, label, screen, IsNone: false);
     }
 }

@@ -36,6 +36,16 @@ public class PointParserTests
     }
 
     [Fact]
+    public void Parse_ScreenWithoutLabel()
+    {
+        var result = PointParser.Parse("over there [POINT:10,20:screen2]");
+        Assert.Equal(10, result.X);
+        Assert.Equal(20, result.Y);
+        Assert.Null(result.ElementLabel);
+        Assert.Equal(2, result.ScreenNumber);
+    }
+
+    [Fact]
     public void Parse_NoTag_ReturnsFullText()
     {
         var result = PointParser.Parse("just chatting");

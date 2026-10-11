@@ -50,8 +50,15 @@ public sealed class TalkOrchestrator : IDisposable
         LoadPersistedHistory();
         _hotkey.Pressed += OnPressed;
         _hotkey.Released += OnReleased;
-        _hotkey.Start();
-        _log($"openclicky talk ready — hold {_hotkey.Chord.DisplayName}");
+        try
+        {
+            _hotkey.Start();
+            _log($"openclicky talk ready — hold {_hotkey.Chord.DisplayName}");
+        }
+        catch (Exception ex)
+        {
+            _log($"hotkey_start_error={ex.Message} — set a different chord in Settings or relaunch as a normal user session");
+        }
     }
 
     public void ClearHistory()

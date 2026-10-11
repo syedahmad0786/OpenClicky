@@ -23,8 +23,8 @@ public sealed class BuddyOverlayController : IOverlayController
     {
         _form.BeginInvoke(() =>
         {
+            _form.ClearPointing();
             _form.BuddyText = null;
-            _form.PointTarget = null;
             _form.Mode = OverlayMode.Listening;
             _form.ShowInactive();
         });
@@ -34,6 +34,7 @@ public sealed class BuddyOverlayController : IOverlayController
     {
         _form.BeginInvoke(() =>
         {
+            _form.ClearPointing();
             _form.BuddyText = null;
             _form.Mode = OverlayMode.Processing;
             _form.ShowInactive();
@@ -45,7 +46,17 @@ public sealed class BuddyOverlayController : IOverlayController
         _form.BeginInvoke(() =>
         {
             _form.BuddyText = spokenText;
-            _form.Mode = OverlayMode.Responding;
+            // Talk path calls PointAt then ShowResponding — keep the fly-to anchor so the
+            // buddy does not snap back to the cursor while TTS plays.
+            if (_form.IsPointingActive)
+            {
+                _form.Mode = OverlayMode.Pointing;
+            }
+            else
+            {
+                _form.Mode = OverlayMode.Responding;
+            }
+
             _form.ShowInactive();
         });
     }
@@ -63,9 +74,9 @@ public sealed class BuddyOverlayController : IOverlayController
     {
         _form.BeginInvoke(() =>
         {
-            _form.Mode = OverlayMode.Hidden;
+            _form.ClearPointing();
             _form.BuddyText = null;
-            _form.PointTarget = null;
+            _form.Mode = OverlayMode.Hidden;
             _form.Hide();
         });
     }
@@ -155,6 +166,22 @@ public sealed class BuddyOverlayController : IOverlayController
         public Point? PointTarget { get; set; }
         public string? PointLabel { get; set; }
 
+        /// <summary>True while flying to a target or holding at a POINT location.</summary>
+        public bool IsPointingActive =>
+            _mode == OverlayMode.Pointing
+            || _flyProgress < 1f
+            || PointTarget is not null
+            || _flyTo is not null;
+
+        public void ClearPointing()
+        {
+            PointTarget = null;
+            PointLabel = null;
+            _flyFrom = null;
+            _flyTo = null;
+            _flyProgress = 1f;
+        }
+
         public void BeginFlyTo(Point virtualTarget, string? label)
         {
             var localTarget = PointToClient(virtualTarget);
@@ -163,8 +190,9 @@ public sealed class BuddyOverlayController : IOverlayController
             _flyTo = new PointF(localTarget.X, localTarget.Y);
             _flyProgress = 0f;
             _buddyAnchor = _flyFrom.Value;
+            PointTarget = localTarget;
             PointLabel = label;
-            BuddyText = null;
+            // Keep any spoken bubble text set by a subsequent ShowResponding invoke.
             Mode = OverlayMode.Pointing;
         }
 

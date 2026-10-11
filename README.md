@@ -36,14 +36,7 @@ dotnet build OpenClicky.sln -c Debug
 dotnet run --project apps/windows/OpenClicky.App -c Debug
 ```
 
-1. Tray icon → **Settings…** → paste **OpenRouter API key** → Save.  
-2. Optional: set a **debug transcript** (e.g. `what is on my screen?`) to skip mic/STT while testing.  
-3. Hold **Win+Alt+Space**, speak (or rely on debug transcript), release.  
-4. OpenClicky captures the screen, calls OpenRouter, speaks the reply locally, and may point the buddy.  
-5. Say `openclicky agent open notepad and type hello` → confirm each step → Agent uses UIA + SendInput.  
-6. Optional Agent playground: `dotnet run --project apps/windows/OpenClicky.Sandbox` then ask the agent to click **Green button** / type into the field.
-
-### Publish EXE (unsigned)
+Or download the unsigned `openclicky-win-x64` artifact from [windows-ci](.github/workflows/windows-ci.yml) Actions runs / publish locally:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/publish-exe.ps1
@@ -58,6 +51,40 @@ Optional proxy:
 cd services/local-proxy && npm install && npm start
 # Enable "Use local proxy" in Settings (http://127.0.0.1:8787)
 ```
+
+## Windows 11 smoke checklist (human)
+
+CI validates build/tests/capture on `windows-latest` — it does **not** exercise the tray, PTT hotkey, overlay, STT, or Agent confirms. Run this on a real interactive Windows 11 desktop:
+
+1. **Launch**  
+   `dotnet run --project apps/windows/OpenClicky.App -c Debug`  
+   **Pass:** tray icon “OpenClicky” appears; `%AppData%\OpenClicky\debug.log` gets a `tray ready` line. Second launch shows “already running”.
+
+2. **Keys**  
+   Tray → Settings → paste OpenRouter API key → Save.  
+   Optional: set debug transcript `what is on my screen?` to skip mic.  
+   **Pass:** Settings log shows `key=set`; key is **not** written into `settings.json` (Credential Manager only).
+
+3. **Talk**  
+   Open Notepad with some text visible. Hold **Win+Alt+Space**, speak (or use debug transcript), release.  
+   **Pass:** overlay listening → processing; spoken reply; debug log has `capture_backend=wgc` (or `gdi` if forced), `transcript=…`, `reply=…`.
+
+4. **POINT**  
+   Ask where a visible UI control is (or use a debug transcript that prompts pointing).  
+   **Pass:** blue buddy **flies to** the control and stays there while the reply is spoken (does not snap back to the cursor).
+
+5. **Hotkey remap**  
+   Settings → set PTT to **Ctrl+Shift+Space** → Save.  
+   **Pass:** new chord triggers Talk; old Win+Alt+Space does not.
+
+6. **Agent**  
+   `dotnet run --project apps/windows/OpenClicky.Sandbox`  
+   Focus the sandbox, then (debug transcript or voice): `openclicky agent click the green button then type hello`.  
+   **Pass:** Yes/No confirm per mutating step; green button click count increases; text appears in the field; no crash.
+
+7. **Privacy**  
+   After a Talk turn, check `%AppData%\OpenClicky\` and Temp.  
+   **Pass:** no screenshot `.jpg`/`.png` written by OpenClicky (history JSON text-only is OK).
 
 ## Privacy
 
