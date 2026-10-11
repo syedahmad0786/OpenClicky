@@ -21,4 +21,7 @@ public sealed class AppSettings
 
     /// <summary>Persist last N Talk turns (text only) under %AppData%\OpenClicky\history.json.</summary>
     public bool PersistConversationHistory { get; set; } = true;
+
+    /// <summary>When true, skip WGC and use GDI BitBlt (debug / broken GPU drivers).</summary>
+    public bool ForceGdiCapture { get; set; }
 }

@@ -6,13 +6,13 @@ using OpenClicky.Core;
 namespace OpenClicky.Capture;
 
 /// <summary>
-/// Phase A capture via GDI BitBlt of each monitor (reliable fallback).
-/// WGC-backed implementation can replace this in a follow-up without changing the orchestrator.
+/// GDI BitBlt fallback when Windows.Graphics.Capture / D3D11 is unavailable.
 /// Captures stay in memory — nothing is written to disk.
 /// </summary>
 public sealed class GdiScreenCaptureService : IScreenCaptureService
 {
-    public Task<IReadOnlyList<ScreenCaptureResult>> CaptureAllMonitorsJpegAsync(CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<ScreenCaptureResult>> CaptureAllMonitorsJpegAsync(
+        CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var cursor = Cursor.Position;
@@ -35,11 +35,7 @@ public sealed class GdiScreenCaptureService : IScreenCaptureService
                 graphics.CopyFromScreen(bounds.Left, bounds.Top, 0, 0, bounds.Size, CopyPixelOperation.SourceCopy);
             }
 
-            // Downscale long edge to ~1280 like open Clicky (keeps Phase B vision cheap).
-            using var scaled = Downscale(bitmap, maxEdge: 1280);
-            using var stream = new MemoryStream();
-            scaled.Save(stream, ImageFormat.Jpeg);
-            var jpeg = stream.ToArray();
+            var (jpeg, pixelW, pixelH) = CaptureImageEncoder.BitmapToJpeg(bitmap, maxEdge: 1280);
 
             var label = screens.Length == 1
                 ? "user's screen (cursor is here)"
@@ -49,8 +45,8 @@ public sealed class GdiScreenCaptureService : IScreenCaptureService
 
             results.Add(new ScreenCaptureResult(
                 JpegBytes: jpeg,
-                PixelWidth: scaled.Width,
-                PixelHeight: scaled.Height,
+                PixelWidth: pixelW,
+                PixelHeight: pixelH,
                 MonitorLeft: bounds.Left,
                 MonitorTop: bounds.Top,
                 MonitorWidth: bounds.Width,
@@ -60,23 +56,5 @@ public sealed class GdiScreenCaptureService : IScreenCaptureService
         }
 
         return Task.FromResult<IReadOnlyList<ScreenCaptureResult>>(results);
-    }
-
-    private static Bitmap Downscale(Bitmap source, int maxEdge)
-    {
-        var longEdge = Math.Max(source.Width, source.Height);
-        if (longEdge <= maxEdge)
-        {
-            return new Bitmap(source);
-        }
-
-        var scale = maxEdge / (double)longEdge;
-        var width = Math.Max(1, (int)Math.Round(source.Width * scale));
-        var height = Math.Max(1, (int)Math.Round(source.Height * scale));
-        var result = new Bitmap(width, height, PixelFormat.Format32bppArgb);
-        using var g = Graphics.FromImage(result);
-        g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
-        g.DrawImage(source, 0, 0, width, height);
-        return result;
     }
 }

@@ -66,5 +66,6 @@ public static class SettingsStore
             TranscriptionModel = settings.TranscriptionModel,
             DebugTranscriptOverride = settings.DebugTranscriptOverride,
             PersistConversationHistory = settings.PersistConversationHistory,
+            ForceGdiCapture = settings.ForceGdiCapture,
         };
 }

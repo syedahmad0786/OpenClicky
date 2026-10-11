@@ -14,6 +14,7 @@ internal sealed class SettingsForm : Form
     private readonly TextBox _modelBox;
     private readonly TextBox _debugTranscriptBox;
     private readonly CheckBox _persistHistory;
+    private readonly CheckBox _forceGdi;
     private readonly TextBox _logBox;
     private readonly Action? _clearHistory;
     private HotkeyChord _draft;
@@ -31,7 +32,7 @@ internal sealed class SettingsForm : Form
         MaximizeBox = false;
         MinimizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(520, 560);
+        ClientSize = new Size(520, 600);
 
         var y = 16;
         Controls.Add(LabelAt(y, "Push-to-talk hotkey (click field, then press the combo):"));
@@ -105,6 +106,17 @@ internal sealed class SettingsForm : Form
             MessageBox.Show("Conversation history cleared.", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
         };
         Controls.Add(clearHistoryButton);
+        y += 32;
+
+        _forceGdi = new CheckBox
+        {
+            Left = 16,
+            Top = y,
+            Width = 480,
+            Text = "Force GDI capture (skip Windows.Graphics.Capture)",
+            Checked = _settings.ForceGdiCapture,
+        };
+        Controls.Add(_forceGdi);
         y += 36;
 
         _logBox = new TextBox
@@ -161,6 +173,7 @@ internal sealed class SettingsForm : Form
             ? null
             : _debugTranscriptBox.Text.Trim();
         _settings.PersistConversationHistory = _persistHistory.Checked;
+        _settings.ForceGdiCapture = _forceGdi.Checked;
         SettingsStore.Save(_settings);
         _onApplied();
         MessageBox.Show("Saved.", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);

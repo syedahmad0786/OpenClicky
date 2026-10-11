@@ -21,14 +21,19 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly WgcScreenCaptureService _capture;
     private readonly LocalSpeechTtsClient _tts;
     private readonly CompositeAgentExecutor _executor = new();
-    private readonly WinFormsAgentConfirm _confirm = new();
+    private readonly WinFormsAgentConfirm _confirm;
+    private readonly SynchronizationContext _uiContext;
 
     public TrayApplicationContext()
     {
+        _uiContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
+        SynchronizationContext.SetSynchronizationContext(_uiContext);
+        _confirm = new WinFormsAgentConfirm(_uiContext);
+
         _settings = LoadSettingsWithSecrets();
         _hotkey = new PushToTalkHotkeyMonitor(_settings.PushToTalk);
         _overlay = new BuddyOverlayController();
-        _capture = new WgcScreenCaptureService(Log);
+        _capture = new WgcScreenCaptureService(Log, () => _settings.ForceGdiCapture);
         _mic = CreateMic();
         _tts = new LocalSpeechTtsClient();
 
@@ -194,6 +199,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     protected override void ExitThreadCore()
     {
         _talk.Dispose();
+        _capture.Dispose();
         _tray.Visible = false;
         _tray.Dispose();
         _settingsForm.Dispose();

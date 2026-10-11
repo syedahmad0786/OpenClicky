@@ -12,7 +12,7 @@ Inspired by the public UX of [HeyClicky](https://www.heyclicky.com/) and the MIT
 |------------|--------|
 | Tray + remappable PTT (`Win+Alt+Space`) | Done |
 | Click-through overlay buddy + POINT fly-to | Done |
-| In-memory screen capture | Done (GDI; WGC probed, frame-pool next) |
+| In-memory screen capture | Done (WGC+D3D11 frame-pool; GDI fallback) |
 | OpenRouter vision Talk + POINT parse | Done (needs API key) |
 | STT via OpenRouter Whisper-compatible API | Done (needs API key) |
 | Local Windows SAPI TTS | Done (no key) |
