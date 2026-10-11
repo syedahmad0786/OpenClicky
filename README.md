@@ -6,7 +6,7 @@ Inspired by the public UX of [HeyClicky](https://www.heyclicky.com/) and the MIT
 
 ## CI
 
-GitHub Actions (`.github/workflows/windows-ci.yml`) on `windows-latest`: build solution, run unit tests, capture smoke, publish unsigned win-x64 EXE artifact `openclicky-win-x64`.
+GitHub Actions (`.github/workflows/windows-ci.yml`) on `windows-latest`: build solution, run unit tests, capture smoke, **agent↔sandbox smoke** (confirm-gated click/type with test-only auto-confirm), publish unsigned win-x64 EXE artifact `openclicky-win-x64`. Tray/PTT/Talk still need the human Win11 checklist below.
 
 ## Status
 

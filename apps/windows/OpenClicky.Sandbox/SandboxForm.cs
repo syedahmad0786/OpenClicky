@@ -34,6 +34,7 @@ internal sealed class SandboxForm : Form
             Width = 440,
             Height = 48,
             Text = "Ready.",
+            AccessibleName = "Sandbox status",
         };
 
         var clickMe = new Button
@@ -43,6 +44,7 @@ internal sealed class SandboxForm : Form
             Width = 160,
             Height = 40,
             Text = "Green button",
+            AccessibleName = "Green button",
             BackColor = Color.FromArgb(56, 168, 90),
             ForeColor = Color.White,
             FlatStyle = FlatStyle.Flat,
@@ -51,11 +53,19 @@ internal sealed class SandboxForm : Form
         {
             _clicks++;
             _status.Text = $"Green button clicked {_clicks} time(s).";
+            _status.AccessibleName = _status.Text;
         };
         Controls.Add(clickMe);
 
         Controls.Add(new Label { Left = 16, Top = 130, Width = 200, Text = "Type target:" });
-        _input = new TextBox { Left = 16, Top = 152, Width = 440, Height = 28 };
+        _input = new TextBox
+        {
+            Left = 16,
+            Top = 152,
+            Width = 440,
+            Height = 28,
+            AccessibleName = "Type target",
+        };
         Controls.Add(_input);
 
         var clear = new Button { Left = 200, Top = 72, Width = 120, Height = 40, Text = "Clear field" };
