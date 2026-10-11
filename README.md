@@ -34,7 +34,8 @@ dotnet run --project apps/windows/OpenClicky.App -c Debug
 2. Optional: set a **debug transcript** (e.g. `what is on my screen?`) to skip mic/STT while testing.  
 3. Hold **Win+Alt+Space**, speak (or rely on debug transcript), release.  
 4. OpenClicky captures the screen, calls OpenRouter, speaks the reply locally, and may point the buddy.  
-5. Say `openclicky agent open notepad and type hello` → confirm each step → Agent uses UIA + SendInput.
+5. Say `openclicky agent open notepad and type hello` → confirm each step → Agent uses UIA + SendInput.  
+6. Optional Agent playground: `dotnet run --project apps/windows/OpenClicky.Sandbox` then ask the agent to click **Green button** / type into the field.
 
 ### Publish EXE (unsigned)
 
