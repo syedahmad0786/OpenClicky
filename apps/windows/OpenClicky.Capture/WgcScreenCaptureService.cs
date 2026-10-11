@@ -56,6 +56,13 @@ public sealed class WgcScreenCaptureService : IScreenCaptureService, IDisposable
             _log?.Invoke($"capture_backend=wgc monitors={results.Count}");
             return Task.FromResult<IReadOnlyList<ScreenCaptureResult>>(results);
         }
+        catch (AccessViolationException ex)
+        {
+            // Should be rare after DXGI QI fix; still fall back rather than killing the tray.
+            _log?.Invoke($"wgc_capture_av={ex.Message}; falling back to gdi");
+            LastBackend = "gdi";
+            return _fallback.CaptureAllMonitorsJpegAsync(cancellationToken);
+        }
         catch (Exception ex)
         {
             _log?.Invoke($"wgc_capture_error={ex.Message}; falling back to gdi");

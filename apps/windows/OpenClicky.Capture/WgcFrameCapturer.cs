@@ -225,11 +225,24 @@ internal sealed class WgcFrameCapturer : IDisposable
 
     private static ID3D11Texture2D GetTextureFromSurface(IDirect3DSurface surface)
     {
-        // CsWinRT object → ABI pointer → Vortice IDirect3DDxgiInterfaceAccess → ID3D11Texture2D
-        var winrtObject = (IWinRTObject)surface;
-        var abi = winrtObject.NativeObject.ThisPtr;
-        using var access = (IDirect3DDxgiInterfaceAccess)abi;
-        return access.GetInterface<ID3D11Texture2D>();
+        // Must QI IDirect3DSurface → IDirect3DDxgiInterfaceAccess (do not wrap ThisPtr blindly).
+        var access = surface.As<NativeDxgiInterfaceAccess>();
+        var textureIid = NativeMethods.Id3D11Texture2DIid;
+        var texPtr = access.GetInterface(ref textureIid);
+        if (texPtr == IntPtr.Zero)
+        {
+            throw new InvalidOperationException("IDirect3DDxgiInterfaceAccess.GetInterface(ID3D11Texture2D) returned null.");
+        }
+
+        return new ID3D11Texture2D(texPtr);
+    }
+
+    [ComImport]
+    [Guid("A9B3D012-3DF2-4EE3-B8D1-8695F457D3C1")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface NativeDxgiInterfaceAccess
+    {
+        IntPtr GetInterface([In] ref Guid iid);
     }
 
     public void Dispose()
@@ -255,6 +268,8 @@ internal sealed class WgcFrameCapturer : IDisposable
 
     private static class NativeMethods
     {
+        public static readonly Guid Id3D11Texture2DIid = new("6F15AAF2-D208-4E89-9AB4-489535D34F9C");
+
         [DllImport("d3d11.dll", ExactSpelling = true)]
         public static extern int CreateDirect3D11DeviceFromDXGIDevice(IntPtr dxgiDevice, out IntPtr graphicsDevice);
 
