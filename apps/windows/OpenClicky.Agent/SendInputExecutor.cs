@@ -251,6 +251,8 @@ public sealed class SendInputExecutor : IAgentActionExecutor
         [DllImport("user32.dll", SetLastError = true)]
         public static extern uint SendInput(uint nInputs, Input[] pInputs, int cbSize);
 
+        // INPUT must be 28 bytes (x86) / 40 bytes (x64). The union has to be sized to
+        // MOUSEINPUT or SendInput returns 0 with ERROR_INVALID_PARAMETER (87).
         [StructLayout(LayoutKind.Sequential)]
         public struct Input
         {
@@ -261,7 +263,20 @@ public sealed class SendInputExecutor : IAgentActionExecutor
         [StructLayout(LayoutKind.Explicit)]
         public struct InputUnion
         {
+            [FieldOffset(0)] public MouseInput Mi;
             [FieldOffset(0)] public KeybdInput Ki;
+            [FieldOffset(0)] public HardwareInput Hi;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct MouseInput
+        {
+            public int Dx;
+            public int Dy;
+            public uint MouseData;
+            public uint DwFlags;
+            public uint Time;
+            public IntPtr DwExtraInfo;
         }
 
         [StructLayout(LayoutKind.Sequential)]
@@ -271,7 +286,15 @@ public sealed class SendInputExecutor : IAgentActionExecutor
             public ushort WScan;
             public uint DwFlags;
             public uint Time;
-            public UIntPtr DwExtraInfo;
+            public IntPtr DwExtraInfo;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct HardwareInput
+        {
+            public uint UMsg;
+            public ushort WParamL;
+            public ushort WParamH;
         }
     }
 }
