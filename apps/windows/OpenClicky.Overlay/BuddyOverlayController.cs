@@ -54,9 +54,7 @@ public sealed class BuddyOverlayController : IOverlayController
     {
         _form.BeginInvoke(() =>
         {
-            _form.PointTarget = new Point(virtualX, virtualY);
-            _form.PointLabel = label;
-            _form.Mode = OverlayMode.Pointing;
+            _form.BeginFlyTo(new Point(virtualX, virtualY), label);
             _form.ShowInactive();
         });
     }
@@ -104,6 +102,10 @@ public sealed class BuddyOverlayController : IOverlayController
         private OverlayMode _mode = OverlayMode.Hidden;
         private float _pulse;
         private readonly System.Windows.Forms.Timer _timer;
+        private PointF? _flyFrom;
+        private PointF? _flyTo;
+        private float _flyProgress = 1f;
+        private PointF _buddyAnchor;
 
         public OverlayForm()
         {
@@ -120,6 +122,20 @@ public sealed class BuddyOverlayController : IOverlayController
             _timer.Tick += (_, _) =>
             {
                 _pulse += 0.12f;
+                if (_flyProgress < 1f && _flyFrom is { } from && _flyTo is { } to)
+                {
+                    _flyProgress = Math.Min(1f, _flyProgress + 0.06f);
+                    // Ease-out cubic
+                    var t = 1f - MathF.Pow(1f - _flyProgress, 3f);
+                    _buddyAnchor = new PointF(
+                        from.X + (to.X - from.X) * t,
+                        from.Y + (to.Y - from.Y) * t);
+                    if (_flyProgress >= 1f)
+                    {
+                        PointTarget = new Point((int)to.X, (int)to.Y);
+                    }
+                }
+
                 Invalidate();
             };
             _timer.Start();
@@ -138,6 +154,19 @@ public sealed class BuddyOverlayController : IOverlayController
         public string? BuddyText { get; set; }
         public Point? PointTarget { get; set; }
         public string? PointLabel { get; set; }
+
+        public void BeginFlyTo(Point virtualTarget, string? label)
+        {
+            var localTarget = PointToClient(virtualTarget);
+            var cursor = PointToClient(Cursor.Position);
+            _flyFrom = _mode == OverlayMode.Pointing ? _buddyAnchor : new PointF(cursor.X + 28, cursor.Y + 20);
+            _flyTo = new PointF(localTarget.X, localTarget.Y);
+            _flyProgress = 0f;
+            _buddyAnchor = _flyFrom.Value;
+            PointLabel = label;
+            BuddyText = null;
+            Mode = OverlayMode.Pointing;
+        }
 
         protected override bool ShowWithoutActivation => true;
 
@@ -185,16 +214,16 @@ public sealed class BuddyOverlayController : IOverlayController
             g.SmoothingMode = SmoothingMode.AntiAlias;
 
             PointF anchor;
-            if (_mode is OverlayMode.Pointing && PointTarget is { } target)
+            if (_mode is OverlayMode.Pointing)
             {
-                var local = PointToClient(target);
-                anchor = new PointF(local.X, local.Y);
+                anchor = _buddyAnchor;
             }
             else
             {
                 var cursor = Cursor.Position;
                 var origin = PointToClient(cursor);
                 anchor = new PointF(origin.X + 28, origin.Y + 20);
+                _buddyAnchor = anchor;
             }
 
             var size = 22 + (float)Math.Sin(_pulse) * 3f;

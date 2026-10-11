@@ -1,5 +1,4 @@
 using System.Runtime.InteropServices;
-using System.Text;
 
 namespace OpenClicky.Agent;
 
@@ -27,13 +26,17 @@ public sealed class SendInputExecutor : IAgentActionExecutor
                     return Task.FromResult(Click(request));
                 case AgentToolNames.TypeText:
                     return Task.FromResult(TypeText(request));
+                case AgentToolNames.Scroll:
+                    return Task.FromResult(Scroll(request));
+                case AgentToolNames.Hotkey:
+                    return Task.FromResult(Hotkey(request));
                 case AgentToolNames.Wait:
                     return Wait(request, cancellationToken);
                 case AgentToolNames.Screenshot:
                 case AgentToolNames.UiaSnapshot:
                     return Task.FromResult(new AgentActionResult(
                         false,
-                        $"{request.ToolName} is handled by the orchestrator capture path, not SendInput.",
+                        $"{request.ToolName} is handled by the composite executor / orchestrator.",
                         false));
                 default:
                     return Task.FromResult(new AgentActionResult(
@@ -93,6 +96,109 @@ public sealed class SendInputExecutor : IAgentActionExecutor
         return new AgentActionResult(true, $"typed {text.Length} chars", false);
     }
 
+    private static AgentActionResult Scroll(AgentActionRequest request)
+    {
+        var amount = 3;
+        if (request.Arguments.TryGetValue("clicks", out var raw) && int.TryParse(raw, out var parsed))
+        {
+            amount = Math.Clamp(parsed, -20, 20);
+        }
+
+        // Positive clicks = scroll up (away from user) in Win32 wheel units.
+        var wheel = amount * 120;
+        NativeMethods.mouse_event(NativeMethods.MouseeventfWheel, 0, 0, unchecked((uint)wheel), UIntPtr.Zero);
+        return new AgentActionResult(true, $"scrolled clicks={amount}", false);
+    }
+
+    private static AgentActionResult Hotkey(AgentActionRequest request)
+    {
+        if (!request.Arguments.TryGetValue("keys", out var keys) || string.IsNullOrWhiteSpace(keys))
+        {
+            return new AgentActionResult(false, "hotkey requires keys like ctrl+n", false);
+        }
+
+        var parts = keys.Split('+', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        var modifiers = new List<byte>();
+        byte? main = null;
+        foreach (var part in parts)
+        {
+            switch (part.ToLowerInvariant())
+            {
+                case "ctrl":
+                case "control":
+                    modifiers.Add(0x11);
+                    break;
+                case "alt":
+                    modifiers.Add(0x12);
+                    break;
+                case "shift":
+                    modifiers.Add(0x10);
+                    break;
+                case "win":
+                case "meta":
+                    modifiers.Add(0x5B);
+                    break;
+                default:
+                    main = VirtualKeyFromName(part);
+                    break;
+            }
+        }
+
+        if (main is null)
+        {
+            return new AgentActionResult(false, $"could not parse hotkey '{keys}'", false);
+        }
+
+        foreach (var mod in modifiers)
+        {
+            KeyEvent(mod, keyUp: false);
+        }
+
+        KeyEvent(main.Value, keyUp: false);
+        KeyEvent(main.Value, keyUp: true);
+        for (var i = modifiers.Count - 1; i >= 0; i--)
+        {
+            KeyEvent(modifiers[i], keyUp: true);
+        }
+
+        return new AgentActionResult(true, $"hotkey {keys}", false);
+    }
+
+    private static void KeyEvent(byte vk, bool keyUp)
+    {
+        var flags = keyUp ? NativeMethods.KeyeventfKeyup : 0u;
+        NativeMethods.keybd_event(vk, 0, flags, UIntPtr.Zero);
+    }
+
+    private static byte? VirtualKeyFromName(string name)
+    {
+        if (name.Length == 1)
+        {
+            var ch = char.ToUpperInvariant(name[0]);
+            if (ch is >= 'A' and <= 'Z' or >= '0' and <= '9')
+            {
+                return (byte)ch;
+            }
+        }
+
+        return name.ToLowerInvariant() switch
+        {
+            "enter" or "return" => 0x0D,
+            "tab" => 0x09,
+            "esc" or "escape" => 0x1B,
+            "space" => 0x20,
+            "backspace" => 0x08,
+            "delete" or "del" => 0x2E,
+            "left" => 0x25,
+            "up" => 0x26,
+            "right" => 0x27,
+            "down" => 0x28,
+            "f4" => 0x73,
+            "f5" => 0x74,
+            _ => null,
+        };
+    }
+
     private static async Task<AgentActionResult> Wait(AgentActionRequest request, CancellationToken cancellationToken)
     {
         var ms = 500;
@@ -109,6 +215,7 @@ public sealed class SendInputExecutor : IAgentActionExecutor
     {
         public const uint MouseeventfLeftdown = 0x0002;
         public const uint MouseeventfLeftup = 0x0004;
+        public const uint MouseeventfWheel = 0x0800;
         public const uint KeyeventfKeyup = 0x0002;
         public const uint KeyeventfUnicode = 0x0004;
 
@@ -117,6 +224,9 @@ public sealed class SendInputExecutor : IAgentActionExecutor
 
         [DllImport("user32.dll")]
         public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
+
+        [DllImport("user32.dll")]
+        public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
 
         [DllImport("user32.dll", SetLastError = true)]
         public static extern uint SendInput(uint nInputs, Input[] pInputs, int cbSize);

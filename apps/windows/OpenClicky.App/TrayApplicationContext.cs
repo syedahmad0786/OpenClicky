@@ -19,7 +19,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly IMicrophoneRecorder _mic;
     private readonly IScreenCaptureService _capture;
     private readonly LocalSpeechTtsClient _tts;
-    private readonly SendInputExecutor _executor = new();
+    private readonly CompositeAgentExecutor _executor = new();
     private readonly WinFormsAgentConfirm _confirm = new();
 
     public TrayApplicationContext()

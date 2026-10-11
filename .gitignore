@@ -28,3 +28,6 @@ Thumbs.db
 *.jpeg
 *.png
 !docs/**/*.png
+
+# Publish output
+artifacts/

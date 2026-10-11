@@ -6,18 +6,20 @@ Inspired by the public UX of [HeyClicky](https://www.heyclicky.com/) and the MIT
 
 ## Status
 
-**Phase B (Talk)** in progress on top of the Phase A shell.
+**MVP in progress** — Talk + POINT fly-to + confirmed Agent on the Phase A shell.
 
 | Capability | Status |
 |------------|--------|
 | Tray + remappable PTT (`Win+Alt+Space`) | Done |
-| Click-through overlay buddy | Done |
-| In-memory screen capture | Done |
+| Click-through overlay buddy + POINT fly-to | Done |
+| In-memory screen capture | Done (GDI; WGC path next) |
 | OpenRouter vision Talk + POINT parse | Done (needs API key) |
 | STT via OpenRouter Whisper-compatible API | Done (needs API key) |
 | Local Windows SAPI TTS | Done (no key) |
 | Optional localhost proxy | Done |
-| Agent computer-use | Phase D |
+| Agent (plan → confirm → UIA/SendInput) | Done (needs Windows + key) |
+| Self-contained EXE publish scripts | Done (unsigned) |
+| MSIX | Deferred (docs stub) |
 
 ## Quick start (Windows 11)
 
@@ -29,7 +31,17 @@ dotnet run --project apps/windows/OpenClicky.App -c Debug
 1. Tray icon → **Settings…** → paste **OpenRouter API key** → Save.  
 2. Optional: set a **debug transcript** (e.g. `what is on my screen?`) to skip mic/STT while testing.  
 3. Hold **Win+Alt+Space**, speak (or rely on debug transcript), release.  
-4. OpenClicky captures the screen, calls OpenRouter, speaks the reply locally, and may point the buddy.
+4. OpenClicky captures the screen, calls OpenRouter, speaks the reply locally, and may point the buddy.  
+5. Say `openclicky agent open notepad and type hello` → confirm each step → Agent uses UIA + SendInput.
+
+### Publish EXE (unsigned)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/publish-exe.ps1
+# → artifacts/exe/win-x64/OpenClicky.App.exe
+```
+
+See [docs/packaging.md](docs/packaging.md) and [docs/agent-safety.md](docs/agent-safety.md).
 
 Optional proxy:
 

@@ -77,19 +77,30 @@ public sealed class AgentOrchestrator
             var args = new Dictionary<string, string>(plan.Arguments, StringComparer.OrdinalIgnoreCase);
             if (plan.ToolName == "click" && args.ContainsKey("x") && args.ContainsKey("y"))
             {
-                var fakePoint = new PointingParseResult(
-                    string.Empty,
-                    double.TryParse(args["x"], out var x) ? x : null,
-                    double.TryParse(args["y"], out var y) ? y : null,
-                    null,
-                    null,
-                    IsNone: false);
-                var mapped = CoordinateMapper.ToVirtualScreen(fakePoint, screens);
-                if (mapped is { } p)
+                var space = args.TryGetValue("space", out var sp) ? sp : "screenshot";
+                if (space.Equals("virtual", StringComparison.OrdinalIgnoreCase))
                 {
-                    args["x"] = p.virtualX.ToString();
-                    args["y"] = p.virtualY.ToString();
-                    _overlay.PointAt(p.virtualX, p.virtualY, plan.Rationale);
+                    if (int.TryParse(args["x"], out var vx) && int.TryParse(args["y"], out var vy))
+                    {
+                        _overlay.PointAt(vx, vy, plan.Rationale);
+                    }
+                }
+                else
+                {
+                    var fakePoint = new PointingParseResult(
+                        string.Empty,
+                        double.TryParse(args["x"], out var x) ? x : null,
+                        double.TryParse(args["y"], out var y) ? y : null,
+                        null,
+                        null,
+                        IsNone: false);
+                    var mapped = CoordinateMapper.ToVirtualScreen(fakePoint, screens);
+                    if (mapped is { } p)
+                    {
+                        args["x"] = p.virtualX.ToString();
+                        args["y"] = p.virtualY.ToString();
+                        _overlay.PointAt(p.virtualX, p.virtualY, plan.Rationale);
+                    }
                 }
             }
 
