@@ -13,4 +13,7 @@ public interface ISecretStore
 public static class SecretNames
 {
     public const string OpenRouterApiKey = "openrouter-api-key";
+
+    /// <summary>JSON <see cref="ChatGptCredential"/> blob (access/refresh/id tokens).</summary>
+    public const string ChatGptOAuth = "chatgpt-oauth";
 }

@@ -42,8 +42,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
             _overlay,
             _capture,
             _mic,
-            () => ProviderFactory.CreateSttClient(_settings),
-            () => ProviderFactory.CreateTalkClient(_settings),
+            () => ProviderFactory.CreateSttClient(_settings, _secrets),
+            () => ProviderFactory.CreateTalkClient(_settings, _secrets),
             _tts,
             () => _settings,
             RunAgentAsync,
@@ -68,9 +68,10 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
         _talk.Start();
         Log($"tray ready — hold {_settings.PushToTalk.DisplayName}");
-        if (string.IsNullOrWhiteSpace(_settings.OpenRouterApiKey))
+        if (string.IsNullOrWhiteSpace(_settings.OpenRouterApiKey)
+            && !ProviderFactory.IsChatGptSignedIn(_secrets))
         {
-            Log("hint: set OpenRouter API key in Settings for Talk/Agent (or use debug transcript override)");
+            Log("hint: set OpenRouter API key or Continue with ChatGPT in Settings (or use debug transcript)");
         }
 
         MaybeShowFirstRunTip();
@@ -88,23 +89,26 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
         _tray.BalloonTipTitle = "OpenClicky";
         _tray.BalloonTipText =
-            $"Hold {_settings.PushToTalk.DisplayName} to talk. Open Settings to paste your OpenRouter API key.";
+            $"Hold {_settings.PushToTalk.DisplayName} to talk. Open Settings for OpenRouter key or Sign in with ChatGPT.";
         _tray.BalloonTipIcon = ToolTipIcon.Info;
         _tray.ShowBalloonTip(8000);
 
-        if (string.IsNullOrWhiteSpace(_settings.OpenRouterApiKey))
+        if (string.IsNullOrWhiteSpace(_settings.OpenRouterApiKey)
+            && !ProviderFactory.IsChatGptSignedIn(_secrets))
         {
-            // Nudge empty-key installs into Settings once.
+            // Nudge empty-auth installs into Settings once.
             _uiContext.Post(_ => ShowSettings(), null);
         }
     }
 
     private async Task RunAgentAsync(string task, CancellationToken cancellationToken)
     {
-        var planner = ProviderFactory.CreateAgentPlanner(_settings);
+        var planner = ProviderFactory.CreateAgentPlanner(_settings, _secrets);
         if (planner is null)
         {
-            const string msg = "add your openrouter api key in settings to run agents.";
+            var msg = _settings.AuthProvider == AuthProvider.ChatGPT
+                ? "sign in with chatgpt in settings to run agents, or switch to openrouter."
+                : "add your openrouter api key in settings to run agents, or sign in with chatgpt.";
             _overlay.ShowResponding(msg);
             await _tts.SpeakAsync(msg, cancellationToken).ConfigureAwait(false);
             return;
@@ -121,7 +125,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             foregroundTitle: ForegroundWindowInfo.GetTitle,
             denyListExtra: () => AgentDenyList.ParseExtraFragments(_settings.AgentDenyListExtra));
 
-        await agent.RunAsync(task, _settings.OpenRouterModel, cancellationToken).ConfigureAwait(false);
+        await agent.RunAsync(task, _settings.ResolveVisionModel(), cancellationToken).ConfigureAwait(false);
     }
 
     private AppSettings LoadSettingsWithSecrets()
@@ -181,7 +185,10 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private void OnSettingsApplied()
     {
         _hotkey.Chord = _settings.PushToTalk;
-        Log($"settings_applied hotkey={_settings.PushToTalk.DisplayName} proxy={_settings.UseLocalProxy} key={(string.IsNullOrEmpty(_settings.OpenRouterApiKey) ? "missing" : "set")}");
+        Log(
+            $"settings_applied hotkey={_settings.PushToTalk.DisplayName} provider={_settings.AuthProvider} " +
+            $"openrouter_key={(string.IsNullOrEmpty(_settings.OpenRouterApiKey) ? "missing" : "set")} " +
+            $"chatgpt={(ProviderFactory.IsChatGptSignedIn(_secrets) ? _settings.ChatGptAccountEmail ?? "signed-in" : "out")}");
     }
 
     private void ShowSettings()

@@ -16,8 +16,25 @@ public static class ProviderFactory
         return "https://openrouter.ai/api/v1";
     }
 
-    public static ITalkClient? CreateTalkClient(AppSettings settings)
+    public static bool IsChatGptSignedIn(ISecretStore secrets)
     {
+        var cred = ChatGptCredentialStore.Load(secrets);
+        return cred?.HasUsableSession == true;
+    }
+
+    public static ITalkClient? CreateTalkClient(AppSettings settings, ISecretStore? secrets = null)
+    {
+        if (settings.AuthProvider == AuthProvider.ChatGPT)
+        {
+            if (secrets is null || !IsChatGptSignedIn(secrets))
+            {
+                return null;
+            }
+
+            var oauth = new ChatGptOAuthService();
+            return new ChatGptTalkClient(ct => oauth.GetAccessTokenAsync(settings, secrets, ct));
+        }
+
         if (string.IsNullOrWhiteSpace(settings.OpenRouterApiKey))
         {
             return null;
@@ -26,8 +43,11 @@ public static class ProviderFactory
         return new OpenRouterTalkClient(settings.OpenRouterApiKey!, ResolveBaseUrl(settings));
     }
 
-    public static ISttClient? CreateSttClient(AppSettings settings)
+    public static ISttClient? CreateSttClient(AppSettings settings, ISecretStore? secrets = null)
     {
+        // STT stays on OpenRouter (Whisper-compatible) when a BYO key is present.
+        // ChatGPT plan usage is Responses API only — mic STT needs OpenRouter or a debug transcript.
+        _ = secrets;
         if (string.IsNullOrWhiteSpace(settings.OpenRouterApiKey))
         {
             return null;
@@ -39,8 +59,19 @@ public static class ProviderFactory
             ResolveBaseUrl(settings));
     }
 
-    public static IAgentPlanner? CreateAgentPlanner(AppSettings settings)
+    public static IAgentPlanner? CreateAgentPlanner(AppSettings settings, ISecretStore? secrets = null)
     {
+        if (settings.AuthProvider == AuthProvider.ChatGPT)
+        {
+            if (secrets is null || !IsChatGptSignedIn(secrets))
+            {
+                return null;
+            }
+
+            var oauth = new ChatGptOAuthService();
+            return new ChatGptAgentPlanner(ct => oauth.GetAccessTokenAsync(settings, secrets, ct));
+        }
+
         if (string.IsNullOrWhiteSpace(settings.OpenRouterApiKey))
         {
             return null;

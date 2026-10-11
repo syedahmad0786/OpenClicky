@@ -164,8 +164,9 @@ public sealed class TalkOrchestrator : IDisposable
                 var stt = _sttFactory();
                 if (stt is null)
                 {
-                    _log("stt_unavailable — set OpenRouter API key or DebugTranscriptOverride in Settings");
-                    _overlay.ShowResponding("add your openrouter api key in settings, or a debug transcript, then try again.");
+                    _log("stt_unavailable — need OpenRouter key for mic STT, or DebugTranscriptOverride");
+                    _overlay.ShowResponding(
+                        "for microphone transcription, add an openrouter api key in settings, or set a debug transcript. chatgpt sign-in covers talk and agent replies.");
                     await Task.Delay(2500, token).ConfigureAwait(false);
                     return;
                 }
@@ -220,8 +221,9 @@ public sealed class TalkOrchestrator : IDisposable
             var talk = _talkFactory();
             if (talk is null)
             {
-                _log("talk_unavailable — missing API key");
-                _overlay.ShowResponding("add your openrouter api key in settings to enable talk.");
+                _log("talk_unavailable — missing provider auth");
+                _overlay.ShowResponding(
+                    "add an openrouter api key or continue with chatgpt in settings to enable talk.");
                 await Task.Delay(2500, token).ConfigureAwait(false);
                 return;
             }
@@ -245,7 +247,7 @@ public sealed class TalkOrchestrator : IDisposable
                 history,
                 transcript,
                 screens,
-                settings.OpenRouterModel,
+                settings.ResolveVisionModel(),
                 token).ConfigureAwait(false);
 
             var parsed = PointParser.Parse(raw);

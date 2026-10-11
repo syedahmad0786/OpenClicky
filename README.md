@@ -17,12 +17,13 @@ GitHub Actions (`.github/workflows/windows-ci.yml`) on `windows-latest`: build s
 | Tray + remappable PTT (`Win+Alt+Space`) | Done |
 | Click-through overlay buddy + POINT fly-to | Done |
 | In-memory screen capture | Done (WGC+D3D11 frame-pool; GDI fallback) |
-| OpenRouter vision Talk + POINT parse | Done (needs API key) |
-| STT via OpenRouter Whisper-compatible API | Done (needs API key) |
+| OpenRouter vision Talk + POINT parse | Done (BYO API key) |
+| Sign in with ChatGPT (OSS OAuth / PKCE) | Done (alternate Talk/Agent auth; tokens in Credential Manager) |
+| STT via OpenRouter Whisper-compatible API | Done (BYO key; ChatGPT sign-in does not replace mic STT) |
 | Local Windows SAPI TTS | Done (no key) |
 | Optional localhost proxy | Done |
-| Agent (plan → confirm → UIA/SendInput) | Done (needs Windows + key) |
-| Credential Manager for API keys | Done |
+| Agent (plan → confirm → UIA/SendInput) | Done (Windows + OpenRouter key **or** ChatGPT sign-in) |
+| Credential Manager for API keys / ChatGPT tokens | Done |
 | Soft agent deny-list | Done |
 | Text Talk history persistence | Done |
 | Agent sandbox demo app | Done |
@@ -60,10 +61,10 @@ CI validates build/tests/capture on `windows-latest` — it does **not** exercis
    `dotnet run --project apps/windows/OpenClicky.App -c Debug`  
    **Pass:** tray icon “OpenClicky” appears; `%AppData%\OpenClicky\debug.log` gets a `tray ready` line. Second launch shows “already running”.
 
-2. **Keys**  
-   Tray → Settings → paste OpenRouter API key → Save.  
-   Optional: set debug transcript `what is on my screen?` to skip mic.  
-   **Pass:** Settings log shows `key=set`; key is **not** written into `settings.json` (Credential Manager only).
+2. **Auth**  
+   Tray → Settings → either paste **OpenRouter API key** → Save, **or** click **Continue with ChatGPT** (browser OAuth) and select the ChatGPT provider radio.  
+   Optional: set debug transcript `what is on my screen?` to skip mic (mic STT still needs an OpenRouter key).  
+   **Pass:** log shows `openrouter_key=set` and/or `chatgpt=you@…`; secrets are **not** in `settings.json` (Credential Manager only).
 
 3. **Talk**  
    Open Notepad with some text visible. Hold **Win+Alt+Space**, speak (or use debug transcript), release.  

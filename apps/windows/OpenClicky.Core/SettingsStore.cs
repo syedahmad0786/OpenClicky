@@ -10,6 +10,7 @@ public static class SettingsStore
         WriteIndented = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
     };
 
     public static string DefaultPath
@@ -61,9 +62,14 @@ public static class SettingsStore
             PushToTalk = settings.PushToTalk,
             LocalProxyBaseUrl = settings.LocalProxyBaseUrl,
             UseLocalProxy = settings.UseLocalProxy,
+            AuthProvider = settings.AuthProvider,
             OpenRouterApiKey = null,
             OpenRouterModel = settings.OpenRouterModel,
             TranscriptionModel = settings.TranscriptionModel,
+            ChatGptHostId = settings.ChatGptHostId,
+            ChatGptIssuedClientId = settings.ChatGptIssuedClientId,
+            ChatGptAccountEmail = settings.ChatGptAccountEmail,
+            ChatGptModel = settings.ChatGptModel,
             DebugTranscriptOverride = settings.DebugTranscriptOverride,
             PersistConversationHistory = settings.PersistConversationHistory,
             ForceGdiCapture = settings.ForceGdiCapture,
