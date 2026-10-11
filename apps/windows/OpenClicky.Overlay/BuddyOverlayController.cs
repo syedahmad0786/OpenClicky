@@ -84,26 +84,29 @@ public sealed class BuddyOverlayController : IOverlayController
         _form.BeginInvoke(() =>
         {
             _form.BuddyText = spokenText;
-            // Talk path calls PointAt then ShowResponding — keep the fly-to anchor so the
-            // buddy does not snap back to the cursor while TTS plays.
-            if (_form.IsPointingActive)
+            // Keep an in-flight / held POINT fly-to; Responding mode re-anchors to the cursor.
+            var spokenMode = OverlayRespondingMode.Resolve(_form.IsPointingActive);
+            _form.Mode = spokenMode switch
             {
-                _form.Mode = OverlayMode.Pointing;
-            }
-            else
-            {
-                _form.Mode = OverlayMode.Responding;
-            }
+                OverlaySpokenVisualMode.Pointing => OverlayMode.Pointing,
+                OverlaySpokenVisualMode.Responding => OverlayMode.Responding,
+                _ => throw new InvalidOperationException($"Unexpected spoken visual mode: {spokenMode}"),
+            };
 
             _form.ShowInactive();
         });
     }
 
-    public void PointAt(int virtualX, int virtualY, string? label)
+    public void PointAt(int virtualX, int virtualY, string? label, string? spokenText = null)
     {
         _form.BeginInvoke(() =>
         {
             _form.BeginFlyTo(new Point(virtualX, virtualY), label);
+            if (spokenText is not null)
+            {
+                _form.BuddyText = spokenText;
+            }
+
             _form.ShowInactive();
         });
     }

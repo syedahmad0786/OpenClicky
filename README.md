@@ -72,7 +72,7 @@ CI validates build/tests/capture on `windows-latest` — it does **not** exercis
 
 4. **POINT**  
    Ask where a visible UI control is (or use a debug transcript that prompts pointing).  
-   **Pass:** blue buddy **flies to** the control and stays there while the reply is spoken (does not snap back to the cursor).
+   **Pass:** debug log has `point=(x,y)`; blue buddy **flies to** the control and **holds there while TTS speaks** (does not snap back to the cursor). CI covers HWND settle after `PointAt`+`ShowResponding` (`OpenClicky.Overlay.Smoke`); this checklist covers the Talk-orchestrated path.
 
 5. **Hotkey remap**  
    Settings → set PTT to **Ctrl+Shift+Space** → Save.  
