@@ -69,7 +69,7 @@ The optional existing localhost proxy is under `services/local-proxy`. It only a
 
 ## Development checks
 
-The built-in demos are the easiest manual check. Automated desktop checks use their own sandbox window; automatic approval exists only in the dedicated test executable. The legacy `OPENCLICKY_OFFLINE_TALK` and `OPENCLICKY_OFFLINE_AGENT` environment fixtures remain for development, with an explicit offline label. Debug transcript overrides are ignored on normal launches so an old fixture cannot silently replace microphone input.
+The built-in demos are the easiest manual check. Automated desktop checks use their own sandbox window; automatic approval exists only in the dedicated test executable. The `OPENCLICKY_OFFLINE_TALK` and `OPENCLICKY_OFFLINE_AGENT` environment fixtures remain for development, with an explicit offline label. The offline Agent fixture types only `hello` into an already open, user-selected test field; it does not launch Notepad or run shell commands. Inspect the actual editor to verify the result. Debug transcript overrides are ignored on normal launches so an old fixture cannot silently replace microphone input.
 
 See [architecture](docs/architecture.md) and [verification](docs/verification.md) for the test commands and acceptance checklist. Earlier phase documents are historical implementation notes.
 

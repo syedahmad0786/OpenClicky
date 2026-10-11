@@ -71,7 +71,7 @@ public class OfflineAgentPlannerTests
     }
 
     [Fact]
-    public async Task NextStepAsync_EmitsFixedNotepadPlanThenDone()
+    public async Task NextStepAsync_TypesOnlyTestTextAndRequiresVisualVerification()
     {
         var planner = new OfflineAgentPlanner();
         var prior = new List<string>();
@@ -90,11 +90,12 @@ public class OfflineAgentPlannerTests
             prior.Add($"step {i + 1}: {step.ToolName} → success=True ok");
         }
 
-        Assert.Equal(["hotkey", "type_text", "hotkey", "wait", "type_text", "done"], tools);
+        Assert.Equal(["type_text", "done"], tools);
 
-        var typeHello = OfflineAgentPlanner.FixedPlan[4];
+        var typeHello = OfflineAgentPlanner.FixedPlan[0];
         Assert.Equal(OfflineAgentPlanner.SafeTypeText, typeHello.Arguments["text"]);
         Assert.True(OfflineAgentPlanner.FixedPlan[^1].Done);
+        Assert.Contains("Check the actual editor", OfflineAgentPlanner.FixedPlan[^1].Arguments["summary"]);
 
         var overflow = await planner.NextStepAsync(
             "again",
@@ -107,11 +108,11 @@ public class OfflineAgentPlannerTests
     }
 
     [Fact]
-    public void FixedPlan_FirstMutatingStepIsWinR()
+    public void FixedPlan_FirstStepRequiresApprovalForTestText()
     {
         var first = OfflineAgentPlanner.FixedPlan[0];
-        Assert.Equal("hotkey", first.ToolName);
-        Assert.Equal("win+r", first.Arguments["keys"]);
+        Assert.Equal("type_text", first.ToolName);
+        Assert.Equal("hello", first.Arguments["text"]);
         Assert.False(first.Done);
     }
 }

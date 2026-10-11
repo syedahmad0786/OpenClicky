@@ -9,6 +9,7 @@ Local run: 11 October 2026 on Windows 11 x64. Working branch: `codex/windows-pro
 | Release solution build | Zero warnings and errors |
 | Unit tests | 95 passed, zero failed or skipped |
 | Full-app action demonstration | Three separate visible approvals; real sandbox green-button count became one and the field contained exactly `hello` |
+| Full-app external Notepad | Typed Agent request, target selected during countdown, normal approval dialog, visible `hello` and five-character status; saved owned test file verified equal to exact `hello` |
 | Published app decline | Declined the first approval; sandbox stayed Ready and its field remained empty; Home reported that the agent stopped |
 | Dedicated external action harness | Its own launched process/window verified; exact `hello`, not a substring; three test-only automatic approvals |
 | Two-monitor capture | Actual WGC JPEG capture, 1280 × 720 primary image, valid JPEG bytes; negative-origin secondary monitor supported |
@@ -23,10 +24,13 @@ Local run: 11 October 2026 on Windows 11 x64. Working branch: `codex/windows-pro
 
 The full-app test used the built-in offline planner and normal human approval dialogs. The external test executable used automatic approval only inside its own test process. Neither proves a live model can plan a general desktop task successfully. The generated WAV test proves local speech integration, not the physical microphone or recognition accuracy for a person's voice.
 
+The separate Notepad check used the opt-in offline Agent fixture with the normal production confirmation/focus-restoration path. It opened an owned blank test file, selected that editor during Home's countdown, and approved a single `type_text: hello` action. The screenshot showed `hello` and five characters; saving the file confirmed its exact contents. Other Notepad tabs were preserved. This verifies the handover's specific external-editor input requirement without treating an input log as proof.
+
 ## Fixes motivated by observed failures
 
 - Approval could lose the selected window/control and type into the wrong target. Focus is now restored and verified; failure stops the action instead of falling back to the desktop.
 - A test could accidentally select another sandbox with the same title and accept `hellohello`. It now scopes to its own process and requires exact `hello`.
+- The legacy offline Agent plan launched Run/Notepad and claimed completion without inspecting the editor. It now types only the test word into an already selected field and explicitly asks for visual verification.
 - The low-level keyboard callback read modifier state before Windows updated it. It now tracks physical key events, ignores injected agent events, and reserves Escape for cancellation.
 - Saved debug transcript fixtures could replace real voice input on later launches. Normal launches now ignore that override.
 - UI scaling clipped navigation and settings. Layout construction now uses a consistent DPI baseline and completes scaling after controls are built.
@@ -47,6 +51,8 @@ powershell -ExecutionPolicy Bypass -File scripts/pack-msix.ps1
 ```
 
 Desktop test executables require an interactive desktop. Do not run several input/overlay checks concurrently: they share foreground focus and the real pointer.
+
+To repeat the external-editor check without a provider, open a fresh harmless file in Notepad, launch OpenClicky with `OPENCLICKY_OFFLINE_AGENT=1` set only for that process, submit a typed Agent request, select the blank editor during the countdown, and review the approval. Inspect the actual text and save/read the owned file if exact verification is needed. Quit that fixture instance and relaunch normally afterward; do not leave offline flags or transcript fixtures active for daily use.
 
 ## Pending acceptance
 

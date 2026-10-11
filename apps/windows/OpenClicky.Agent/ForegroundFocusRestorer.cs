@@ -5,7 +5,7 @@ namespace OpenClicky.Agent;
 
 /// <summary>
 /// Captures and restores the interactive desktop focus around Agent confirm UI.
-/// MessageBox / modal dialogs steal foreground; SendInput (win+r, type_text) then
+/// Modal dialogs steal foreground; SendInput typing and hotkeys then
 /// hits the tray host instead of the intended desktop target unless we restore.
 /// </summary>
 public static class ForegroundFocusRestorer
