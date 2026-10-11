@@ -15,5 +15,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\apps\windows\OpenClicky.Core\OpenClicky.Core.csproj" />
+    <ProjectReference Include="..\..\apps\windows\OpenClicky.Providers\OpenClicky.Providers.csproj" />
   </ItemGroup>
 </Project>

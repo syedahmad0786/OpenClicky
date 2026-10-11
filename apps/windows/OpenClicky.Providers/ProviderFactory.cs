@@ -38,4 +38,14 @@ public static class ProviderFactory
             settings.TranscriptionModel,
             ResolveBaseUrl(settings));
     }
+
+    public static IAgentPlanner? CreateAgentPlanner(AppSettings settings)
+    {
+        if (string.IsNullOrWhiteSpace(settings.OpenRouterApiKey))
+        {
+            return null;
+        }
+
+        return new OpenRouterAgentPlanner(settings.OpenRouterApiKey!, ResolveBaseUrl(settings));
+    }
 }

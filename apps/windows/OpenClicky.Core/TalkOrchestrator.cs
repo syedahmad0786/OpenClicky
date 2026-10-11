@@ -13,6 +13,7 @@ public sealed class TalkOrchestrator : IDisposable
     private readonly Func<ITalkClient?> _talkFactory;
     private readonly ITtsClient _tts;
     private readonly Func<AppSettings> _settings;
+    private readonly Func<string, CancellationToken, Task>? _agentRunner;
     private readonly Action<string> _log;
     private readonly List<(string user, string assistant)> _history = new();
     private CancellationTokenSource? _turnCts;
@@ -27,6 +28,7 @@ public sealed class TalkOrchestrator : IDisposable
         Func<ITalkClient?> talkFactory,
         ITtsClient tts,
         Func<AppSettings> settings,
+        Func<string, CancellationToken, Task>? agentRunner = null,
         Action<string>? log = null)
     {
         _hotkey = hotkey;
@@ -37,6 +39,7 @@ public sealed class TalkOrchestrator : IDisposable
         _talkFactory = talkFactory;
         _tts = tts;
         _settings = settings;
+        _agentRunner = agentRunner;
         _log = log ?? Console.WriteLine;
     }
 
@@ -125,13 +128,28 @@ public sealed class TalkOrchestrator : IDisposable
             if (AgentIntent.TryExtract(transcript, out var agentTask))
             {
                 _log($"agent_intent task={agentTask}");
-                var spokenAgent =
-                    string.IsNullOrWhiteSpace(agentTask)
-                        ? "agent mode is ready, but i need a task. try saying openclicky agent, then what you want done."
-                        : $"agent mode heard you. computer-use actions are scaffolding now — next build will confirm each step for: {agentTask}";
-                _state = CompanionVoiceState.Responding;
-                _overlay.ShowResponding(spokenAgent);
-                await _tts.SpeakAsync(spokenAgent, token).ConfigureAwait(false);
+                if (string.IsNullOrWhiteSpace(agentTask))
+                {
+                    const string needTask =
+                        "agent mode is ready, but i need a task. try saying openclicky agent, then what you want done.";
+                    _state = CompanionVoiceState.Responding;
+                    _overlay.ShowResponding(needTask);
+                    await _tts.SpeakAsync(needTask, token).ConfigureAwait(false);
+                    return;
+                }
+
+                if (_agentRunner is null)
+                {
+                    var spokenAgent =
+                        $"agent mode heard you, but the agent runner is not wired yet. task was: {agentTask}";
+                    _state = CompanionVoiceState.Responding;
+                    _overlay.ShowResponding(spokenAgent);
+                    await _tts.SpeakAsync(spokenAgent, token).ConfigureAwait(false);
+                    return;
+                }
+
+                _state = CompanionVoiceState.Processing;
+                await _agentRunner(agentTask, token).ConfigureAwait(false);
                 return;
             }
 

@@ -1,5 +1,7 @@
+using OpenClicky.Agent;
 using OpenClicky.Capture;
 using OpenClicky.Core;
+using OpenClicky.Core.Agent;
 using OpenClicky.Input;
 using OpenClicky.Overlay;
 using OpenClicky.Providers;
@@ -15,25 +17,30 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly TalkOrchestrator _talk;
     private readonly SettingsForm _settingsForm;
     private readonly IMicrophoneRecorder _mic;
+    private readonly IScreenCaptureService _capture;
+    private readonly LocalSpeechTtsClient _tts;
+    private readonly SendInputExecutor _executor = new();
+    private readonly WinFormsAgentConfirm _confirm = new();
 
     public TrayApplicationContext()
     {
         _settings = SettingsStore.Load();
         _hotkey = new PushToTalkHotkeyMonitor(_settings.PushToTalk);
         _overlay = new BuddyOverlayController();
-        var capture = new WgcScreenCaptureService();
+        _capture = new WgcScreenCaptureService();
         _mic = CreateMic();
-        var tts = new LocalSpeechTtsClient();
+        _tts = new LocalSpeechTtsClient();
 
         _talk = new TalkOrchestrator(
             _hotkey,
             _overlay,
-            capture,
+            _capture,
             _mic,
             () => ProviderFactory.CreateSttClient(_settings),
             () => ProviderFactory.CreateTalkClient(_settings),
-            tts,
+            _tts,
             () => _settings,
+            RunAgentAsync,
             Log);
 
         _settingsForm = new SettingsForm(_settings, OnSettingsApplied);
@@ -57,8 +64,41 @@ internal sealed class TrayApplicationContext : ApplicationContext
         Log($"tray ready — hold {_settings.PushToTalk.DisplayName}");
         if (string.IsNullOrWhiteSpace(_settings.OpenRouterApiKey))
         {
-            Log("hint: set OpenRouter API key in Settings for Talk (or use debug transcript override)");
+            Log("hint: set OpenRouter API key in Settings for Talk/Agent (or use debug transcript override)");
         }
+    }
+
+    private async Task RunAgentAsync(string task, CancellationToken cancellationToken)
+    {
+        var planner = ProviderFactory.CreateAgentPlanner(_settings);
+        if (planner is null)
+        {
+            const string msg = "add your openrouter api key in settings to run agents.";
+            _overlay.ShowResponding(msg);
+            await _tts.SpeakAsync(msg, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        var agent = new AgentOrchestrator(
+            _capture,
+            planner,
+            ExecuteMappedAsync,
+            _confirm,
+            _overlay,
+            _tts,
+            Log);
+
+        await agent.RunAsync(task, _settings.OpenRouterModel, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<ActionResult> ExecuteMappedAsync(
+        ActionRequest request,
+        bool confirmed,
+        CancellationToken cancellationToken)
+    {
+        var legacy = new AgentActionRequest(request.ToolName, request.Arguments, request.Rationale);
+        var result = await _executor.ExecuteAsync(legacy, confirmed, cancellationToken).ConfigureAwait(false);
+        return new ActionResult(result.Success, result.Message, result.RequiresConfirmation);
     }
 
     private static IMicrophoneRecorder CreateMic()
@@ -76,7 +116,6 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private void OnSettingsApplied()
     {
-        // SettingsForm mutates the shared _settings instance and persists it.
         _hotkey.Chord = _settings.PushToTalk;
         Log($"settings_applied hotkey={_settings.PushToTalk.DisplayName} proxy={_settings.UseLocalProxy} key={(string.IsNullOrEmpty(_settings.OpenRouterApiKey) ? "missing" : "set")}");
     }

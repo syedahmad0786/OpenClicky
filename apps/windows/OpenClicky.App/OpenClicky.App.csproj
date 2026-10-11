@@ -16,6 +16,7 @@
     <ProjectReference Include="..\OpenClicky.Input\OpenClicky.Input.csproj" />
     <ProjectReference Include="..\OpenClicky.Overlay\OpenClicky.Overlay.csproj" />
     <ProjectReference Include="..\OpenClicky.Providers\OpenClicky.Providers.csproj" />
+    <ProjectReference Include="..\OpenClicky.Agent\OpenClicky.Agent.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="System.Speech" Version="8.0.0" />
