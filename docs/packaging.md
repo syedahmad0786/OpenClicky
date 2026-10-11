@@ -18,13 +18,17 @@ bash scripts/publish-exe.sh
 
 No code signing is applied yet — SmartScreen may warn on first run.
 
-## MSIX (later / Store)
+## MSIX (unsigned stub)
 
-MSIX packaging is deferred until the WinUI settings shell lands. For now:
+Identity/manifest live in `packaging/msix/Package.appxmanifest`. On Windows 11 with the Windows SDK (`makeappx` on PATH):
 
-1. Ship the published EXE folder.  
-2. Optional: wrap with [Microsoft Windows App SDK MSIX packaging](https://learn.microsoft.com/windows/msix/desktop/desktop-to-uwp-packaging-dot-net) once identity/certs exist.  
-3. Store submission is explicitly post-MVP for this OSS project.
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/publish-exe.ps1
+powershell -ExecutionPolicy Bypass -File scripts/pack-msix.ps1
+# → artifacts/msix/OpenClicky.msix (unsigned)
+```
+
+Sign with `signtool` before broad sideload. Store submission remains post-MVP.
 
 ## Smoke checklist after publish
 

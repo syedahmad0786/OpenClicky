@@ -162,7 +162,10 @@ public sealed class TalkOrchestrator : IDisposable
                 return;
             }
 
+            // Hide buddy so capture does not include the overlay triangle/bubble.
+            _overlay.Hide();
             var screens = await _capture.CaptureAllMonitorsJpegAsync(token).ConfigureAwait(false);
+            _overlay.ShowProcessing();
             var primary = screens.FirstOrDefault(c => c.IsCursorMonitor) ?? screens.FirstOrDefault();
             if (primary is not null)
             {

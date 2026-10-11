@@ -5,6 +5,7 @@ namespace OpenClicky.App;
 internal sealed class SettingsForm : Form
 {
     private readonly AppSettings _settings;
+    private readonly ISecretStore _secrets;
     private readonly Action _onApplied;
     private readonly TextBox _hotkeyBox;
     private readonly TextBox _proxyBox;
@@ -15,9 +16,10 @@ internal sealed class SettingsForm : Form
     private readonly TextBox _logBox;
     private HotkeyChord _draft;
 
-    public SettingsForm(AppSettings settings, Action onApplied)
+    public SettingsForm(AppSettings settings, ISecretStore secrets, Action onApplied)
     {
         _settings = settings;
+        _secrets = secrets;
         _onApplied = onApplied;
         _draft = settings.PushToTalk;
 
@@ -36,7 +38,7 @@ internal sealed class SettingsForm : Form
         Controls.Add(_hotkeyBox);
         y += 36;
 
-        Controls.Add(LabelAt(y, "OpenRouter API key (stored locally in %AppData%\\OpenClicky):"));
+        Controls.Add(LabelAt(y, "OpenRouter API key (Windows Credential Manager — not written to settings.json):"));
         y += 22;
         _apiKeyBox = new TextBox
         {
@@ -111,7 +113,26 @@ internal sealed class SettingsForm : Form
     private void Save()
     {
         _settings.PushToTalk = _draft;
-        _settings.OpenRouterApiKey = string.IsNullOrWhiteSpace(_apiKeyBox.Text) ? null : _apiKeyBox.Text.Trim();
+        var key = string.IsNullOrWhiteSpace(_apiKeyBox.Text) ? null : _apiKeyBox.Text.Trim();
+        if (string.IsNullOrEmpty(key))
+        {
+            try
+            {
+                _secrets.Delete(SecretNames.OpenRouterApiKey);
+            }
+            catch (Exception ex)
+            {
+                DebugLog.Append($"secret_delete_error={ex.Message}");
+            }
+
+            _settings.OpenRouterApiKey = null;
+        }
+        else
+        {
+            _secrets.Set(SecretNames.OpenRouterApiKey, key);
+            _settings.OpenRouterApiKey = key;
+        }
+
         _settings.OpenRouterModel = string.IsNullOrWhiteSpace(_modelBox.Text) ? "openai/gpt-4o-mini" : _modelBox.Text.Trim();
         _settings.UseLocalProxy = _useProxy.Checked;
         _settings.LocalProxyBaseUrl = _proxyBox.Text.Trim();

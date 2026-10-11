@@ -14,6 +14,7 @@ public sealed class AgentOrchestrator
     private readonly IOverlayController _overlay;
     private readonly ITtsClient _tts;
     private readonly Action<string> _log;
+    private readonly Func<string?>? _foregroundTitle;
     private readonly int _maxSteps;
 
     public AgentOrchestrator(
@@ -24,7 +25,8 @@ public sealed class AgentOrchestrator
         IOverlayController overlay,
         ITtsClient tts,
         Action<string>? log = null,
-        int maxSteps = 8)
+        int maxSteps = 8,
+        Func<string?>? foregroundTitle = null)
     {
         _capture = capture;
         _planner = planner;
@@ -34,6 +36,7 @@ public sealed class AgentOrchestrator
         _tts = tts;
         _log = log ?? Console.WriteLine;
         _maxSteps = maxSteps;
+        _foregroundTitle = foregroundTitle;
     }
 
     public async Task RunAsync(string task, string model, CancellationToken cancellationToken = default)
@@ -45,7 +48,10 @@ public sealed class AgentOrchestrator
         for (var step = 1; step <= _maxSteps; step++)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            // Hide buddy so it does not pollute the vision / UIA capture.
+            _overlay.Hide();
             var screens = await _capture.CaptureAllMonitorsJpegAsync(cancellationToken).ConfigureAwait(false);
+            _overlay.ShowProcessing();
             var plan = await _planner.NextStepAsync(task, screens, prior, model, cancellationToken).ConfigureAwait(false);
             _log($"agent_step={step} tool={plan.ToolName} rationale={plan.Rationale}");
 
@@ -60,6 +66,21 @@ public sealed class AgentOrchestrator
             }
 
             var mutating = plan.ToolName is "click" or "type_text" or "hotkey" or "scroll";
+            if (mutating && _foregroundTitle is not null)
+            {
+                var title = _foregroundTitle();
+                if (AgentDenyList.IsDenied(title))
+                {
+                    var reason = AgentDenyList.MatchReason(title) ?? "sensitive window";
+                    var blocked =
+                        $"i stopped because the foreground window looks sensitive ({reason}). switch away and try again.";
+                    _log($"agent_denied title={title}");
+                    _overlay.ShowResponding(blocked);
+                    await _tts.SpeakAsync(blocked, cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+            }
+
             var confirmed = !mutating;
             if (mutating)
             {

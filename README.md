@@ -53,8 +53,10 @@ cd services/local-proxy && npm install && npm start
 ## Privacy
 
 - Client-only BYO keys — no OpenClicky cloud.  
-- Settings live in `%AppData%\OpenClicky\settings.json`.  
-- Screenshots stay in memory for the request.
+- OpenRouter API key → **Windows Credential Manager** (`OpenClicky/openrouter-api-key`).  
+- Non-secret settings → `%AppData%\OpenClicky\settings.json` (never writes the API key).  
+- Screenshots stay in memory for the request.  
+- Agent soft-blocks mutating actions over banking / password-manager window titles.
 
 ## License
 

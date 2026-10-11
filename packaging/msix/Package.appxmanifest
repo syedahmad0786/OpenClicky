@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  OpenClicky MSIX identity stub (Phase E).
+  Build with Windows SDK makeappx after publishing the EXE, or convert this into a
+  Windows Application Packaging Project once code-signing certs exist.
+  See docs/packaging.md.
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap rescap">
+  <Identity
+    Name="OpenClicky.OpenClicky"
+    Publisher="CN=OpenClicky"
+    Version="0.1.0.0" />
+  <Properties>
+    <DisplayName>OpenClicky</DisplayName>
+    <PublisherDisplayName>OpenClicky</PublisherDisplayName>
+    <Description>Open-source Windows AI buddy — Talk, POINT, confirmed Agent.</Description>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.22621.0" />
+  </Dependencies>
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+  <Applications>
+    <Application Id="OpenClicky" Executable="OpenClicky.App.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements
+        DisplayName="OpenClicky"
+        Description="Screen-aware companion"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png" />
+    </Application>
+  </Applications>
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+    <DeviceCapability Name="microphone" />
+  </Capabilities>
+</Package>

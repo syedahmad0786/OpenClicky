@@ -12,22 +12,23 @@ internal sealed class TrayApplicationContext : ApplicationContext
 {
     private readonly NotifyIcon _tray;
     private AppSettings _settings;
+    private readonly ISecretStore _secrets = new WindowsCredentialSecretStore();
     private readonly PushToTalkHotkeyMonitor _hotkey;
     private readonly BuddyOverlayController _overlay;
     private readonly TalkOrchestrator _talk;
     private readonly SettingsForm _settingsForm;
     private readonly IMicrophoneRecorder _mic;
-    private readonly IScreenCaptureService _capture;
+    private readonly WgcScreenCaptureService _capture;
     private readonly LocalSpeechTtsClient _tts;
     private readonly CompositeAgentExecutor _executor = new();
     private readonly WinFormsAgentConfirm _confirm = new();
 
     public TrayApplicationContext()
     {
-        _settings = SettingsStore.Load();
+        _settings = LoadSettingsWithSecrets();
         _hotkey = new PushToTalkHotkeyMonitor(_settings.PushToTalk);
         _overlay = new BuddyOverlayController();
-        _capture = new WgcScreenCaptureService();
+        _capture = new WgcScreenCaptureService(Log);
         _mic = CreateMic();
         _tts = new LocalSpeechTtsClient();
 
@@ -43,7 +44,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             RunAgentAsync,
             Log);
 
-        _settingsForm = new SettingsForm(_settings, OnSettingsApplied);
+        _settingsForm = new SettingsForm(_settings, _secrets, OnSettingsApplied);
 
         _tray = new NotifyIcon
         {
@@ -86,9 +87,41 @@ internal sealed class TrayApplicationContext : ApplicationContext
             _confirm,
             _overlay,
             _tts,
-            Log);
+            Log,
+            foregroundTitle: ForegroundWindowInfo.GetTitle);
 
         await agent.RunAsync(task, _settings.OpenRouterModel, cancellationToken).ConfigureAwait(false);
+    }
+
+    private AppSettings LoadSettingsWithSecrets()
+    {
+        var settings = SettingsStore.Load();
+        // Migrate plaintext keys out of settings.json into Credential Manager.
+        if (!string.IsNullOrWhiteSpace(settings.OpenRouterApiKey))
+        {
+            try
+            {
+                _secrets.Set(SecretNames.OpenRouterApiKey, settings.OpenRouterApiKey!);
+                settings.OpenRouterApiKey = null;
+                SettingsStore.Save(settings);
+                Log("migrated OpenRouter key → Windows Credential Manager");
+            }
+            catch (Exception ex)
+            {
+                Log($"secret_migrate_error={ex.Message}");
+            }
+        }
+
+        try
+        {
+            settings.OpenRouterApiKey = _secrets.Get(SecretNames.OpenRouterApiKey);
+        }
+        catch (Exception ex)
+        {
+            Log($"secret_load_error={ex.Message}");
+        }
+
+        return settings;
     }
 
     private async Task<ActionResult> ExecuteMappedAsync(
@@ -135,12 +168,11 @@ internal sealed class TrayApplicationContext : ApplicationContext
     {
         try
         {
-            var capture = new GdiScreenCaptureService();
-            var results = await capture.CaptureAllMonitorsJpegAsync();
+            var results = await _capture.CaptureAllMonitorsJpegAsync();
             var primary = results.FirstOrDefault(r => r.IsCursorMonitor) ?? results.First();
-            Log($"manual_capture_bytes={primary.JpegBytes.Length} magic={(primary.LooksLikeJpeg ? "FFD8" : "????")}");
+            Log($"manual_capture_bytes={primary.JpegBytes.Length} magic={(primary.LooksLikeJpeg ? "FFD8" : "????")} backend={_capture.LastBackend}");
             MessageBox.Show(
-                $"Captured {primary.JpegBytes.Length} bytes ({primary.PixelWidth}x{primary.PixelHeight}).\nJPEG magic OK: {primary.LooksLikeJpeg}",
+                $"Captured {primary.JpegBytes.Length} bytes ({primary.PixelWidth}x{primary.PixelHeight}).\nJPEG magic OK: {primary.LooksLikeJpeg}\nBackend: {_capture.LastBackend} (WGC supported: {_capture.GraphicsCaptureSupported})",
                 "OpenClicky capture",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);

@@ -18,4 +18,8 @@ OpenClicky Agent can move the mouse, type, and send hotkeys. Treat it like handi
 
 ## Deny-list (soft)
 
-The model prompt forbids inventing credentials and casual `alt+f4`. Future builds may hard-block window titles matching banking/password managers.
+Mutating tools are refused when the foreground window title matches banking / password-manager / authenticator fragments (see `AgentDenyList`). The model prompt also forbids inventing credentials and casual `alt+f4`.
+
+## Secrets
+
+OpenRouter API keys are stored in **Windows Credential Manager** (`OpenClicky/openrouter-api-key`), not in `settings.json`.

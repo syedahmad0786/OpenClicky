@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace OpenClicky.Core;
 
@@ -8,6 +9,7 @@ public static class SettingsStore
     {
         WriteIndented = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
     public static string DefaultPath
@@ -41,10 +43,27 @@ public static class SettingsStore
         }
     }
 
+    /// <summary>
+    /// Persists non-secret settings. API keys must not be written here —
+    /// use <see cref="ISecretStore"/> (Credential Manager) instead.
+    /// </summary>
     public static void Save(AppSettings settings, string? path = null)
     {
         path ??= DefaultPath;
-        var json = JsonSerializer.Serialize(settings, JsonOptions);
+        var disk = CloneWithoutSecrets(settings);
+        var json = JsonSerializer.Serialize(disk, JsonOptions);
         File.WriteAllText(path, json);
     }
+
+    public static AppSettings CloneWithoutSecrets(AppSettings settings) =>
+        new()
+        {
+            PushToTalk = settings.PushToTalk,
+            LocalProxyBaseUrl = settings.LocalProxyBaseUrl,
+            UseLocalProxy = settings.UseLocalProxy,
+            OpenRouterApiKey = null,
+            OpenRouterModel = settings.OpenRouterModel,
+            TranscriptionModel = settings.TranscriptionModel,
+            DebugTranscriptOverride = settings.DebugTranscriptOverride,
+        };
 }
