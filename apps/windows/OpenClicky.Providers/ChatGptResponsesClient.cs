@@ -93,10 +93,10 @@ public sealed class ChatGptResponsesClient
         }
     }
 
-    private static async Task<string> ReadSseTextAsync(Stream stream, CancellationToken cancellationToken)
+    private async Task<string> ReadSseTextAsync(Stream stream, CancellationToken cancellationToken)
     {
         using var reader = new StreamReader(stream);
-        var text = new StringBuilder();
+        var completedItems = new List<JsonElement>();
 
         while (!reader.EndOfStream)
         {
@@ -123,18 +123,35 @@ public sealed class ChatGptResponsesClient
             var type = root.TryGetProperty("type", out var t) ? t.GetString() : null;
             switch (type)
             {
-                case "response.output_text.delta":
-                    if (root.TryGetProperty("delta", out var delta) && delta.ValueKind == JsonValueKind.String)
-                    {
-                        text.Append(delta.GetString());
-                    }
-
+                case "response.output_item.done":
+                    completedItems.Add(root.GetProperty("item").Clone());
                     break;
                 case "response.failed":
                 case "response.incomplete":
                 case "error":
                     throw new InvalidOperationException($"ChatGPT response stopped: {TryErrorCode(root) ?? type}. Review your connection and ChatGPT usage settings.");
                 case "response.completed":
+                    if (!root.TryGetProperty("response", out var completed)
+                        || !completed.TryGetProperty("status", out var status) || status.GetString() != "completed"
+                        || !completed.TryGetProperty("output", out var output) || output.ValueKind != JsonValueKind.Array)
+                        throw new InvalidOperationException("ChatGPT did not return a completed response.");
+                    var items = output.GetArrayLength() > 0 ? output.EnumerateArray().ToList() : completedItems;
+                    var messages = items
+                        .Where(item => item.TryGetProperty("type", out var kind) && kind.GetString() == "message").ToList();
+                    var commentary = messages.Count(item => item.TryGetProperty("phase", out var phase) && phase.GetString() == "commentary");
+                    _log($"chatgpt_output messages={messages.Count} commentary={commentary} streamed_items={completedItems.Count} terminal_items={output.GetArrayLength()}");
+                    var text = new StringBuilder();
+                    foreach (var message in messages)
+                    {
+                        // Commentary can contain a preliminary JSON plan; only the completed answer is actionable.
+                        if (message.TryGetProperty("phase", out var phase) && phase.ValueKind != JsonValueKind.Null && phase.GetString() != "final_answer") continue;
+                        foreach (var content in message.GetProperty("content").EnumerateArray())
+                        {
+                            if (content.GetProperty("type").GetString() == "refusal")
+                                throw new InvalidOperationException("ChatGPT declined this request.");
+                            if (content.GetProperty("type").GetString() == "output_text") text.Append(content.GetProperty("text").GetString());
+                        }
+                    }
                     if (text.Length == 0) throw new InvalidOperationException("ChatGPT completed without a text answer.");
                     return text.ToString();
             }

@@ -7,9 +7,15 @@ Local run: 11 October 2026 on Windows 11 x64. Working branch: `codex/windows-pro
 | Check | Actual evidence |
 | --- | --- |
 | Release solution build | Zero warnings and errors |
-| Unit tests | 128 passed, zero failed or skipped after ChatGPT integration changes |
+| Unit tests | 135 passed, zero failed or skipped after ChatGPT integration and final-message stream checks |
 | ChatGPT protocol checks | Signed/forged/unsigned identity tokens, nonce/audience/issuer/expiry rejection, JWKS failure, exact loopback callback, account binding, rotating refresh/sign-out serialization, permission loss, ordered model catalog, image/history request format, and interrupted/failed stream rejection tested with isolated fixtures |
-| ChatGPT connection screen | Published app visually inspected; ChatGPT selected and saved, local speech enabled, Continue with ChatGPT visible; human authentication still pending |
+| ChatGPT connection screen | Human completed sign-in; Settings visibly showed Connected, plan usage enabled, and GPT-6.1-Sol; protected token file exists without reading its contents; connection survived app update |
+| Live ChatGPT Ask | Fresh sandbox field contained `mint 47`; the completed GPT-6.1-Sol answer read it exactly, with HTTP 200 and `response.completed` receipts |
+| Live POINT target | The returned mapped point `(1776,1014)` matched the actual sandbox Green button's accessibility center `(1776,1013)`; this run did not capture the visible tip throughout speech |
+| Live ChatGPT Agent | Standalone sandbox, actual model calls, three separately reviewed production approvals; real button count became one and field equalled exact `hello`; model recaptured and reported the verified result |
+| Live Agent decline | Declined a model-proposed extra click; count stayed one, field stayed `hello`, Home reported that the agent stopped |
+| Updated live stream handling | Actual replies included two message items with one commentary item and an empty terminal output array; only the final plan was parsed. The updated app then clicked the field, typed exact `hello`, recaptured, and reported the verified count of one |
+| Updated live Ask / Stop | A fresh completed answer correctly read `hello` and the click count; Stop cancelled its local spoken reply (`turn_cancelled`). Sandbox values remained unchanged. The answer completed before Stop, so this does not verify cancellation during pending inference |
 | Full-app action demonstration | Three separate visible approvals; real sandbox green-button count became one and the field contained exactly `hello` |
 | Full-app external Notepad | Typed Agent request, target selected during countdown, normal approval dialog, visible `hello` and five-character status; saved owned test file verified equal to exact `hello` |
 | Published app decline | Declined the first approval; sandbox stayed Ready and its field remained empty; Home reported that the agent stopped |
@@ -24,9 +30,11 @@ Local run: 11 October 2026 on Windows 11 x64. Working branch: `codex/windows-pro
 | Missing provider | Published app accepted typed input and displayed instructions to connect a provider; automated check confirms capture is skipped |
 | Distribution | Self-contained EXE launched from its published path; unsigned MSIX created with real logos and license notices |
 
-The full-app test used the built-in offline planner and normal human approval dialogs. The external test executable used automatic approval only inside its own test process. Neither proves a live model can plan a general desktop task successfully. The generated WAV test proves local speech integration, not the physical microphone or recognition accuracy for a person's voice.
+The built-in full-app demonstration used the offline planner and normal production approval dialogs. The external test executable used automatic approval only inside its own test process. The separate live GPT-6.1-Sol run used the standalone sandbox and reviewed each proposed action. That proves this bounded sandbox task, not general desktop reliability. The generated WAV test proves local speech integration, not physical microphone accuracy; two earlier Home transcripts were garbled, so voice accuracy remains unaccepted.
 
 The separate Notepad check used the opt-in offline Agent fixture with the normal production confirmation/focus-restoration path. It opened an owned blank test file, selected that editor during Home's countdown, and approved a single `type_text: hello` action. The screenshot showed `hello` and five characters; saving the file confirmed its exact contents. Other Notepad tabs were preserved. This verifies the handover's specific external-editor input requirement without treating an input log as proof.
+
+The updated live retest also observed a focus-restoration rejection before typing: the field remained empty and Home asked to reselect the destination. A fresh bounded request, with the sandbox selected and approvals reviewed, entered exact `hello` successfully. This is evidence that the guard stops input when restoration fails, and a limitation for broader focus reliability. Live HTTP receipts returned status 200 and `response.completed`; this route did not expose a request ID.
 
 ## Fixes motivated by observed failures
 
@@ -37,6 +45,7 @@ The separate Notepad check used the opt-in offline Agent fixture with the normal
 - Saved debug transcript fixtures could replace real voice input on later launches. Normal launches now ignore that override.
 - UI scaling clipped navigation and settings. Layout construction now uses a consistent DPI baseline and completes scaling after controls are built.
 - Idle overlay animation continuously repainted the desktop; the timer now runs only while the overlay is visible. The transparency key uses a neutral dark edge rather than a purple fringe.
+- A live Agent run stopped with two concatenated JSON values. The Responses reader now uses completed output items, excludes commentary messages, and still waits for `response.completed`. This live route's terminal output array was empty, so finished items are retained from `response.output_item.done`. Regression fixtures cover both wire forms, the old concatenation error, and refusal/incomplete/commentary-only rejection. Logs record item counts, not content.
 
 ## Commands
 
@@ -58,10 +67,10 @@ To repeat the external-editor check without a provider, open a fresh harmless fi
 
 ## Pending acceptance
 
-1. **Connect ChatGPT yourself.** No signed-in ChatGPT session was available. Open Settings → Connection → ChatGPT plan → Continue with ChatGPT, finish the official browser sign-in, and enable plan usage. Do not paste credentials into chat. Close or cover private content on every connected monitor before a live test.
-2. **Live Ask and POINT.** Put harmless sample text in a test window, ask about a visible control, and verify the reply and pointing match the actual UI. Record the selected provider/model and observed response without logging secrets.
-3. **Live Agent.** Use the standalone sandbox. Select it during the three-second countdown, request a button click and `hello`, approve each action, then inspect the exact result. Also decline a proposed action and cancel a pending request.
-4. **Physical voice.** Hold the default shortcut, speak a request, release, and inspect the recognized text. Repeat with a remapped shortcut. Test Escape while listening and during speech.
+1. **Physical voice accuracy.** Hold the default shortcut, speak a short request, release, and compare the recognized text with what was said. Earlier garbled transcripts require investigation before voice can be accepted. Repeat with a remapped shortcut; test Escape while listening and during speech.
+2. **Live visual pointing.** Capture the visible tip on the intended control throughout speech, including a secondary-monitor target. The live model's target coordinates and the separate overlay position/hold checks passed; these are separate evidence.
+3. **Broader Agent reliability.** Repeat harmless real-world tasks beyond the bounded sandbox, preserving per-action review. A successful sandbox task is not blanket approval for consequential desktop actions.
+4. **Pending inference cancellation.** Stop cancelled a live answer's local speech, and declining an action stopped the Agent. The attempted network cancellation happened after the answer completed; cancellation during a pending live provider request remains unverified.
 5. **Distribution acceptance.** Signed installation, clean-machine launch, MSIX installation, and upgrade behavior remain unverified. GitHub CI has not run the new local branch.
 
 Full HeyClicky parity is outside this preview's implemented scope; the missing features are listed in [the research map](heyclicky-research.md). Do not mark the product complete or operationally accepted based only on this local record.

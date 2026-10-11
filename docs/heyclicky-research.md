@@ -24,7 +24,7 @@ The public videos make desktop action results visible. OpenClicky's action demon
 
 | Reference behavior | OpenClicky 0.2 |
 | --- | --- |
-| Voice invocation and screen questions | Implemented; local recognition tested with generated speech; physical mic and live-provider acceptance pending |
+| Voice invocation and screen questions | Live ChatGPT screen-reading passed; local recognition tested with generated speech; physical voice accuracy remains unaccepted after garbled transcripts |
 | Screen pointing during speech | Implemented; position/hold and mixed-monitor mapping tested |
 | Desktop clicks and typing | Implemented with per-action approval; actual sandbox result verified |
 | Multiple monitors | Captured and mapped; real two-monitor check passed |

@@ -32,9 +32,9 @@ Windows speech recognition and spoken replies run locally with ChatGPT. An insta
 | Desktop actions with human approval | Built-in test clicked the green button and typed exact `hello`; decline stops input |
 | Screen capture | Actual in-memory JPEG capture on two monitors using WGC |
 | Local speech | Installed recognizer tested with generated speech; real TTS cancellation tested |
-| ChatGPT sign-in, model discovery, Talk / Agent | Official OAuth/Responses flow implemented; protocol checks passed; human sign-in and live inference acceptance pending |
+| ChatGPT sign-in, model discovery, Talk / Agent | Human sign-in completed; live GPT-6.1-Sol read fresh sample text and planned approved sandbox clicks and exact `hello`; broader desktop acceptance remains open |
 | OpenRouter Talk / Agent | Preserved as an alternative; no live request verified for this release yet |
-| Physical microphone / voice shortcut | Requires the human acceptance check |
+| Physical microphone / voice shortcut | Accuracy remains unaccepted; earlier spoken requests produced garbled transcripts; typing works |
 | Portable EXE / MSIX | Built locally; unsigned; MSIX installation not verified |
 
 OpenClicky does not yet provide HeyClicky's persistent named companions, drawing canvas, routines, scheduling, dictation into apps, or account connectors. See the [video research and scope](docs/heyclicky-research.md) and [verification record](docs/verification.md).

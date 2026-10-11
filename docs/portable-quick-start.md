@@ -12,7 +12,7 @@ Closing Home keeps the app in the tray. Double-click the tray icon to reopen Hom
 
 Screen requests send all connected monitors to your selected provider. With ChatGPT, Windows speech recognition and spoken replies stay local. Optional OpenRouter cloud transcription sends recorded audio when explicitly selected. Optional plaintext Talk history is enabled by default and can be disabled or cleared in Settings. Credentials are stored securely rather than in settings JSON.
 
-This is an unsigned Windows preview. Local desktop and ChatGPT protocol checks have passed; human ChatGPT sign-in, live AI calls, a physical microphone, signed installation, and full HeyClicky feature parity are not accepted yet.
+This is an unsigned Windows preview. ChatGPT sign-in and live GPT-6.1-Sol screen-reading and approved sandbox actions passed on the developer's Windows machine. Physical voice accuracy remains unaccepted after garbled transcripts; use typed requests while checking your microphone. Signed installation, clean-machine use, broader desktop reliability, and full HeyClicky feature parity are not accepted yet.
 
 Source, build instructions, verification details, and issue tracking: [OpenClicky on GitHub](https://github.com/syedahmad0786/OpenClicky). The files in this folder may contain local changes newer than the published repository.
 

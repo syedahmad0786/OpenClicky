@@ -10,7 +10,46 @@ namespace OpenClicky.Core.Tests;
 
 public class ChatGptProtocolTests
 {
-    private const string Completed = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Token sharing works.\"}\n\ndata: {\"type\":\"response.completed\"}\n\n";
+    private const string Completed = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Token sharing works.\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"Token sharing works.\"}]}]}}\n\n";
+
+    [Fact]
+    public async Task Agent_UsesFinalMessageWithoutConcatenatingCommentary()
+    {
+        var commentary = JsonSerializer.Serialize("{\"tool\":\"click\",\"args\":{},\"rationale\":\"preliminary\"}");
+        var final = JsonSerializer.Serialize("{\"tool\":\"uia_snapshot\",\"args\":{},\"rationale\":\"inspect first\"}");
+        var body = $"data: {{\"type\":\"response.output_text.delta\",\"delta\":{commentary}}}\n\n"
+            + $"data: {{\"type\":\"response.output_text.delta\",\"delta\":{final}}}\n\n"
+            + $"data: {{\"type\":\"response.completed\",\"response\":{{\"status\":\"completed\",\"output\":["
+            + $"{{\"type\":\"message\",\"phase\":\"commentary\",\"content\":[{{\"type\":\"output_text\",\"text\":{commentary}}}]}},"
+            + $"{{\"type\":\"message\",\"phase\":\"final_answer\",\"content\":[{{\"type\":\"output_text\",\"text\":{final}}}]}}]}}}}\n\n";
+        using var http = new HttpClient(new Handler((r, c) => Task.FromResult(Reply(body))));
+        var planner = new ChatGptAgentPlanner(_ => Task.FromResult("fixture-token"), http);
+        var step = await planner.NextStepAsync("inspect sandbox", [], [], "available-model");
+        Assert.Equal("uia_snapshot", step.ToolName);
+        Assert.Equal("inspect first", step.Rationale);
+    }
+
+    [Fact]
+    public async Task CompletedOutput_IsAuthoritativeEvenWhenDeltasDiffer()
+    {
+        using var http = new HttpClient(new Handler((r, c) => Task.FromResult(Reply(Completed.Replace("\"delta\":\"Token sharing works.\"", "\"delta\":\"outdated partial\"")))));
+        var client = new ChatGptResponsesClient(_ => Task.FromResult("fixture-token"), http);
+        Assert.Equal("Token sharing works.", await client.CompleteAsync(null, [], "available-model"));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CompletedStreamItems_WorkWithAnEmptyTerminalOutput(bool terminal)
+    {
+        var body = "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"message\",\"phase\":\"commentary\",\"content\":[{\"type\":\"output_text\",\"text\":\"preliminary\"}]}}\n\n"
+            + "data: {\"type\":\"response.output_item.done\",\"item\":{\"type\":\"message\",\"phase\":\"final_answer\",\"content\":[{\"type\":\"output_text\",\"text\":\"final only\"}]}}\n\n";
+        if (terminal) body += "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[]}}\n\n";
+        using var http = new HttpClient(new Handler((r, c) => Task.FromResult(Reply(body))));
+        var client = new ChatGptResponsesClient(_ => Task.FromResult("fixture-token"), http);
+        if (terminal) Assert.Equal("final only", await client.CompleteAsync(null, [], "available-model"));
+        else await Assert.ThrowsAsync<InvalidOperationException>(() => client.CompleteAsync(null, [], "available-model"));
+    }
 
     [Fact]
     public async Task CompletedInference_UsesPublicRouteAndLogsOnlyReceipt()
@@ -41,6 +80,9 @@ public class ChatGptProtocolTests
     [InlineData("data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"subscription_sharing_usage_limit_exceeded\"}}}\n\n")]
     [InlineData("data: {\"type\":\"error\",\"code\":\"subscription_sharing_usage_unavailable\"}\n\n")]
     [InlineData("data: {\"type\":\"response.completed\"}\n\n")]
+    [InlineData("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"incomplete\",\"output\":[]}}\n\n")]
+    [InlineData("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"refusal\",\"refusal\":\"no\"}]}]}}\n\n")]
+    [InlineData("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"phase\":\"commentary\",\"content\":[{\"type\":\"output_text\",\"text\":\"not final\"}]}]}}\n\n")]
     public async Task InterruptedOrFailedStream_NeverPublishesPartialAnswer(string body)
     {
         using var http = new HttpClient(new Handler((r, c) => Task.FromResult(Reply(body))));
