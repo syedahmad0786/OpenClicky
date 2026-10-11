@@ -112,6 +112,11 @@ internal static class Program
 
             Console.WriteLine("click_assert=ok");
 
+            // Re-resolve the window/edit — UIA peers can go stale after the first click.
+            window = await WaitForSandboxWindowAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(true)
+                     ?? window;
+            NativeMethods.SetForegroundWindow(new IntPtr(window.Current.NativeWindowHandle));
+
             var edit = FindDescendant(window, ControlType.Edit, "Type target")
                        ?? FindFirstEdit(window);
             if (edit is null)
@@ -120,7 +125,41 @@ internal static class Program
                 return 8;
             }
 
-            edit.SetFocus();
+            // Focus via real click (same path as agents) — UIA SetFocus alone is flaky for SendInput on CI.
+            var editPoint = edit.GetClickablePoint();
+            var editX = (int)Math.Round(editPoint.X);
+            var editY = (int)Math.Round(editPoint.Y);
+            Console.WriteLine($"edit_click_target=({editX},{editY})");
+
+            var focusClick = await ConfirmGatedRunner.RunAsync(
+                confirm,
+                executor,
+                new AgentActionRequest(
+                    AgentToolNames.Click,
+                    new Dictionary<string, string>
+                    {
+                        ["x"] = editX.ToString(),
+                        ["y"] = editY.ToString(),
+                        ["space"] = "virtual",
+                    },
+                    "focus type target"),
+                CancellationToken.None).ConfigureAwait(true);
+            if (!focusClick.Success)
+            {
+                Console.Error.WriteLine($"FAIL: focus click failed: {focusClick.Message}");
+                return 8;
+            }
+
+            await Task.Delay(300).ConfigureAwait(true);
+            try
+            {
+                edit.SetFocus();
+            }
+            catch
+            {
+                // optional; mouse click is the primary focus path
+            }
+
             await Task.Delay(200).ConfigureAwait(true);
 
             const string typed = "hello";
@@ -139,6 +178,11 @@ internal static class Program
                 return 9;
             }
 
+            // Refresh edit peer before reading value.
+            edit = FindDescendant(window, ControlType.Edit, "Type target")
+                   ?? FindFirstEdit(window)
+                   ?? edit;
+
             if (!await WaitUntilAsync(
                     () => ReadEditValue(edit)?.Contains(typed, StringComparison.Ordinal) == true,
                     TimeSpan.FromSeconds(8)).ConfigureAwait(true))
@@ -150,9 +194,10 @@ internal static class Program
 
             Console.WriteLine("type_assert=ok");
 
-            if (confirm.ConfirmCalls < 2)
+            // click green + focus edit + type_text
+            if (confirm.ConfirmCalls < 3)
             {
-                Console.Error.WriteLine($"FAIL: expected >=2 auto-confirm calls, got {confirm.ConfirmCalls}");
+                Console.Error.WriteLine($"FAIL: expected >=3 auto-confirm calls, got {confirm.ConfirmCalls}");
                 return 11;
             }
 

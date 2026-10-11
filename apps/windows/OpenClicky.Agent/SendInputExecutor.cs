@@ -72,25 +72,45 @@ public sealed class SendInputExecutor : IAgentActionExecutor
             return new AgentActionResult(false, "type_text requires text", false);
         }
 
-        // Unicode typing via KEYEVENTF_UNICODE
+        // Unicode typing via KEYEVENTF_UNICODE (batched down+up per char for focus reliability).
+        var inputSize = Marshal.SizeOf<NativeMethods.Input>();
         foreach (var ch in text)
         {
-            var down = new NativeMethods.Input
+            var pair = new NativeMethods.Input[2];
+            pair[0] = new NativeMethods.Input
             {
                 Type = 1,
                 U = new NativeMethods.InputUnion
                 {
                     Ki = new NativeMethods.KeybdInput
                     {
+                        WVk = 0,
                         WScan = ch,
                         DwFlags = NativeMethods.KeyeventfUnicode,
                     },
                 },
             };
-            var up = down;
-            up.U.Ki.DwFlags = NativeMethods.KeyeventfUnicode | NativeMethods.KeyeventfKeyup;
-            NativeMethods.SendInput(1, [down], Marshal.SizeOf<NativeMethods.Input>());
-            NativeMethods.SendInput(1, [up], Marshal.SizeOf<NativeMethods.Input>());
+            pair[1] = new NativeMethods.Input
+            {
+                Type = 1,
+                U = new NativeMethods.InputUnion
+                {
+                    Ki = new NativeMethods.KeybdInput
+                    {
+                        WVk = 0,
+                        WScan = ch,
+                        DwFlags = NativeMethods.KeyeventfUnicode | NativeMethods.KeyeventfKeyup,
+                    },
+                },
+            };
+            var sent = NativeMethods.SendInput(2, pair, inputSize);
+            if (sent != 2)
+            {
+                return new AgentActionResult(
+                    false,
+                    $"SendInput typed only {sent}/2 events for char U+{(int)ch:X4} (win32={Marshal.GetLastWin32Error()})",
+                    false);
+            }
         }
 
         return new AgentActionResult(true, $"typed {text.Length} chars", false);
