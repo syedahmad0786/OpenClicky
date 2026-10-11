@@ -36,7 +36,9 @@ public static class SettingsStore
         try
         {
             var json = File.ReadAllText(path);
-            return JsonSerializer.Deserialize<AppSettings>(json, JsonOptions) ?? new AppSettings();
+            var settings = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions) ?? new AppSettings();
+            settings.PushToTalk = HotkeyChord.NormalizeOrDefault(settings.PushToTalk);
+            return settings;
         }
         catch
         {
@@ -51,6 +53,7 @@ public static class SettingsStore
     public static void Save(AppSettings settings, string? path = null)
     {
         path ??= DefaultPath;
+        settings.PushToTalk = HotkeyChord.NormalizeOrDefault(settings.PushToTalk);
         var disk = CloneWithoutSecrets(settings);
         var json = JsonSerializer.Serialize(disk, JsonOptions);
         File.WriteAllText(path, json);

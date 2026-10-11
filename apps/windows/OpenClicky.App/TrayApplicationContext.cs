@@ -55,7 +55,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             Icon = SystemIcons.Application,
             Visible = true,
-            Text = "OpenClicky",
+            Text = $"OpenClicky — hold {_settings.PushToTalk.DisplayName}",
         };
 
         var menu = new ContextMenuStrip();
@@ -184,7 +184,10 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private void OnSettingsApplied()
     {
-        _hotkey.Chord = _settings.PushToTalk;
+        // LL hook reads Chord on each key event — assign is enough (no Unhook/re-hook).
+        _hotkey.Chord = HotkeyChord.NormalizeOrDefault(_settings.PushToTalk);
+        _settings.PushToTalk = _hotkey.Chord;
+        _tray.Text = $"OpenClicky — hold {_settings.PushToTalk.DisplayName}";
         Log(
             $"settings_applied hotkey={_settings.PushToTalk.DisplayName} provider={_settings.AuthProvider} " +
             $"openrouter_key={(string.IsNullOrEmpty(_settings.OpenRouterApiKey) ? "missing" : "set")} " +
