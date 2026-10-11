@@ -15,4 +15,15 @@ dotnet publish "$root/apps/windows/OpenClicky.App/OpenClicky.App.csproj" \
   -p:EnableWindowsTargeting=true \
   -o "$out"
 
-echo "Published: $out/OpenClicky.App.exe"
+exe="$out/OpenClicky.App.exe"
+if [[ ! -f "$exe" ]]; then
+  echo "Expected publish output missing: $exe" >&2
+  exit 1
+fi
+
+# Friendly alias for manual installs (MSIX still launches OpenClicky.App.exe).
+cp -f "$exe" "$out/OpenClicky.exe"
+
+size_mb=$(du -m "$exe" | awk '{print $1}')
+echo "Published: $exe (${size_mb} MB)"
+echo "Alias:     $out/OpenClicky.exe"

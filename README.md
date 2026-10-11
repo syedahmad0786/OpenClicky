@@ -6,7 +6,7 @@ Inspired by the public UX of [HeyClicky](https://www.heyclicky.com/) and the MIT
 
 ## CI
 
-GitHub Actions (`.github/workflows/windows-ci.yml`) on `windows-latest`: build solution, run unit tests, capture smoke, **agent↔sandbox smoke** (confirm-gated click/type with test-only auto-confirm), **overlay POINT smoke** (buddy tip HWND at virtual target), publish unsigned win-x64 EXE artifact `openclicky-win-x64`. Tray/PTT/Talk/spoken POINT still need the human Win11 checklist below.
+GitHub Actions (`.github/workflows/windows-ci.yml`) on `windows-latest`: build solution, run unit tests, capture smoke, **agent↔sandbox smoke** (confirm-gated click/type with test-only auto-confirm), **overlay POINT smoke** (buddy tip HWND at virtual target), publish unsigned win-x64 EXE artifact `openclicky-win-x64` **and** unsigned MSIX artifact `openclicky-msix`. Tray/PTT/Talk/spoken POINT still need the human Win11 checklist below.
 
 ## Status
 
@@ -27,8 +27,8 @@ GitHub Actions (`.github/workflows/windows-ci.yml`) on `windows-latest`: build s
 | Soft agent deny-list | Done |
 | Text Talk history persistence | Done |
 | Agent sandbox demo app | Done |
-| Self-contained EXE publish scripts | Done (unsigned) |
-| MSIX | Manifest + pack script (unsigned stub) |
+| Self-contained EXE publish scripts | Done (unsigned; CI artifact `openclicky-win-x64`) |
+| MSIX | Manifest + pack script + CI artifact `openclicky-msix` (unsigned) |
 
 ## Quick start (Windows 11)
 
@@ -37,11 +37,14 @@ dotnet build OpenClicky.sln -c Debug
 dotnet run --project apps/windows/OpenClicky.App -c Debug
 ```
 
-Or download the unsigned `openclicky-win-x64` artifact from [windows-ci](.github/workflows/windows-ci.yml) Actions runs / publish locally:
+Or download CI artifacts from [windows-ci](.github/workflows/windows-ci.yml) Actions (`openclicky-win-x64` EXE folder, `openclicky-msix`) / publish locally:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/publish-exe.ps1
+# → artifacts/exe/win-x64/OpenClicky.exe  (alias)
 # → artifacts/exe/win-x64/OpenClicky.App.exe
+powershell -ExecutionPolicy Bypass -File scripts/pack-msix.ps1
+# → artifacts/msix/OpenClicky.msix  (unsigned; needs makeappx / Windows SDK)
 ```
 
 See [docs/packaging.md](docs/packaging.md) and [docs/agent-safety.md](docs/agent-safety.md).

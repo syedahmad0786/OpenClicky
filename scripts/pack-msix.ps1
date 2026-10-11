@@ -3,7 +3,7 @@
 #   powershell -ExecutionPolicy Bypass -File scripts/publish-exe.ps1
 #   powershell -ExecutionPolicy Bypass -File scripts/pack-msix.ps1
 #
-# Requires: makeappx.exe from Windows 10/11 SDK on PATH.
+# Requires: makeappx.exe from Windows 10/11 SDK (PATH or auto-discovered under Windows Kits).
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
@@ -13,16 +13,41 @@ $outDir = Join-Path $root "artifacts\msix"
 $manifestSrc = Join-Path $root "packaging\msix\Package.appxmanifest"
 $msix = Join-Path $outDir "OpenClicky.msix"
 
+function Find-MakeAppx {
+    $fromPath = Get-Command makeappx -ErrorAction SilentlyContinue
+    if ($fromPath) {
+        return $fromPath.Source
+    }
+
+    $kitsRoot = Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\bin"
+    if (-not (Test-Path $kitsRoot)) {
+        return $null
+    }
+
+    $candidate = Get-ChildItem -Path $kitsRoot -Directory -ErrorAction SilentlyContinue |
+        Sort-Object Name -Descending |
+        ForEach-Object {
+            $exe = Join-Path $_.FullName "x64\makeappx.exe"
+            if (Test-Path $exe) { $exe }
+        } |
+        Select-Object -First 1
+
+    return $candidate
+}
+
 if (-not (Test-Path (Join-Path $payload "OpenClicky.App.exe"))) {
     throw "Publish EXE first: scripts/publish-exe.ps1"
 }
 
-if (-not (Get-Command makeappx -ErrorAction SilentlyContinue)) {
-    throw "makeappx.exe not found. Install Windows SDK and add makeappx to PATH."
+$makeappx = Find-MakeAppx
+if (-not $makeappx) {
+    throw "makeappx.exe not found. Install Windows SDK (App certification / packaging tools) or add makeappx to PATH."
 }
 
+Write-Host "Using makeappx: $makeappx"
+
 New-Item -ItemType Directory -Force -Path $staging, $outDir | Out-Null
-Get-ChildItem $staging -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+Get-ChildItem $staging -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 Copy-Item -Path (Join-Path $payload "*") -Destination $staging -Recurse -Force
 Copy-Item -Path $manifestSrc -Destination (Join-Path $staging "AppxManifest.xml") -Force
 
@@ -33,6 +58,10 @@ foreach ($name in @("StoreLogo.png", "Square150x150Logo.png", "Square44x44Logo.p
     [IO.File]::WriteAllBytes((Join-Path $staging "Assets\$name"), $pngBytes)
 }
 
-& makeappx pack /d $staging /p $msix /o
+& $makeappx pack /d $staging /p $msix /o
+if ($LASTEXITCODE -ne 0) {
+    throw "makeappx failed with exit code $LASTEXITCODE"
+}
+
 Write-Host "Packed (unsigned): $msix"
 Write-Host "Sign with signtool before sideload, or enable Developer Mode + Add-AppxPackage -AllowUnsigned if supported."
