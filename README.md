@@ -84,7 +84,7 @@ dotnet run --project apps/windows/OpenClicky.App -c Debug
 ```
 
 Hold **Win+Alt+Space**, release once (debug transcript must start with an agent intent prefix such as `openclicky agent …`).  
-**Pass:** Yes/No confirm dialog appears for the first mutating step (`hotkey: keys=win+r` — open Run). Do **not** auto-confirm; click Yes/No yourself. Unset the env var to use real planners again.
+**Pass:** Yes/No confirm dialog appears for the first mutating step (`hotkey: keys=win+r` — open Run). Do **not** auto-confirm; click Yes yourself. After Yes, focus must leave the confirm UI so Run opens, Notepad launches, and `hello` is typed (not into the tray/confirm). Log may show `agent_result=hotkey win+r` / `typed …` — also verify Notepad visually. Unset the env var to use real planners again.
 
 | Env var | Effect |
 |---------|--------|

@@ -4,7 +4,8 @@ OpenClicky Agent can move the mouse, type, and send hotkeys. Treat it like handi
 
 ## Defaults
 
-- Every mutating action (`click`, `type_text`, `hotkey`, `scroll`) shows a **Yes/No** confirmation dialog.
+- Every mutating action (`click`, `type_text`, `hotkey`, `scroll`) shows a **Yes/No** confirmation dialog (human only — no auto-confirm).
+- After Yes/No closes, OpenClicky restores foreground to the prior desktop window (or the shell if the prior HWND was ours/invalid) and settles briefly before SendInput. This prevents `win+r` / `type_text` from landing on the confirm UI or tray host.
 - Max **8** steps per agent run.
 - Screenshots stay in memory; BYO OpenRouter keys stay on the client (or optional localhost proxy).
 - No credential scraping tools.
