@@ -9,6 +9,7 @@ internal sealed class SettingsForm : Form
     private readonly ISecretStore _secrets;
     private readonly Action _onApplied;
     private readonly TextBox _hotkeyBox;
+    private readonly Label _hotkeyHint;
     private readonly TextBox _proxyBox;
     private readonly CheckBox _useProxy;
     private readonly RadioButton _providerOpenRouter;
@@ -49,10 +50,29 @@ internal sealed class SettingsForm : Form
         var y = 16;
         Controls.Add(LabelAt(y, "Push-to-talk hotkey (click field, then press the combo):"));
         y += 22;
-        _hotkeyBox = new TextBox { Left = 16, Top = y, Width = 500, ReadOnly = true, Text = _draft.DisplayName };
+        _hotkeyBox = new TextBox { Left = 16, Top = y, Width = 360, ReadOnly = true, Text = _draft.DisplayName };
         _hotkeyBox.KeyDown += HotkeyBoxOnKeyDown;
         Controls.Add(_hotkeyBox);
-        y += 36;
+        var resetHotkey = new Button { Left = 388, Top = y - 1, Width = 128, Text = "Reset default" };
+        resetHotkey.Click += (_, _) =>
+        {
+            _draft = HotkeyChord.Default;
+            _hotkeyBox.Text = _draft.DisplayName;
+            SetHotkeyHint(null);
+        };
+        Controls.Add(resetHotkey);
+        y += 28;
+        _hotkeyHint = new Label
+        {
+            Left = 16,
+            Top = y,
+            Width = 500,
+            Height = 36,
+            ForeColor = SystemColors.GrayText,
+            Text = "Default: Win+Alt+Space. Needs a modifier + key. Esc clears.",
+        };
+        Controls.Add(_hotkeyHint);
+        y += 40;
 
         Controls.Add(LabelAt(y, "Talk / Agent provider:"));
         y += 22;
@@ -375,6 +395,18 @@ internal sealed class SettingsForm : Form
 
     private void Save()
     {
+        if (!_draft.TryValidate(out var hotkeyError))
+        {
+            SetHotkeyHint(hotkeyError, isError: true);
+            MessageBox.Show(
+                hotkeyError ?? "Invalid hotkey.",
+                Text,
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            _hotkeyBox.Focus();
+            return;
+        }
+
         ApplyFormToSettings(persistSecrets: true);
         if (_settings.AuthProvider == AuthProvider.ChatGPT && !ProviderFactory.IsChatGptSignedIn(_secrets))
         {
@@ -387,7 +419,12 @@ internal sealed class SettingsForm : Form
 
         SettingsStore.Save(_settings);
         _onApplied();
-        MessageBox.Show("Saved.", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+        SetHotkeyHint($"Active: {_draft.DisplayName}. Reloads after restart.", isError: false);
+        MessageBox.Show(
+            $"Saved. Push-to-talk is now {_draft.DisplayName}.",
+            Text,
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Information);
     }
 
     private void HotkeyBoxOnKeyDown(object? sender, KeyEventArgs e)
@@ -399,11 +436,44 @@ internal sealed class SettingsForm : Form
             return;
         }
 
+        // Esc clears the draft so Save can reject empty bindings with clear UX.
+        if (e.KeyCode == Keys.Escape && !e.Alt && !e.Control && !e.Shift)
+        {
+            const int vkLWinClear = 0x5B;
+            const int vkRWinClear = 0x5C;
+            var winHeld =
+                (GetAsyncKeyState(vkLWinClear) & 0x8000) != 0
+                || (GetAsyncKeyState(vkRWinClear) & 0x8000) != 0;
+            if (!winHeld)
+            {
+                _draft = new HotkeyChord(false, false, false, false, 0);
+                _hotkeyBox.Text = _draft.DisplayName;
+                SetHotkeyHint("Hotkey cleared. Press a shortcut or Reset default before Save.", isError: true);
+                return;
+            }
+        }
+
         const int vkLWin = 0x5B;
         const int vkRWin = 0x5C;
         var winDown = (GetAsyncKeyState(vkLWin) & 0x8000) != 0 || (GetAsyncKeyState(vkRWin) & 0x8000) != 0;
-        _draft = new HotkeyChord(winDown, e.Alt, e.Control, e.Shift, e.KeyValue);
+        var candidate = new HotkeyChord(winDown, e.Alt, e.Control, e.Shift, e.KeyValue);
+        if (!candidate.TryValidate(out var error))
+        {
+            SetHotkeyHint(error, isError: true);
+            return;
+        }
+
+        _draft = candidate;
         _hotkeyBox.Text = _draft.DisplayName;
+        SetHotkeyHint($"Will use {_draft.DisplayName} after Save.", isError: false);
+    }
+
+    private void SetHotkeyHint(string? message, bool isError = false)
+    {
+        _hotkeyHint.Text = string.IsNullOrWhiteSpace(message)
+            ? "Default: Win+Alt+Space. Needs a modifier + key. Esc clears."
+            : message;
+        _hotkeyHint.ForeColor = isError ? Color.Firebrick : SystemColors.GrayText;
     }
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
@@ -412,6 +482,10 @@ internal sealed class SettingsForm : Form
     protected override void OnShown(EventArgs e)
     {
         base.OnShown(e);
+        // Drop unsaved capture edits when the dialog is reopened.
+        _draft = HotkeyChord.NormalizeOrDefault(_settings.PushToTalk);
+        _hotkeyBox.Text = _draft.DisplayName;
+        SetHotkeyHint(null);
         _logBox.Text = DebugLog.Snapshot();
         RefreshChatGptButtons();
     }

@@ -13,6 +13,7 @@ public class HotkeyChordTests
         Assert.False(chord.Control);
         Assert.Equal(0x20, chord.VirtualKey);
         Assert.Equal("Win+Alt+Space", chord.DisplayName);
+        Assert.True(chord.IsValid);
     }
 
     [Fact]
@@ -21,5 +22,48 @@ public class HotkeyChordTests
         var chord = HotkeyChord.Default;
         Assert.True(chord.Matches(winDown: true, altDown: true, controlDown: false, shiftDown: false, virtualKey: 0x20));
         Assert.False(chord.Matches(winDown: true, altDown: true, controlDown: true, shiftDown: false, virtualKey: 0x20));
+    }
+
+    [Fact]
+    public void TryValidate_RejectsEmpty()
+    {
+        var empty = new HotkeyChord(false, false, false, false, 0);
+        Assert.False(empty.TryValidate(out var error));
+        Assert.Contains("empty", error, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("(not set)", empty.DisplayName);
+    }
+
+    [Fact]
+    public void TryValidate_RejectsBareKeyWithoutModifier()
+    {
+        var bare = new HotkeyChord(false, false, false, false, 0x41); // A
+        Assert.False(bare.TryValidate(out var error));
+        Assert.Contains("modifier", error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void TryValidate_RejectsModifierOnlyVirtualKey()
+    {
+        var modOnly = new HotkeyChord(true, false, false, false, 0x5B); // LWin as key
+        Assert.False(modOnly.TryValidate(out var error));
+        Assert.Contains("modifier", error, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void TryValidate_AcceptsCtrlShiftLetter()
+    {
+        var chord = new HotkeyChord(false, false, true, true, 0x54); // Ctrl+Shift+T
+        Assert.True(chord.TryValidate(out var error));
+        Assert.Null(error);
+        Assert.Equal("Ctrl+Shift+T", chord.DisplayName);
+    }
+
+    [Fact]
+    public void NormalizeOrDefault_FallsBackForInvalid()
+    {
+        Assert.Equal(HotkeyChord.Default, HotkeyChord.NormalizeOrDefault(null));
+        Assert.Equal(HotkeyChord.Default, HotkeyChord.NormalizeOrDefault(new HotkeyChord(false, false, false, false, 0)));
+        var valid = new HotkeyChord(false, true, true, false, 0x20);
+        Assert.Equal(valid, HotkeyChord.NormalizeOrDefault(valid));
     }
 }
