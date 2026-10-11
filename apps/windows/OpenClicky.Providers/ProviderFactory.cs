@@ -24,6 +24,12 @@ public static class ProviderFactory
 
     public static ITalkClient? CreateTalkClient(AppSettings settings, ISecretStore? secrets = null)
     {
+        // Opt-in offline smoke: canned [POINT:…] reply, no network / no API keys.
+        if (OfflineTalkClient.IsEnvEnabled())
+        {
+            return new OfflineTalkClient();
+        }
+
         if (settings.AuthProvider == AuthProvider.ChatGPT)
         {
             if (secrets is null || !IsChatGptSignedIn(secrets))
