@@ -56,6 +56,20 @@ cd services/local-proxy && npm install && npm start
 # Enable "Use local proxy" in Settings (http://127.0.0.1:8787)
 ```
 
+### Offline Talk smoke (no API keys)
+
+Opt-in fixture for proving Talk → POINT without OpenRouter or ChatGPT. Set the env var **before** launching the tray:
+
+```powershell
+$env:OPENCLICKY_OFFLINE_TALK = '1'   # or 'true'
+# Skip mic STT (still needed offline — ChatGPT/OpenRouter STT is not used):
+# Tray → Settings → debug transcript, e.g. "point at the center", Save
+Get-Process OpenClicky.App -ErrorAction SilentlyContinue | Stop-Process -Force
+dotnet run --project apps/windows/OpenClicky.App -c Debug
+```
+
+Hold **Win+Alt+Space**, release once. Pass: `%AppData%\OpenClicky\debug.log` contains `point=(x,y)` and a canned reply mentioning offline smoke. Unset the env var (or launch without it) to use real providers again.
+
 ## Windows 11 smoke checklist (human)
 
 CI validates build/tests/capture on `windows-latest` — it does **not** exercise the tray, PTT hotkey, overlay, STT, or Agent confirms. Run this on a real interactive Windows 11 desktop:
@@ -67,7 +81,8 @@ CI validates build/tests/capture on `windows-latest` — it does **not** exercis
 2. **Auth**  
    Tray → Settings → either paste **OpenRouter API key** → Save, **or** click **Continue with ChatGPT** (browser OAuth) and select the ChatGPT provider radio.  
    Optional: set debug transcript `what is on my screen?` to skip mic (mic STT still needs an OpenRouter key).  
-   **Pass:** log shows `openrouter_key=set` and/or `chatgpt=you@…`; secrets are **not** in `settings.json` (Credential Manager only).
+   **Offline shortcut:** `$env:OPENCLICKY_OFFLINE_TALK='1'` before launch + debug transcript (see [Offline Talk smoke](#offline-talk-smoke-no-api-keys)) — no keys required for Talk→POINT.  
+   **Pass:** log shows `openrouter_key=set` and/or `chatgpt=you@…` (or offline canned reply); secrets are **not** in `settings.json` (Credential Manager only).
 
 3. **Talk**  
    Open Notepad with some text visible. Hold **Win+Alt+Space**, speak (or use debug transcript), release.  
@@ -75,7 +90,7 @@ CI validates build/tests/capture on `windows-latest` — it does **not** exercis
 
 4. **POINT**  
    Ask where a visible UI control is (or use a debug transcript that prompts pointing).  
-   **Pass:** debug log has `point=(x,y)`; blue buddy **flies to** the control and **holds there while TTS speaks** (does not snap back to the cursor). CI covers HWND settle after `PointAt`+`ShowResponding` (`OpenClicky.Overlay.Smoke`); this checklist covers the Talk-orchestrated path.
+   **Pass:** debug log has `point=(x,y)`; blue buddy **flies to** the control and **holds there while TTS speaks** (does not snap back to the cursor). CI covers HWND settle after `PointAt`+`ShowResponding` (`OpenClicky.Overlay.Smoke`); this checklist covers the Talk-orchestrated path. Offline fixture also emits `point=` near capture center.
 
 5. **Hotkey remap**  
    Settings → set PTT to **Ctrl+Shift+Space** → Save.  
