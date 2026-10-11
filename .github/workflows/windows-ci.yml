@@ -46,6 +46,10 @@ jobs:
         # Does NOT exercise tray / PTT / Talk / spoken POINT — those stay on the human Win11 checklist.
         run: dotnet run --project apps/windows/OpenClicky.Overlay.Smoke/OpenClicky.Overlay.Smoke.csproj -c Release --no-launch-profile
 
+      - name: Secret-store smoke (CredWrite + DPAPI fallback)
+        # Small secret via Credential Manager; OAuth-sized blob via DPAPI under %AppData%\OpenClicky\secrets\.
+        run: dotnet run --project apps/windows/OpenClicky.App.SecretStore.Smoke/OpenClicky.App.SecretStore.Smoke.csproj -c Release --no-launch-profile
+
       - name: Publish self-contained win-x64 EXE (unsigned)
         run: powershell -ExecutionPolicy Bypass -File scripts/publish-exe.ps1
 

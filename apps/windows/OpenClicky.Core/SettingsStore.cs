@@ -45,8 +45,8 @@ public static class SettingsStore
     }
 
     /// <summary>
-    /// Persists non-secret settings. API keys must not be written here —
-    /// use <see cref="ISecretStore"/> (Credential Manager) instead.
+    /// Persists non-secret settings. API keys / OAuth tokens must not be written here —
+    /// use <see cref="ISecretStore"/> (Credential Manager or DPAPI) instead.
     /// </summary>
     public static void Save(AppSettings settings, string? path = null)
     {

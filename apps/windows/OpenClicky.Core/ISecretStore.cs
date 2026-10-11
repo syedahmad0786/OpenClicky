@@ -1,6 +1,10 @@
 namespace OpenClicky.Core;
 
-/// <summary>OS secret store abstraction (Windows Credential Manager in the app host).</summary>
+/// <summary>
+/// OS secret store abstraction. Windows host: Credential Manager for small secrets,
+/// DPAPI file under %AppData%\OpenClicky\secrets\ when CredWrite cannot hold the blob
+/// (ChatGPT OAuth JSON exceeds the 2560-byte CredMan limit).
+/// </summary>
 public interface ISecretStore
 {
     string? Get(string name);

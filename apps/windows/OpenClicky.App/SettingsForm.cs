@@ -242,7 +242,7 @@ internal sealed class SettingsForm : Form
         if (signedIn)
         {
             var email = _settings.ChatGptAccountEmail ?? "(signed in)";
-            return $"Signed in as {email}. Tokens in Windows Credential Manager.";
+            return $"Signed in as {email}. Tokens in OS secret store (DPAPI / Credential Manager).";
         }
 
         return "Not signed in. Continue with ChatGPT opens the official OpenAI browser login.";

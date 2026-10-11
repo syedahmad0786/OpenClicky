@@ -22,4 +22,4 @@ Mutating tools are refused when the foreground window title matches banking / pa
 
 ## Secrets
 
-OpenRouter API keys are stored in **Windows Credential Manager** (`OpenClicky/openrouter-api-key`), not in `settings.json`.
+OpenRouter API keys are stored in **Windows Credential Manager** (`OpenClicky/openrouter-api-key`), not in `settings.json`. ChatGPT OAuth token JSON is larger than CredMan’s 2560-byte blob limit, so it is stored as a **DPAPI-protected file** under `%AppData%\OpenClicky\secrets\` (still never plaintext in `settings.json`).

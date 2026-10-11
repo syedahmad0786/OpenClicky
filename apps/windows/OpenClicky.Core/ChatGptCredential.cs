@@ -2,7 +2,7 @@ namespace OpenClicky.Core;
 
 /// <summary>
 /// Local ChatGPT OAuth credential record (Sign in with ChatGPT OSS flow).
-/// Tokens live in Windows Credential Manager; never write them to settings.json.
+/// Tokens live in the OS secret store (Credential Manager or DPAPI file); never write them to settings.json.
 /// </summary>
 public sealed class ChatGptCredential
 {
