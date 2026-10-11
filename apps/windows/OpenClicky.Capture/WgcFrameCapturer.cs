@@ -69,7 +69,26 @@ internal sealed class WgcFrameCapturer : IDisposable
             }
 
             using var dxgi = device.QueryInterface<IDXGIDevice>();
-            var winrtDevice = D3D11.CreateDirect3D11DeviceFromDXGIDevice<IDirect3DDevice>(dxgi);
+            // Must go through ABI → MarshalInterface so WinRT APIs get a real RCW, not a bare __ComObject.
+            var bridgeHr = D3D11.CreateDirect3D11DeviceFromDXGIDevice(dxgi, out var punk);
+            if (bridgeHr.Failure || punk == IntPtr.Zero)
+            {
+                device.Dispose();
+                context.Dispose();
+                error = $"CreateDirect3D11DeviceFromDXGIDevice failed: {bridgeHr}";
+                return false;
+            }
+
+            IDirect3DDevice winrtDevice;
+            try
+            {
+                winrtDevice = MarshalInterface<IDirect3DDevice>.FromAbi(punk);
+            }
+            finally
+            {
+                Marshal.Release(punk);
+            }
+
             capturer = new WgcFrameCapturer(device, context, winrtDevice);
             return true;
         }
@@ -221,9 +240,17 @@ internal sealed class WgcFrameCapturer : IDisposable
         _disposed = true;
         _context.Dispose();
         _device.Dispose();
-        if (_winrtDevice is IDisposable disposable)
+        // WinRT IDirect3DDevice is IClosable, not System.IDisposable (QI fails on CI).
+        try
         {
-            disposable.Dispose();
+            if (_winrtDevice is Windows.Foundation.IClosable closable)
+            {
+                closable.Close();
+            }
+        }
+        catch
+        {
+            // best-effort
         }
     }
 
