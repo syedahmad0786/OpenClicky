@@ -70,7 +70,8 @@ Download from the Actions run for that commit — still unsigned.
 2. Unzip to e.g. `%USERPROFILE%\Apps\OpenClicky\`.  
 3. Double-click `OpenClicky.exe` (or `OpenClicky.App.exe`).  
 4. If SmartScreen blocks: **More info → Run anyway**.  
-5. Tray icon → Settings → OpenRouter key (or ChatGPT when CredWrite fix lands) → hold **Win+Alt+Space**.
+5. Tray icon → Settings → OpenRouter key **or** Continue with ChatGPT → hold **Win+Alt+Space**.  
+   (CredWrite/DPAPI fix is on phase-a `2cae07c` — ChatGPT token save should work for oversized OAuth blobs.)
 
 **MSIX (optional sideload):**
 
