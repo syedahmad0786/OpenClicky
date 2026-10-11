@@ -69,13 +69,15 @@ internal sealed class WgcFrameCapturer : IDisposable
             }
 
             using var dxgi = device.QueryInterface<IDXGIDevice>();
-            // Must go through ABI → MarshalInterface so WinRT APIs get a real RCW, not a bare __ComObject.
-            var bridgeHr = D3D11.CreateDirect3D11DeviceFromDXGIDevice(dxgi, out var punk);
-            if (bridgeHr.Failure || punk == IntPtr.Zero)
+            // P/Invoke + MarshalInterface.FromAbi yields a real WinRT RCW.
+            // Vortice's generic CreateDirect3D11DeviceFromDXGIDevice<T> returns a bare __ComObject
+            // that fails CCW when passed to Direct3D11CaptureFramePool on .NET 8.
+            var bridgeHr = NativeMethods.CreateDirect3D11DeviceFromDXGIDevice(dxgi.NativePointer, out var punk);
+            if (bridgeHr != 0 || punk == IntPtr.Zero)
             {
                 device.Dispose();
                 context.Dispose();
-                error = $"CreateDirect3D11DeviceFromDXGIDevice failed: {bridgeHr}";
+                error = $"CreateDirect3D11DeviceFromDXGIDevice failed: 0x{bridgeHr:X8}";
                 return false;
             }
 
@@ -240,13 +242,10 @@ internal sealed class WgcFrameCapturer : IDisposable
         _disposed = true;
         _context.Dispose();
         _device.Dispose();
-        // WinRT IDirect3DDevice is IClosable, not System.IDisposable (QI fails on CI).
+        // Proper WinRT RCW implements IDisposable; bare __ComObject does not (seen on CI).
         try
         {
-            if (_winrtDevice is Windows.Foundation.IClosable closable)
-            {
-                closable.Close();
-            }
+            (_winrtDevice as IDisposable)?.Dispose();
         }
         catch
         {
@@ -256,6 +255,9 @@ internal sealed class WgcFrameCapturer : IDisposable
 
     private static class NativeMethods
     {
+        [DllImport("d3d11.dll", ExactSpelling = true)]
+        public static extern int CreateDirect3D11DeviceFromDXGIDevice(IntPtr dxgiDevice, out IntPtr graphicsDevice);
+
         public const uint MonitorDefaultToNearest = 2;
 
         [StructLayout(LayoutKind.Sequential)]
