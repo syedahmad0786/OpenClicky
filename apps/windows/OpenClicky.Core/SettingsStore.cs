@@ -67,5 +67,7 @@ public static class SettingsStore
             DebugTranscriptOverride = settings.DebugTranscriptOverride,
             PersistConversationHistory = settings.PersistConversationHistory,
             ForceGdiCapture = settings.ForceGdiCapture,
+            AgentDenyListExtra = settings.AgentDenyListExtra,
+            FirstRunCompleted = settings.FirstRunCompleted,
         };
 }

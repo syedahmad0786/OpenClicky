@@ -15,6 +15,7 @@ internal sealed class SettingsForm : Form
     private readonly TextBox _debugTranscriptBox;
     private readonly CheckBox _persistHistory;
     private readonly CheckBox _forceGdi;
+    private readonly TextBox _denyExtraBox;
     private readonly TextBox _logBox;
     private readonly Action? _clearHistory;
     private HotkeyChord _draft;
@@ -32,7 +33,7 @@ internal sealed class SettingsForm : Form
         MaximizeBox = false;
         MinimizeBox = false;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(520, 600);
+        ClientSize = new Size(520, 660);
 
         var y = 16;
         Controls.Add(LabelAt(y, "Push-to-talk hotkey (click field, then press the combo):"));
@@ -117,6 +118,18 @@ internal sealed class SettingsForm : Form
             Checked = _settings.ForceGdiCapture,
         };
         Controls.Add(_forceGdi);
+        y += 28;
+
+        Controls.Add(LabelAt(y, "Extra agent deny-list fragments (comma-separated window titles):"));
+        y += 22;
+        _denyExtraBox = new TextBox
+        {
+            Left = 16,
+            Top = y,
+            Width = 480,
+            Text = _settings.AgentDenyListExtra ?? string.Empty,
+        };
+        Controls.Add(_denyExtraBox);
         y += 36;
 
         _logBox = new TextBox
@@ -124,7 +137,7 @@ internal sealed class SettingsForm : Form
             Left = 16,
             Top = y + 40,
             Width = 480,
-            Height = 120,
+            Height = 100,
             Multiline = true,
             ScrollBars = ScrollBars.Vertical,
             ReadOnly = true,
@@ -174,6 +187,9 @@ internal sealed class SettingsForm : Form
             : _debugTranscriptBox.Text.Trim();
         _settings.PersistConversationHistory = _persistHistory.Checked;
         _settings.ForceGdiCapture = _forceGdi.Checked;
+        _settings.AgentDenyListExtra = string.IsNullOrWhiteSpace(_denyExtraBox.Text)
+            ? null
+            : _denyExtraBox.Text.Trim();
         SettingsStore.Save(_settings);
         _onApplied();
         MessageBox.Show("Saved.", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);

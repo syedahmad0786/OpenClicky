@@ -15,6 +15,7 @@ public sealed class AgentOrchestrator
     private readonly ITtsClient _tts;
     private readonly Action<string> _log;
     private readonly Func<string?>? _foregroundTitle;
+    private readonly Func<IEnumerable<string>?>? _denyListExtra;
     private readonly int _maxSteps;
 
     public AgentOrchestrator(
@@ -26,7 +27,8 @@ public sealed class AgentOrchestrator
         ITtsClient tts,
         Action<string>? log = null,
         int maxSteps = 8,
-        Func<string?>? foregroundTitle = null)
+        Func<string?>? foregroundTitle = null,
+        Func<IEnumerable<string>?>? denyListExtra = null)
     {
         _capture = capture;
         _planner = planner;
@@ -37,6 +39,7 @@ public sealed class AgentOrchestrator
         _log = log ?? Console.WriteLine;
         _maxSteps = maxSteps;
         _foregroundTitle = foregroundTitle;
+        _denyListExtra = denyListExtra;
     }
 
     public async Task RunAsync(string task, string model, CancellationToken cancellationToken = default)
@@ -69,9 +72,10 @@ public sealed class AgentOrchestrator
             if (mutating && _foregroundTitle is not null)
             {
                 var title = _foregroundTitle();
-                if (AgentDenyList.IsDenied(title))
+                var extras = _denyListExtra?.Invoke();
+                if (AgentDenyList.IsDenied(title, extras))
                 {
-                    var reason = AgentDenyList.MatchReason(title) ?? "sensitive window";
+                    var reason = AgentDenyList.MatchReason(title, extras) ?? "sensitive window";
                     var blocked =
                         $"i stopped because the foreground window looks sensitive ({reason}). switch away and try again.";
                     _log($"agent_denied title={title}");

@@ -27,5 +27,15 @@ public class AgentDenyListTests
     public void ExtraFragmentsWork()
     {
         Assert.True(AgentDenyList.IsDenied("Acme Payroll Portal", ["payroll"]));
+        Assert.Equal("payroll", AgentDenyList.MatchReason("Acme Payroll Portal", ["payroll"]));
+    }
+
+    [Fact]
+    public void ParseExtraFragments_SplitsCsv()
+    {
+        var parts = AgentDenyList.ParseExtraFragments(" payroll , vault\nhr portal ");
+        Assert.Equal(3, parts.Count);
+        Assert.Contains("payroll", parts);
+        Assert.Contains("hr portal", parts);
     }
 }

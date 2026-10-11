@@ -72,6 +72,31 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             Log("hint: set OpenRouter API key in Settings for Talk/Agent (or use debug transcript override)");
         }
+
+        MaybeShowFirstRunTip();
+    }
+
+    private void MaybeShowFirstRunTip()
+    {
+        if (_settings.FirstRunCompleted)
+        {
+            return;
+        }
+
+        _settings.FirstRunCompleted = true;
+        SettingsStore.Save(_settings);
+
+        _tray.BalloonTipTitle = "OpenClicky";
+        _tray.BalloonTipText =
+            $"Hold {_settings.PushToTalk.DisplayName} to talk. Open Settings to paste your OpenRouter API key.";
+        _tray.BalloonTipIcon = ToolTipIcon.Info;
+        _tray.ShowBalloonTip(8000);
+
+        if (string.IsNullOrWhiteSpace(_settings.OpenRouterApiKey))
+        {
+            // Nudge empty-key installs into Settings once.
+            _uiContext.Post(_ => ShowSettings(), null);
+        }
     }
 
     private async Task RunAgentAsync(string task, CancellationToken cancellationToken)
@@ -93,7 +118,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
             _overlay,
             _tts,
             Log,
-            foregroundTitle: ForegroundWindowInfo.GetTitle);
+            foregroundTitle: ForegroundWindowInfo.GetTitle,
+            denyListExtra: () => AgentDenyList.ParseExtraFragments(_settings.AgentDenyListExtra));
 
         await agent.RunAsync(task, _settings.OpenRouterModel, cancellationToken).ConfigureAwait(false);
     }

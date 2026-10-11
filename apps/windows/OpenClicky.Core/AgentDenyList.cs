@@ -60,7 +60,7 @@ public static class AgentDenyList
         return false;
     }
 
-    public static string? MatchReason(string? foregroundWindowTitle)
+    public static string? MatchReason(string? foregroundWindowTitle, IEnumerable<string>? extraFragments = null)
     {
         if (string.IsNullOrWhiteSpace(foregroundWindowTitle))
         {
@@ -76,6 +76,28 @@ public static class AgentDenyList
             }
         }
 
+        if (extraFragments is not null)
+        {
+            foreach (var fragment in extraFragments)
+            {
+                if (string.IsNullOrWhiteSpace(fragment))
+                {
+                    continue;
+                }
+
+                var needle = fragment.Trim().ToLowerInvariant();
+                if (haystack.Contains(needle, StringComparison.Ordinal))
+                {
+                    return needle;
+                }
+            }
+        }
+
         return null;
     }
+
+    public static IReadOnlyList<string> ParseExtraFragments(string? csv) =>
+        string.IsNullOrWhiteSpace(csv)
+            ? Array.Empty<string>()
+            : csv.Split([',', '\n', ';'], StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
 }

@@ -24,4 +24,10 @@ public sealed class AppSettings
 
     /// <summary>When true, skip WGC and use GDI BitBlt (debug / broken GPU drivers).</summary>
     public bool ForceGdiCapture { get; set; }
+
+    /// <summary>Comma-separated extra window-title fragments that block mutating agent actions.</summary>
+    public string? AgentDenyListExtra { get; set; }
+
+    /// <summary>True after first-run tip has been shown.</summary>
+    public bool FirstRunCompleted { get; set; }
 }
