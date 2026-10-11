@@ -8,7 +8,10 @@ On Windows 11 with .NET 8 SDK:
 powershell -ExecutionPolicy Bypass -File scripts/publish-exe.ps1
 ```
 
-Output: `artifacts/exe/win-x64/OpenClicky.App.exe` (self-contained single-file).
+Output:
+
+- `artifacts/exe/win-x64/OpenClicky.App.exe` — self-contained single-file (canonical; MSIX entry point)
+- `artifacts/exe/win-x64/OpenClicky.exe` — copy alias for manual installs
 
 From Linux CI (cross-compile):
 
@@ -32,17 +35,49 @@ powershell -ExecutionPolicy Bypass -File scripts/pack-msix.ps1
 # → artifacts/msix/OpenClicky.msix
 ```
 
+`pack-msix.ps1` locates `makeappx.exe` on `PATH` or under `%ProgramFiles(x86)%\Windows Kits\10\bin\*\x64\`.
+
 **This MSIX is intentionally unsigned** until a code-signing certificate is available. Sideload options:
 
 1. Sign with `signtool` + your cert, then `Add-AppxPackage`.  
-2. Or enable Developer Mode and sideload per your org policy.  
+2. Or enable **Developer Mode** (`Settings → Privacy & security → For developers`) and:
+
+```powershell
+Add-AppxPackage -Path artifacts\msix\OpenClicky.msix -AllowUnsigned
+```
+
+(AllowUnsigned requires a recent Windows 11 build; otherwise sign first.)  
 3. Microsoft Store submission remains post-MVP.
 
 There is no CI signing secret in this repository — do not expect a signed Store package from `pack-msix.ps1` alone.
 
-## CI artifact
+## CI artifacts
 
-Every push to `main` / `cursor/**` runs `.github/workflows/windows-ci.yml` on `windows-latest` and uploads `openclicky-win-x64` (contents of `artifacts/exe/win-x64/`). Download from the Actions run — still unsigned.
+Every push to `main` / `cursor/**` (and PRs into `main`) runs `.github/workflows/windows-ci.yml` on `windows-latest` and uploads:
+
+| Artifact | Contents |
+|----------|----------|
+| `openclicky-win-x64` | Folder `artifacts/exe/win-x64/` (`OpenClicky.exe` + `OpenClicky.App.exe` + deps) |
+| `openclicky-msix` | `artifacts/msix/OpenClicky.msix` (unsigned) |
+
+Download from the Actions run for that commit — still unsigned.
+
+### Install / run from CI (Ahmad / Windows 11)
+
+**EXE (fastest):**
+
+1. Open the green `windows-ci` run → Artifacts → download `openclicky-win-x64`.  
+2. Unzip to e.g. `%USERPROFILE%\Apps\OpenClicky\`.  
+3. Double-click `OpenClicky.exe` (or `OpenClicky.App.exe`).  
+4. If SmartScreen blocks: **More info → Run anyway**.  
+5. Tray icon → Settings → OpenRouter key (or ChatGPT when CredWrite fix lands) → hold **Win+Alt+Space**.
+
+**MSIX (optional sideload):**
+
+1. Download artifact `openclicky-msix`.  
+2. Enable Developer Mode.  
+3. `Add-AppxPackage -Path .\OpenClicky.msix -AllowUnsigned` (or sign first).  
+4. Launch **OpenClicky** from the Start menu.
 
 ## Smoke checklist after publish
 

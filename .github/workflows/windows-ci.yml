@@ -9,7 +9,7 @@ on:
 
 jobs:
   build-test-publish:
-    name: Build, test, publish EXE
+    name: Build, test, publish EXE/MSIX
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -53,10 +53,23 @@ jobs:
       - name: Publish self-contained win-x64 EXE (unsigned)
         run: powershell -ExecutionPolicy Bypass -File scripts/publish-exe.ps1
 
+      - name: Pack unsigned MSIX
+        # makeappx is auto-discovered from Windows Kits on windows-latest.
+        # Package is unsigned — SmartScreen / sideload policy still apply.
+        run: powershell -ExecutionPolicy Bypass -File scripts/pack-msix.ps1
+
       - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
         with:
           name: openclicky-win-x64
           path: artifacts/exe/win-x64/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload MSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openclicky-msix
+          path: artifacts/msix/OpenClicky.msix
           if-no-files-found: error
           retention-days: 14

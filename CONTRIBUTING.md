@@ -18,7 +18,8 @@ Clean-room only — MIT Clicky + public HeyClicky UX. No commercial binary rever
 
 ## Packaging
 
-- EXE: `scripts/publish-exe.ps1` / `scripts/publish-exe.sh`
-- MSIX stub: `scripts/pack-msix.ps1` (unsigned; needs Windows SDK `makeappx`)
+- EXE: `scripts/publish-exe.ps1` / `scripts/publish-exe.sh` → `artifacts/exe/win-x64/`
+- MSIX: `scripts/pack-msix.ps1` (unsigned; auto-finds Windows SDK `makeappx`) → `artifacts/msix/OpenClicky.msix`
+- CI uploads both as `openclicky-win-x64` and `openclicky-msix`
 
 See `docs/packaging.md` and `docs/agent-safety.md`.
