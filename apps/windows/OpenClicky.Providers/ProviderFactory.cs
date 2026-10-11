@@ -67,6 +67,13 @@ public static class ProviderFactory
 
     public static IAgentPlanner? CreateAgentPlanner(AppSettings settings, ISecretStore? secrets = null)
     {
+        // Opt-in offline smoke: fixed Notepad + type plan, no network / no API keys.
+        // Confirmations still use WinFormsAgentConfirm in the tray path.
+        if (OfflineAgentPlanner.IsEnvEnabled())
+        {
+            return new OfflineAgentPlanner();
+        }
+
         if (settings.AuthProvider == AuthProvider.ChatGPT)
         {
             if (secrets is null || !IsChatGptSignedIn(secrets))

@@ -70,6 +70,27 @@ dotnet run --project apps/windows/OpenClicky.App -c Debug
 
 Hold **Win+Alt+Space**, release once. Pass: `%AppData%\OpenClicky\debug.log` contains `point=(x,y)` and a canned reply mentioning offline smoke. Unset the env var (or launch without it) to use real providers again.
 
+### Offline Agent smoke (no API keys)
+
+Opt-in fixture for proving the confirm-gated Agent UI + SendInput path without OpenRouter or ChatGPT. Set **before** launching the tray (works with or without `OPENCLICKY_OFFLINE_TALK`):
+
+```powershell
+$env:OPENCLICKY_OFFLINE_AGENT = '1'   # or 'true'
+# Optional — Talk→POINT also offline (independent flag):
+# $env:OPENCLICKY_OFFLINE_TALK = '1'
+# Tray → Settings → debug transcript, e.g. "openclicky agent type hello in notepad", Save
+Get-Process OpenClicky.App -ErrorAction SilentlyContinue | Stop-Process -Force
+dotnet run --project apps/windows/OpenClicky.App -c Debug
+```
+
+Hold **Win+Alt+Space**, release once (debug transcript must start with an agent intent prefix such as `openclicky agent …`).  
+**Pass:** Yes/No confirm dialog appears for the first mutating step (`hotkey: keys=win+r` — open Run). Do **not** auto-confirm; click Yes/No yourself. Unset the env var to use real planners again.
+
+| Env var | Effect |
+|---------|--------|
+| `OPENCLICKY_OFFLINE_TALK=1` | Canned Talk reply with `[POINT:…]` (no keys) |
+| `OPENCLICKY_OFFLINE_AGENT=1` | Fixed Agent plan: Run → notepad → type `hello` (no keys; human Yes/No still required) |
+
 ## Windows 11 smoke checklist (human)
 
 CI validates build/tests/capture on `windows-latest` — it does **not** exercise the tray, PTT hotkey, overlay, STT, or Agent confirms. Run this on a real interactive Windows 11 desktop:
@@ -81,8 +102,8 @@ CI validates build/tests/capture on `windows-latest` — it does **not** exercis
 2. **Auth**  
    Tray → Settings → either paste **OpenRouter API key** → Save, **or** click **Continue with ChatGPT** (browser OAuth) and select the ChatGPT provider radio.  
    Optional: set debug transcript `what is on my screen?` to skip mic (mic STT still needs an OpenRouter key).  
-   **Offline shortcut:** `$env:OPENCLICKY_OFFLINE_TALK='1'` before launch + debug transcript (see [Offline Talk smoke](#offline-talk-smoke-no-api-keys)) — no keys required for Talk→POINT.  
-   **Pass:** log shows `openrouter_key=set` and/or `chatgpt=you@…` (or offline canned reply); secrets are **not** in `settings.json` (Credential Manager only).
+   **Offline shortcut:** `$env:OPENCLICKY_OFFLINE_TALK='1'` and/or `$env:OPENCLICKY_OFFLINE_AGENT='1'` before launch + debug transcript (see [Offline Talk](#offline-talk-smoke-no-api-keys) / [Offline Agent](#offline-agent-smoke-no-api-keys)) — no keys required for those paths.  
+   **Pass:** log shows `openrouter_key=set` and/or `chatgpt=you@…` (or offline canned reply / offline agent confirm); secrets are **not** in `settings.json` (Credential Manager only).
 
 3. **Talk**  
    Open Notepad with some text visible. Hold **Win+Alt+Space**, speak (or use debug transcript), release.  
