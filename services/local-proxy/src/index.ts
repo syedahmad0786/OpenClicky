@@ -7,8 +7,9 @@ import { URL } from "node:url";
  *
  * Routes:
  *   GET  /health
- *   POST /v1/chat/completions  → OpenRouter (or OPENCLICKY_UPSTREAM)
- *   POST /chat                 → alias of /v1/chat/completions (Clicky-shaped)
+ *   POST /v1/chat/completions      → OpenRouter chat
+ *   POST /chat                     → alias
+ *   POST /v1/audio/transcriptions  → OpenRouter STT
  */
 
 const port = Number(process.env.PORT ?? 8787);
@@ -25,7 +26,19 @@ function readApiKey(req: http.IncomingMessage): string | undefined {
   return process.env.OPENROUTER_API_KEY ?? process.env.OPENCLICKY_API_KEY;
 }
 
-async function proxyChat(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+async function readBody(req: http.IncomingMessage): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
+}
+
+async function proxyJson(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  upstreamPath: string,
+): Promise<void> {
   const apiKey = readApiKey(req);
   if (!apiKey) {
     res.writeHead(401, { "content-type": "application/json" });
@@ -33,13 +46,8 @@ async function proxyChat(req: http.IncomingMessage, res: http.ServerResponse): P
     return;
   }
 
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  const body = Buffer.concat(chunks);
-
-  const upstream = await fetch(`${upstreamBase}/chat/completions`, {
+  const body = await readBody(req);
+  const upstream = await fetch(`${upstreamBase}${upstreamPath}`, {
     method: "POST",
     headers: {
       authorization: `Bearer ${apiKey}`,
@@ -53,11 +61,6 @@ async function proxyChat(req: http.IncomingMessage, res: http.ServerResponse): P
   const responseHeaders: Record<string, string> = {
     "content-type": upstream.headers.get("content-type") ?? "application/json",
   };
-  const cacheControl = upstream.headers.get("cache-control");
-  if (cacheControl) {
-    responseHeaders["cache-control"] = cacheControl;
-  }
-
   res.writeHead(upstream.status, responseHeaders);
   if (!upstream.body) {
     res.end();
@@ -76,6 +79,44 @@ async function proxyChat(req: http.IncomingMessage, res: http.ServerResponse): P
   } finally {
     res.end();
   }
+}
+
+async function proxyMultipart(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  upstreamPath: string,
+): Promise<void> {
+  const apiKey = readApiKey(req);
+  if (!apiKey) {
+    res.writeHead(401, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "Missing API key (Authorization Bearer or OPENROUTER_API_KEY)" }));
+    return;
+  }
+
+  const body = await readBody(req);
+  const contentType = req.headers["content-type"];
+  if (!contentType) {
+    res.writeHead(400, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "Missing content-type" }));
+    return;
+  }
+
+  const upstream = await fetch(`${upstreamBase}${upstreamPath}`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      "content-type": contentType,
+      "http-referer": "https://github.com/openclicky/OpenClicky",
+      "x-title": "OpenClicky",
+    },
+    body,
+  });
+
+  res.writeHead(upstream.status, {
+    "content-type": upstream.headers.get("content-type") ?? "application/json",
+  });
+  const buf = Buffer.from(await upstream.arrayBuffer());
+  res.end(buf);
 }
 
 const server = http.createServer((req, res) => {
@@ -99,7 +140,12 @@ const server = http.createServer((req, res) => {
         req.method === "POST" &&
         (url.pathname === "/v1/chat/completions" || url.pathname === "/chat")
       ) {
-        await proxyChat(req, res);
+        await proxyJson(req, res, "/chat/completions");
+        return;
+      }
+
+      if (req.method === "POST" && url.pathname === "/v1/audio/transcriptions") {
+        await proxyMultipart(req, res, "/audio/transcriptions");
         return;
       }
 

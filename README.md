@@ -6,53 +6,43 @@ Inspired by the public UX of [HeyClicky](https://www.heyclicky.com/) and the MIT
 
 ## Status
 
-**Phase A spike** — tray app, remappable push-to-talk (default `Win+Alt+Space`), click-through overlay, in-memory screen capture, optional localhost OpenRouter proxy.
+**Phase B (Talk)** in progress on top of the Phase A shell.
 
-| Layer | Notes |
-|-------|--------|
-| Client | .NET 8 Windows (`OpenClicky.sln`) — **build/run on Windows 11 x64** |
-| Core tests | `dotnet test` works on any OS with .NET 8 |
-| Local proxy | Node 20+ — `services/local-proxy` |
+| Capability | Status |
+|------------|--------|
+| Tray + remappable PTT (`Win+Alt+Space`) | Done |
+| Click-through overlay buddy | Done |
+| In-memory screen capture | Done |
+| OpenRouter vision Talk + POINT parse | Done (needs API key) |
+| STT via OpenRouter Whisper-compatible API | Done (needs API key) |
+| Local Windows SAPI TTS | Done (no key) |
+| Optional localhost proxy | Done |
+| Agent computer-use | Phase D |
 
 ## Quick start (Windows 11)
 
 ```powershell
-# Prerequisites: .NET 8 SDK
 dotnet build OpenClicky.sln -c Debug
 dotnet run --project apps/windows/OpenClicky.App -c Debug
 ```
 
-1. Find **OpenClicky** in the system tray.  
-2. Hold **Win+Alt+Space** — buddy overlay appears.  
-3. Release — overlay fades; Settings → Refresh log should show `capture_bytes=… magic=FFD8`.  
-4. Remap the hotkey under **Settings…**.
+1. Tray icon → **Settings…** → paste **OpenRouter API key** → Save.  
+2. Optional: set a **debug transcript** (e.g. `what is on my screen?`) to skip mic/STT while testing.  
+3. Hold **Win+Alt+Space**, speak (or rely on debug transcript), release.  
+4. OpenClicky captures the screen, calls OpenRouter, speaks the reply locally, and may point the buddy.
 
-Optional proxy (any OS):
+Optional proxy:
 
 ```bash
-cd services/local-proxy
-npm install
-export OPENROUTER_API_KEY=sk-or-...   # only needed for /chat
-npm start
-curl http://127.0.0.1:8787/health
+cd services/local-proxy && npm install && npm start
+# Enable "Use local proxy" in Settings (http://127.0.0.1:8787)
 ```
 
-## Repo layout
+## Privacy
 
-See the project plan in the OpenClicky Agent Store (`docs/windows-heyclicky-plan.md`) for product decisions. In-repo:
-
-```
-apps/windows/          # .NET solution projects
-services/local-proxy/  # OpenRouter-first localhost sidecar
-tests/                 # Core unit tests
-docs/                  # Contributor docs
-```
-
-## Privacy (v1)
-
-- **Client-only BYO keys** — no OpenClicky cloud.  
-- Screenshots stay in memory for the request (Phase A never writes them).  
-- Optional local proxy keeps keys off the UI process if you prefer.
+- Client-only BYO keys — no OpenClicky cloud.  
+- Settings live in `%AppData%\OpenClicky\settings.json`.  
+- Screenshots stay in memory for the request.
 
 ## License
 

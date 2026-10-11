@@ -16,7 +16,6 @@ public sealed class BuddyOverlayController : IOverlayController
     public BuddyOverlayController()
     {
         _form = new OverlayForm();
-        // Force handle creation so BeginInvoke works from the keyboard-hook thread.
         _ = _form.Handle;
     }
 
@@ -24,6 +23,8 @@ public sealed class BuddyOverlayController : IOverlayController
     {
         _form.BeginInvoke(() =>
         {
+            _form.BuddyText = null;
+            _form.PointTarget = null;
             _form.Mode = OverlayMode.Listening;
             _form.ShowInactive();
         });
@@ -33,7 +34,29 @@ public sealed class BuddyOverlayController : IOverlayController
     {
         _form.BeginInvoke(() =>
         {
+            _form.BuddyText = null;
             _form.Mode = OverlayMode.Processing;
+            _form.ShowInactive();
+        });
+    }
+
+    public void ShowResponding(string spokenText)
+    {
+        _form.BeginInvoke(() =>
+        {
+            _form.BuddyText = spokenText;
+            _form.Mode = OverlayMode.Responding;
+            _form.ShowInactive();
+        });
+    }
+
+    public void PointAt(int virtualX, int virtualY, string? label)
+    {
+        _form.BeginInvoke(() =>
+        {
+            _form.PointTarget = new Point(virtualX, virtualY);
+            _form.PointLabel = label;
+            _form.Mode = OverlayMode.Pointing;
             _form.ShowInactive();
         });
     }
@@ -43,6 +66,8 @@ public sealed class BuddyOverlayController : IOverlayController
         _form.BeginInvoke(() =>
         {
             _form.Mode = OverlayMode.Hidden;
+            _form.BuddyText = null;
+            _form.PointTarget = null;
             _form.Hide();
         });
     }
@@ -70,6 +95,8 @@ public sealed class BuddyOverlayController : IOverlayController
         Hidden,
         Listening,
         Processing,
+        Responding,
+        Pointing,
     }
 
     private sealed class OverlayForm : Form
@@ -107,6 +134,10 @@ public sealed class BuddyOverlayController : IOverlayController
                 Invalidate();
             }
         }
+
+        public string? BuddyText { get; set; }
+        public Point? PointTarget { get; set; }
+        public string? PointLabel { get; set; }
 
         protected override bool ShowWithoutActivation => true;
 
@@ -153,32 +184,64 @@ public sealed class BuddyOverlayController : IOverlayController
             var g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
 
-            // Buddy near primary cursor, offset slightly.
-            var cursor = Cursor.Position;
-            var origin = PointToClient(cursor);
-            var x = origin.X + 28;
-            var y = origin.Y + 20;
-            var size = 22 + (float)Math.Sin(_pulse) * 3f;
+            PointF anchor;
+            if (_mode is OverlayMode.Pointing && PointTarget is { } target)
+            {
+                var local = PointToClient(target);
+                anchor = new PointF(local.X, local.Y);
+            }
+            else
+            {
+                var cursor = Cursor.Position;
+                var origin = PointToClient(cursor);
+                anchor = new PointF(origin.X + 28, origin.Y + 20);
+            }
 
+            var size = 22 + (float)Math.Sin(_pulse) * 3f;
             using var brush = new SolidBrush(Color.FromArgb(220, 56, 132, 255));
             using var pen = new Pen(Color.FromArgb(255, 180, 220, 255), 2f);
             var points = new[]
             {
-                new PointF(x, y),
-                new PointF(x + size, y + size * 0.45f),
-                new PointF(x + size * 0.2f, y + size),
+                new PointF(anchor.X, anchor.Y),
+                new PointF(anchor.X + size, anchor.Y + size * 0.45f),
+                new PointF(anchor.X + size * 0.2f, anchor.Y + size),
             };
             g.FillPolygon(brush, points);
             g.DrawPolygon(pen, points);
 
             if (_mode == OverlayMode.Listening)
             {
-                DrawWaveform(g, x + size + 10, y, brush);
+                DrawWaveform(g, anchor.X + size + 10, anchor.Y, brush);
             }
             else if (_mode == OverlayMode.Processing)
             {
-                DrawSpinner(g, x + size + 16, y + 6, pen);
+                DrawSpinner(g, anchor.X + size + 16, anchor.Y + 6, pen);
             }
+            else if (_mode is OverlayMode.Responding or OverlayMode.Pointing)
+            {
+                var text = BuddyText;
+                if (_mode == OverlayMode.Pointing && !string.IsNullOrEmpty(PointLabel))
+                {
+                    text = string.IsNullOrEmpty(text) ? PointLabel : $"{PointLabel} — {text}";
+                }
+
+                if (!string.IsNullOrEmpty(text))
+                {
+                    DrawBubble(g, anchor.X + size + 8, anchor.Y - 8, text!);
+                }
+            }
+        }
+
+        private static void DrawBubble(Graphics g, float x, float y, string text)
+        {
+            var clipped = text.Length > 180 ? text[..177] + "…" : text;
+            using var font = new Font("Segoe UI", 10f, FontStyle.Regular);
+            var size = g.MeasureString(clipped, font, 320);
+            var rect = new RectangleF(x, y, size.Width + 16, size.Height + 12);
+            using var bg = new SolidBrush(Color.FromArgb(210, 20, 24, 32));
+            using var fg = new SolidBrush(Color.FromArgb(240, 240, 245));
+            g.FillRoundedRectangle(bg, rect, 8);
+            g.DrawString(clipped, font, fg, new RectangleF(rect.X + 8, rect.Y + 6, size.Width, size.Height));
         }
 
         private void DrawWaveform(Graphics g, float x, float y, Brush brush)
@@ -216,5 +279,20 @@ public sealed class BuddyOverlayController : IOverlayController
 
         [DllImport("user32.dll", SetLastError = true)]
         public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);
+    }
+}
+
+internal static class GraphicsExtensions
+{
+    public static void FillRoundedRectangle(this Graphics g, Brush brush, RectangleF rect, float radius)
+    {
+        using var path = new GraphicsPath();
+        var d = radius * 2;
+        path.AddArc(rect.X, rect.Y, d, d, 180, 90);
+        path.AddArc(rect.Right - d, rect.Y, d, d, 270, 90);
+        path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90);
+        path.AddArc(rect.X, rect.Bottom - d, d, d, 90, 90);
+        path.CloseFigure();
+        g.FillPath(brush, path);
     }
 }

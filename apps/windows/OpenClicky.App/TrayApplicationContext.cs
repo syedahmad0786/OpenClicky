@@ -2,31 +2,47 @@ using OpenClicky.Capture;
 using OpenClicky.Core;
 using OpenClicky.Input;
 using OpenClicky.Overlay;
+using OpenClicky.Providers;
 
 namespace OpenClicky.App;
 
 internal sealed class TrayApplicationContext : ApplicationContext
 {
     private readonly NotifyIcon _tray;
-    private readonly AppSettings _settings = new();
+    private AppSettings _settings;
     private readonly PushToTalkHotkeyMonitor _hotkey;
     private readonly BuddyOverlayController _overlay;
-    private readonly SpikeOrchestrator _spike;
+    private readonly TalkOrchestrator _talk;
     private readonly SettingsForm _settingsForm;
+    private readonly IMicrophoneRecorder _mic;
 
     public TrayApplicationContext()
     {
+        _settings = SettingsStore.Load();
         _hotkey = new PushToTalkHotkeyMonitor(_settings.PushToTalk);
         _overlay = new BuddyOverlayController();
         var capture = new WgcScreenCaptureService();
-        _spike = new SpikeOrchestrator(_hotkey, _overlay, capture, Log);
-        _settingsForm = new SettingsForm(_settings, OnHotkeyChanged);
+        _mic = CreateMic();
+        var tts = new LocalSpeechTtsClient();
+
+        _talk = new TalkOrchestrator(
+            _hotkey,
+            _overlay,
+            capture,
+            _mic,
+            () => ProviderFactory.CreateSttClient(_settings),
+            () => ProviderFactory.CreateTalkClient(_settings),
+            tts,
+            () => _settings,
+            Log);
+
+        _settingsForm = new SettingsForm(_settings, OnSettingsApplied);
 
         _tray = new NotifyIcon
         {
             Icon = SystemIcons.Application,
             Visible = true,
-            Text = "OpenClicky (Phase A spike)",
+            Text = "OpenClicky",
         };
 
         var menu = new ContextMenuStrip();
@@ -37,15 +53,32 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _tray.ContextMenuStrip = menu;
         _tray.DoubleClick += (_, _) => ShowSettings();
 
-        _spike.Start();
+        _talk.Start();
         Log($"tray ready — hold {_settings.PushToTalk.DisplayName}");
+        if (string.IsNullOrWhiteSpace(_settings.OpenRouterApiKey))
+        {
+            Log("hint: set OpenRouter API key in Settings for Talk (or use debug transcript override)");
+        }
     }
 
-    private void OnHotkeyChanged(HotkeyChord chord)
+    private static IMicrophoneRecorder CreateMic()
     {
-        _settings.PushToTalk = chord;
-        _hotkey.Chord = chord;
-        Log($"hotkey_changed={chord.DisplayName}");
+        try
+        {
+            return new NAudioMicrophoneRecorder();
+        }
+        catch (Exception ex)
+        {
+            Log($"mic_fallback null ({ex.Message})");
+            return new NullMicrophoneRecorder();
+        }
+    }
+
+    private void OnSettingsApplied()
+    {
+        // SettingsForm mutates the shared _settings instance and persists it.
+        _hotkey.Chord = _settings.PushToTalk;
+        Log($"settings_applied hotkey={_settings.PushToTalk.DisplayName} proxy={_settings.UseLocalProxy} key={(string.IsNullOrEmpty(_settings.OpenRouterApiKey) ? "missing" : "set")}");
     }
 
     private void ShowSettings()
@@ -89,7 +122,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     protected override void ExitThreadCore()
     {
-        _spike.Dispose();
+        _talk.Dispose();
         _tray.Visible = false;
         _tray.Dispose();
         _settingsForm.Dispose();
