@@ -6,9 +6,14 @@ public static class ProviderFactory
 {
     public static string ResolveBaseUrl(AppSettings settings)
     {
-        if (settings.UseLocalProxy && !string.IsNullOrWhiteSpace(settings.LocalProxyBaseUrl))
+        if (settings.UseLocalProxy)
         {
-            var proxy = settings.LocalProxyBaseUrl.Trim().TrimEnd('/');
+            var address = settings.LocalProxyBaseUrl?.Trim();
+            if (!Uri.TryCreate(address, UriKind.Absolute, out var uri)
+                || !uri.IsLoopback || uri.Scheme is not ("http" or "https")
+                || uri.UserInfo.Length != 0 || uri.Query.Length != 0 || uri.Fragment.Length != 0)
+                throw new InvalidOperationException("The local proxy must use a localhost or loopback HTTP address, without credentials, query, or fragment.");
+            var proxy = address!.TrimEnd('/');
             // Local proxy exposes OpenAI-compatible paths at root; append /v1 if missing.
             return proxy.EndsWith("/v1", StringComparison.OrdinalIgnoreCase) ? proxy : $"{proxy}/v1";
         }

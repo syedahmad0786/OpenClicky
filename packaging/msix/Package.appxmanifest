@@ -13,7 +13,7 @@
   <Identity
     Name="OpenClicky.OpenClicky"
     Publisher="CN=OpenClicky"
-    Version="0.1.0.0" />
+    Version="0.2.0.0" />
   <Properties>
     <DisplayName>OpenClicky</DisplayName>
     <PublisherDisplayName>OpenClicky</PublisherDisplayName>

@@ -1,8 +1,6 @@
 namespace OpenClicky.Core;
 
-/// <summary>
-/// Phase B Talk path: PTT → mic → STT → screen capture → vision LLM → POINT → TTS.
-/// </summary>
+/// <summary>One cancellable voice or text turn at a time, sharing the same screen-aware pipeline.</summary>
 public sealed class TalkOrchestrator : IDisposable
 {
     private readonly IPushToTalkMonitor _hotkey;
@@ -16,20 +14,15 @@ public sealed class TalkOrchestrator : IDisposable
     private readonly Func<string, CancellationToken, Task>? _agentRunner;
     private readonly Action<string> _log;
     private readonly List<(string user, string assistant)> _history = new();
+    private readonly SemaphoreSlim _turnGate = new(1, 1);
     private CancellationTokenSource? _turnCts;
-    private CompanionVoiceState _state = CompanionVoiceState.Idle;
+    private CompanionVoiceState _state;
+    private bool _disposed;
 
-    public TalkOrchestrator(
-        IPushToTalkMonitor hotkey,
-        IOverlayController overlay,
-        IScreenCaptureService capture,
-        IMicrophoneRecorder mic,
-        Func<ISttClient?> sttFactory,
-        Func<ITalkClient?> talkFactory,
-        ITtsClient tts,
-        Func<AppSettings> settings,
-        Func<string, CancellationToken, Task>? agentRunner = null,
-        Action<string>? log = null)
+    public TalkOrchestrator(IPushToTalkMonitor hotkey, IOverlayController overlay,
+        IScreenCaptureService capture, IMicrophoneRecorder mic, Func<ISttClient?> sttFactory,
+        Func<ITalkClient?> talkFactory, ITtsClient tts, Func<AppSettings> settings,
+        Func<string, CancellationToken, Task>? agentRunner = null, Action<string>? log = null)
     {
         _hotkey = hotkey;
         _overlay = overlay;
@@ -44,274 +37,216 @@ public sealed class TalkOrchestrator : IDisposable
     }
 
     public CompanionVoiceState State => _state;
+    public event Action<CompanionVoiceState>? StateChanged;
+    public event Action<string, string>? MessageReceived;
 
     public void Start()
     {
-        LoadPersistedHistory();
+        if (_settings().PersistConversationHistory)
+        {
+            _history.AddRange(ConversationHistoryStore.Load());
+            foreach (var (user, assistant) in _history)
+            {
+                MessageReceived?.Invoke("You", user);
+                MessageReceived?.Invoke("OpenClicky", assistant);
+            }
+        }
         _hotkey.Pressed += OnPressed;
         _hotkey.Released += OnReleased;
-        try
-        {
-            _hotkey.Start();
-            _log($"openclicky talk ready — hold {_hotkey.Chord.DisplayName}");
-        }
-        catch (Exception ex)
-        {
-            _log($"hotkey_start_error={ex.Message} — set a different chord in Settings or relaunch as a normal user session");
-        }
+        try { _hotkey.Start(); }
+        catch (Exception ex) { ReportAssistantMessage($"Voice shortcut unavailable: {ex.Message}. You can still type here."); }
     }
 
     public void ClearHistory()
     {
-        _history.Clear();
-        try
-        {
-            ConversationHistoryStore.Clear();
-            _log("history_cleared");
-        }
-        catch (Exception ex)
-        {
-            _log($"history_clear_error={ex.Message}");
-        }
+        Cancel();
+        try { lock (_history) { _history.Clear(); ConversationHistoryStore.Clear(); } }
+        catch (Exception ex) { ReportAssistantMessage($"Could not clear saved history: {ex.Message}"); }
     }
 
-    private void LoadPersistedHistory()
-    {
-        var settings = _settings();
-        if (!settings.PersistConversationHistory)
-        {
-            return;
-        }
+    public void ReportAssistantMessage(string text) => MessageReceived?.Invoke("OpenClicky", text);
 
-        try
-        {
-            var loaded = ConversationHistoryStore.Load();
-            _history.Clear();
-            _history.AddRange(loaded);
-            if (_history.Count > 0)
-            {
-                _log($"history_loaded turns={_history.Count}");
-            }
-        }
-        catch (Exception ex)
-        {
-            _log($"history_load_error={ex.Message}");
-        }
+    private void SetState(CompanionVoiceState state)
+    {
+        _state = state;
+        StateChanged?.Invoke(state);
     }
 
-    private void PersistHistoryIfEnabled()
+    public void Cancel()
     {
-        var settings = _settings();
-        if (!settings.PersistConversationHistory)
-        {
-            return;
-        }
-
-        try
-        {
-            ConversationHistoryStore.Save(_history);
-        }
-        catch (Exception ex)
-        {
-            _log($"history_save_error={ex.Message}");
-        }
-    }
-
-    private void OnPressed(object? sender, EventArgs e)
-    {
-        _turnCts?.Cancel();
+        var wasListening = _state == CompanionVoiceState.Listening;
+        var turn = Interlocked.Exchange(ref _turnCts, null);
+        try { turn?.Cancel(); }
+        catch (ObjectDisposedException) { }
+        if (wasListening) turn?.Dispose();
         _tts.Stop();
-        _state = CompanionVoiceState.Listening;
-        _overlay.ShowListening();
+        if (_mic.IsRecording)
+        {
+            try { _mic.StopToWav(); }
+            catch (Exception ex) { _log($"mic_stop_error={ex.GetType().Name}"); }
+        }
+        SetState(CompanionVoiceState.Idle);
+        _overlay.Hide();
+    }
+
+    public void BeginListening()
+    {
+        if (_disposed || _state == CompanionVoiceState.Listening) return;
+        Cancel();
+        _turnCts = new CancellationTokenSource();
         try
         {
             _mic.Start();
+            SetState(CompanionVoiceState.Listening);
+            _overlay.ShowListening();
         }
         catch (Exception ex)
         {
-            _log($"mic_start_error={ex.Message}");
+            Cancel();
+            ReportAssistantMessage($"Could not start your microphone: {ex.Message}. Type your request instead.");
         }
-
-        _log("ptt_pressed → listening");
     }
 
-    private async void OnReleased(object? sender, EventArgs e)
+    public async Task EndListeningAsync()
     {
-        _state = CompanionVoiceState.Processing;
-        _overlay.ShowProcessing();
-        _log("ptt_released → processing");
-
-        byte[] wav = Array.Empty<byte>();
-        try
-        {
-            wav = _mic.StopToWav();
-        }
+        if (_state != CompanionVoiceState.Listening || _turnCts is not { } turn) return;
+        byte[] wav;
+        try { wav = _mic.StopToWav(); }
         catch (Exception ex)
         {
-            _log($"mic_stop_error={ex.Message}");
+            Cancel();
+            ReportAssistantMessage($"Could not read your microphone: {ex.Message}");
+            return;
         }
+        await RunTurnAsync(null, wav, turn).ConfigureAwait(false);
+    }
 
-        _turnCts?.Cancel();
-        _turnCts = new CancellationTokenSource();
-        var token = _turnCts.Token;
-        var settings = _settings();
+    public Task SubmitTextAsync(string text, bool remember = true)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (string.IsNullOrWhiteSpace(text)) return Task.CompletedTask;
+        Cancel();
+        var turn = _turnCts = new CancellationTokenSource();
+        return RunTurnAsync(text.Trim(), Array.Empty<byte>(), turn, remember);
+    }
 
+    private void OnPressed(object? sender, EventArgs e) => BeginListening();
+    private async void OnReleased(object? sender, EventArgs e) => await EndListeningAsync();
+
+    private async Task RunTurnAsync(string? transcript, byte[] wav, CancellationTokenSource turn, bool remember = true)
+    {
+        var token = turn.Token;
+        var entered = false;
         try
         {
-            var transcript = settings.DebugTranscriptOverride?.Trim();
-            if (string.IsNullOrEmpty(transcript))
+            await _turnGate.WaitAsync(token).ConfigureAwait(false);
+            entered = true;
+            token.ThrowIfCancellationRequested();
+            SetState(CompanionVoiceState.Processing);
+            _overlay.ShowProcessing();
+            var settings = _settings();
+            if (transcript is null)
             {
-                var stt = _sttFactory();
-                if (stt is null)
+                transcript = settings.DebugTranscriptOverride?.Trim();
+                if (string.IsNullOrWhiteSpace(transcript))
                 {
-                    _log("stt_unavailable — need OpenRouter key for mic STT, or DebugTranscriptOverride");
-                    _overlay.ShowResponding(
-                        "for microphone transcription, add an openrouter api key in settings, or set a debug transcript. chatgpt sign-in covers talk and agent replies.");
-                    await Task.Delay(2500, token).ConfigureAwait(false);
-                    return;
+                    if (wav.Length <= 44)
+                    {
+                        ReportAssistantMessage("I didn't catch any audio. Hold the shortcut while you speak, or type here.");
+                        return;
+                    }
+                    var stt = _sttFactory();
+                    if (stt is null)
+                    {
+                        ReportAssistantMessage("Choose Windows speech or add an OpenRouter key in Settings → Voice. You can also type here.");
+                        return;
+                    }
+                    transcript = (await stt.TranscribeAsync(wav, token).ConfigureAwait(false)).Trim();
                 }
-
-                if (wav.Length < 44)
-                {
-                    _log("stt_skipped empty_audio");
-                    _overlay.ShowResponding("i didn't catch any audio. hold the hotkey and speak, then release.");
-                    await Task.Delay(2500, token).ConfigureAwait(false);
-                    return;
-                }
-
-                transcript = (await stt.TranscribeAsync(wav, token).ConfigureAwait(false)).Trim();
             }
-
-            _log($"transcript={transcript}");
+            token.ThrowIfCancellationRequested();
             if (string.IsNullOrWhiteSpace(transcript))
             {
-                _overlay.ShowResponding("i couldn't understand that. try again?");
-                await Task.Delay(2000, token).ConfigureAwait(false);
+                ReportAssistantMessage("I couldn't understand that. Please try again or type your request.");
                 return;
             }
-
+            MessageReceived?.Invoke("You", transcript);
+            _log($"request_chars={transcript.Length}");
             if (AgentIntent.TryExtract(transcript, out var agentTask))
             {
-                _log($"agent_intent task={agentTask}");
-                if (string.IsNullOrWhiteSpace(agentTask))
-                {
-                    const string needTask =
-                        "agent mode is ready, but i need a task. try saying openclicky agent, then what you want done.";
-                    _state = CompanionVoiceState.Responding;
-                    _overlay.ShowResponding(needTask);
-                    await _tts.SpeakAsync(needTask, token).ConfigureAwait(false);
-                    return;
-                }
-
-                if (_agentRunner is null)
-                {
-                    var spokenAgent =
-                        $"agent mode heard you, but the agent runner is not wired yet. task was: {agentTask}";
-                    _state = CompanionVoiceState.Responding;
-                    _overlay.ShowResponding(spokenAgent);
-                    await _tts.SpeakAsync(spokenAgent, token).ConfigureAwait(false);
-                    return;
-                }
-
-                _state = CompanionVoiceState.Processing;
-                await _agentRunner(agentTask, token).ConfigureAwait(false);
+                if (string.IsNullOrWhiteSpace(agentTask)) ReportAssistantMessage("Tell me what you'd like done in Agent mode.");
+                else if (_agentRunner is null) ReportAssistantMessage("Agent mode is unavailable in this build.");
+                else await _agentRunner(agentTask, token).ConfigureAwait(false);
                 return;
             }
 
             var talk = _talkFactory();
             if (talk is null)
             {
-                _log("talk_unavailable — missing provider auth");
-                _overlay.ShowResponding(
-                    "add an openrouter api key or continue with chatgpt in settings to enable talk.");
-                await Task.Delay(2500, token).ConfigureAwait(false);
+                ReportAssistantMessage("Connect OpenRouter or ChatGPT in Settings to ask about your screen. Try the offline demo first if you'd like.");
                 return;
             }
-
-            // Hide buddy so capture does not include the overlay triangle/bubble.
             _overlay.Hide();
-            var screens = await _capture.CaptureAllMonitorsJpegAsync(token).ConfigureAwait(false);
+            var screens = await Task.Run(() => _capture.CaptureAllMonitorsJpegAsync(token), token).ConfigureAwait(false);
             _overlay.ShowProcessing();
-            var primary = screens.FirstOrDefault(c => c.IsCursorMonitor) ?? screens.FirstOrDefault();
-            if (primary is not null)
-            {
-                _log($"capture_bytes={primary.JpegBytes.Length} magic={(primary.LooksLikeJpeg ? "FFD8" : "????")}");
-            }
-
-            var history = _history
-                .SelectMany(h => new[] { ("user", h.user), ("assistant", h.assistant) })
-                .ToList();
-
-            var raw = await talk.CompleteVisionTalkAsync(
-                CompanionPrompts.TalkSystemPrompt,
-                history,
-                transcript,
-                screens,
-                settings.ResolveVisionModel(),
-                token).ConfigureAwait(false);
-
+            List<(string, string)> history;
+            lock (_history) history = _history.SelectMany(h => new[] { ("user", h.user), ("assistant", h.assistant) }).ToList();
+            var raw = await talk.CompleteVisionTalkAsync(CompanionPrompts.TalkSystemPrompt, history,
+                transcript, screens, settings.ResolveVisionModel(), token).ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
             var parsed = PointParser.Parse(raw);
             var spoken = parsed.SpokenText;
-            _log($"reply={spoken}");
-
-            _history.Add((transcript, spoken));
-            if (_history.Count > 10)
+            ReportAssistantMessage(spoken);
+            lock (_history)
             {
-                _history.RemoveAt(0);
+                token.ThrowIfCancellationRequested();
+                if (remember) _history.Add((transcript, spoken));
+                if (_history.Count > 10) _history.RemoveAt(0);
+                if (remember && settings.PersistConversationHistory)
+                {
+                    try { ConversationHistoryStore.Save(_history); }
+                    catch (Exception ex) { _log($"history_save_error={ex.GetType().Name}"); }
+                }
             }
-
-            PersistHistoryIfEnabled();
-
             var mapped = CoordinateMapper.ToVirtualScreen(parsed, screens);
             if (mapped is { } point)
             {
-                // Stay in Pointing for TTS: set spoken text in the same UI invoke as the
-                // fly-to. A follow-up ShowResponding used to flip Mode=Responding and
-                // re-anchor the buddy to the cursor every paint frame.
-                _state = CompanionVoiceState.Pointing;
+                SetState(CompanionVoiceState.Pointing);
                 _overlay.PointAt(point.virtualX, point.virtualY, parsed.ElementLabel, spoken);
-                _log($"point=({point.virtualX},{point.virtualY}) label={parsed.ElementLabel}");
+                _log($"point=({point.virtualX},{point.virtualY})");
             }
             else
             {
-                _state = CompanionVoiceState.Responding;
+                SetState(CompanionVoiceState.Responding);
                 _overlay.ShowResponding(spoken);
             }
-
-            await _tts.SpeakAsync(spoken, token).ConfigureAwait(false);
+            if (settings.SpeakReplies) await _tts.SpeakAsync(spoken, token).ConfigureAwait(false);
+            else await Task.Delay(1800, token).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
-        {
-            _log("turn cancelled");
-        }
+        catch (OperationCanceledException) { _log("turn_cancelled"); }
         catch (Exception ex)
         {
-            _log($"talk_error={ex.GetType().Name}: {ex.Message}");
-            try
-            {
-                _overlay.ShowResponding("something went wrong talking to the model. check the log in settings.");
-                await _tts.SpeakAsync("something went wrong. check settings.", CancellationToken.None).ConfigureAwait(false);
-            }
-            catch
-            {
-                // ignore secondary failures
-            }
+            _log($"turn_error={ex.GetType().Name}");
+            if (!token.IsCancellationRequested) ReportAssistantMessage($"Couldn't finish this request: {ex.Message}");
         }
         finally
         {
-            _state = CompanionVoiceState.Idle;
-            _overlay.Hide();
-            _log("idle");
+            if (ReferenceEquals(Interlocked.CompareExchange(ref _turnCts, null, turn), turn))
+            {
+                SetState(CompanionVoiceState.Idle);
+                _overlay.Hide();
+            }
+            if (entered) _turnGate.Release();
+            turn.Dispose();
         }
     }
 
     public void Dispose()
     {
+        _disposed = true;
         _hotkey.Pressed -= OnPressed;
         _hotkey.Released -= OnReleased;
-        _turnCts?.Cancel();
-        _turnCts?.Dispose();
-        _tts.Stop();
+        Cancel();
         _hotkey.Dispose();
         _overlay.Dispose();
         _mic.Dispose();

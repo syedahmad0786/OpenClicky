@@ -113,13 +113,15 @@ public sealed class BuddyOverlayController : IOverlayController
 
     public void Hide()
     {
-        _form.BeginInvoke(() =>
+        void HideNow()
         {
             _form.ClearPointing();
             _form.BuddyText = null;
             _form.Mode = OverlayMode.Hidden;
             _form.Hide();
-        });
+        }
+        if (_form.InvokeRequired) _form.Invoke(HideNow);
+        else HideNow();
     }
 
     public void Dispose()
@@ -166,12 +168,13 @@ public sealed class BuddyOverlayController : IOverlayController
             ShowInTaskbar = false;
             TopMost = true;
             StartPosition = FormStartPosition.Manual;
-            BackColor = Color.Magenta;
-            TransparencyKey = Color.Magenta;
+            // Anti-aliased edges blend with the transparency key; black keeps their fringe neutral.
+            BackColor = Color.Black;
+            TransparencyKey = Color.Black;
             DoubleBuffered = true;
             Bounds = SystemInformation.VirtualScreen;
 
-            _timer = new System.Windows.Forms.Timer { Interval = 16 };
+            _timer = new System.Windows.Forms.Timer { Interval = 33 };
             _timer.Tick += (_, _) =>
             {
                 _pulse += 0.12f;
@@ -192,7 +195,6 @@ public sealed class BuddyOverlayController : IOverlayController
                 SyncBuddyTipHwnd();
                 Invalidate();
             };
-            _timer.Start();
         }
 
         public IntPtr BuddyTipHandle =>
@@ -204,6 +206,7 @@ public sealed class BuddyOverlayController : IOverlayController
             set
             {
                 _mode = value;
+                if (value == OverlayMode.Hidden) _timer.Stop();
                 Invalidate();
             }
         }
@@ -291,8 +294,8 @@ public sealed class BuddyOverlayController : IOverlayController
             var cursor = PointToClient(Cursor.Position);
             _flyFrom = _mode == OverlayMode.Pointing ? _buddyAnchor : new PointF(cursor.X + 28, cursor.Y + 20);
             _flyTo = new PointF(localTarget.X, localTarget.Y);
-            _flyProgress = 0f;
-            _buddyAnchor = _flyFrom.Value;
+            _flyProgress = SystemInformation.UIEffectsEnabled ? 0f : 1f;
+            _buddyAnchor = _flyProgress == 1f ? _flyTo.Value : _flyFrom.Value;
             PointTarget = localTarget;
             PointLabel = label;
             // Keep any spoken bubble text set by a subsequent ShowResponding invoke.
@@ -318,6 +321,7 @@ public sealed class BuddyOverlayController : IOverlayController
         public void ShowInactive()
         {
             Bounds = SystemInformation.VirtualScreen;
+            _timer.Start();
             if (!Visible)
             {
                 Show();
@@ -358,8 +362,8 @@ public sealed class BuddyOverlayController : IOverlayController
             }
 
             var size = 22 + (float)Math.Sin(_pulse) * 3f;
-            using var brush = new SolidBrush(Color.FromArgb(220, 56, 132, 255));
-            using var pen = new Pen(Color.FromArgb(255, 180, 220, 255), 2f);
+            using var brush = new SolidBrush(Color.FromArgb(208, 230, 187));
+            using var pen = new Pen(Color.FromArgb(37, 102, 76), 2f);
             var points = new[]
             {
                 new PointF(anchor.X, anchor.Y),
@@ -368,6 +372,9 @@ public sealed class BuddyOverlayController : IOverlayController
             };
             g.FillPolygon(brush, points);
             g.DrawPolygon(pen, points);
+            using var eye = new SolidBrush(Color.FromArgb(29, 43, 36));
+            g.FillEllipse(eye, anchor.X + size * .28f, anchor.Y + size * .3f, 3, 3);
+            g.FillEllipse(eye, anchor.X + size * .48f, anchor.Y + size * .4f, 3, 3);
 
             if (_mode == OverlayMode.Listening)
             {
@@ -392,13 +399,16 @@ public sealed class BuddyOverlayController : IOverlayController
             }
         }
 
-        private static void DrawBubble(Graphics g, float x, float y, string text)
+        private void DrawBubble(Graphics g, float x, float y, string text)
         {
             var clipped = text.Length > 180 ? text[..177] + "…" : text;
             using var font = new Font("Segoe UI", 10f, FontStyle.Regular);
             var size = g.MeasureString(clipped, font, 320);
             var rect = new RectangleF(x, y, size.Width + 16, size.Height + 12);
-            using var bg = new SolidBrush(Color.FromArgb(210, 20, 24, 32));
+            var bounds = RectangleToClient(Screen.FromPoint(PointToScreen(new Point((int)x, (int)y))).WorkingArea);
+            rect.X = Math.Clamp(rect.X, bounds.Left, Math.Max(bounds.Left, bounds.Right - rect.Width));
+            rect.Y = Math.Clamp(rect.Y, bounds.Top, Math.Max(bounds.Top, bounds.Bottom - rect.Height));
+            using var bg = new SolidBrush(Color.FromArgb(29, 43, 36));
             using var fg = new SolidBrush(Color.FromArgb(240, 240, 245));
             g.FillRoundedRectangle(bg, rect, 8);
             g.DrawString(clipped, font, fg, new RectangleF(rect.X + 8, rect.Y + 6, size.Width, size.Height));

@@ -58,6 +58,18 @@ public class HotkeyChordTests
         Assert.Equal("Ctrl+Shift+T", chord.DisplayName);
     }
 
+    [Theory]
+    [InlineData(0x1B)]
+    [InlineData(-1)]
+    [InlineData(0xFF)]
+    public void TryValidate_RejectsCancelOrInvalidKey(int key)
+    {
+        var chord = new HotkeyChord(false, false, true, true, key);
+        Assert.False(chord.TryValidate(out var error));
+        Assert.NotNull(error);
+        Assert.Equal(HotkeyChord.Default, HotkeyChord.NormalizeOrDefault(chord));
+    }
+
     [Fact]
     public void NormalizeOrDefault_FallsBackForInvalid()
     {

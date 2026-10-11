@@ -52,6 +52,12 @@ public sealed record HotkeyChord(bool Win, bool Alt, bool Control, bool Shift, i
         && Shift == shiftDown
         && VirtualKey == virtualKey;
 
+    public bool MatchesPressedKeys(IReadOnlySet<int> keys) => keys.Contains(VirtualKey)
+        && Matches(keys.Contains(0x5B) || keys.Contains(0x5C),
+            keys.Contains(0x12) || keys.Contains(0xA4) || keys.Contains(0xA5),
+            keys.Contains(0x11) || keys.Contains(0xA2) || keys.Contains(0xA3),
+            keys.Contains(0x10) || keys.Contains(0xA0) || keys.Contains(0xA1), VirtualKey);
+
     /// <summary>
     /// Validates a remappable PTT binding. Bare keys (no modifiers) and modifier-only
     /// / empty chords are rejected so typing is not stolen and Save cannot persist junk.
@@ -61,6 +67,18 @@ public sealed record HotkeyChord(bool Win, bool Alt, bool Control, bool Shift, i
         if (VirtualKey == 0)
         {
             error = "Hotkey is empty. Click the field and press a shortcut (e.g. Win+Alt+Space).";
+            return false;
+        }
+
+        if (VirtualKey == 0x1B)
+        {
+            error = "Escape is reserved for stopping a task. Choose another shortcut.";
+            return false;
+        }
+
+        if (VirtualKey < 1 || VirtualKey > 0xFE)
+        {
+            error = "Hotkey contains an invalid key. Record the shortcut again.";
             return false;
         }
 

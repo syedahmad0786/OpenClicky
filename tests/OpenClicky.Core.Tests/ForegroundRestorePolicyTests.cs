@@ -13,26 +13,26 @@ public class ForegroundRestorePolicyTests
     }
 
     [Fact]
-    public void ResolveTarget_FallsBackToShellWhenPriorIsOurProcess()
+    public void ResolveTarget_RejectsOurProcess()
     {
         var prior = (nint)0x1000;
         var shell = (nint)0x2000;
-        Assert.Equal(shell, ForegroundRestorePolicy.ResolveTarget(prior, priorIsWindow: true, priorIsCurrentProcess: true, shell));
+        Assert.Equal(0, ForegroundRestorePolicy.ResolveTarget(prior, priorIsWindow: true, priorIsCurrentProcess: true, shell));
     }
 
     [Fact]
-    public void ResolveTarget_FallsBackToShellWhenPriorInvalid()
+    public void ResolveTarget_RejectsInvalidPrior()
     {
         var prior = (nint)0x1000;
         var shell = (nint)0x2000;
-        Assert.Equal(shell, ForegroundRestorePolicy.ResolveTarget(prior, priorIsWindow: false, priorIsCurrentProcess: false, shell));
+        Assert.Equal(0, ForegroundRestorePolicy.ResolveTarget(prior, priorIsWindow: false, priorIsCurrentProcess: false, shell));
     }
 
     [Fact]
-    public void ResolveTarget_UsesPriorWhenShellMissingButPriorValid()
+    public void ResolveTarget_RejectsOurProcessEvenWithoutShell()
     {
         var prior = (nint)0x1000;
-        Assert.Equal(prior, ForegroundRestorePolicy.ResolveTarget(prior, priorIsWindow: true, priorIsCurrentProcess: true, shell: 0));
+        Assert.Equal(0, ForegroundRestorePolicy.ResolveTarget(prior, priorIsWindow: true, priorIsCurrentProcess: true, shell: 0));
     }
 
     [Fact]

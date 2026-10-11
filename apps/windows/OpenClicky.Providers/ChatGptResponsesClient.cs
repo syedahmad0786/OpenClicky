@@ -11,6 +11,7 @@ namespace OpenClicky.Providers;
 /// </summary>
 public sealed class ChatGptResponsesClient
 {
+    private static readonly HttpClient DefaultHttp = new() { Timeout = TimeSpan.FromMinutes(3) };
     private readonly HttpClient _http;
     private readonly Func<CancellationToken, Task<string>> _accessToken;
 
@@ -19,7 +20,7 @@ public sealed class ChatGptResponsesClient
         HttpClient? httpClient = null)
     {
         _accessToken = accessTokenFactory;
-        _http = httpClient ?? new HttpClient { Timeout = TimeSpan.FromMinutes(3) };
+        _http = httpClient ?? DefaultHttp;
     }
 
     public async Task<string> CompleteAsync(

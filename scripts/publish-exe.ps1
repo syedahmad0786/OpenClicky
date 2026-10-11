@@ -30,6 +30,10 @@ if (-not (Test-Path $exe)) {
 
 # Friendly alias for manual installs (MSIX still launches OpenClicky.App.exe).
 Copy-Item -Path $exe -Destination (Join-Path $out "OpenClicky.exe") -Force
+foreach ($notice in @("LICENSE", "THIRD-PARTY-NOTICES.md")) {
+    Copy-Item -LiteralPath (Join-Path $root $notice) -Destination (Join-Path $out $notice) -Force
+}
+Copy-Item -LiteralPath (Join-Path $root "docs/portable-quick-start.md") -Destination (Join-Path $out "README.md") -Force
 
 $sizeMb = [math]::Round((Get-Item $exe).Length / 1MB, 1)
 Write-Host "Published: $exe ($sizeMb MB)"

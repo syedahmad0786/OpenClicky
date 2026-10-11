@@ -9,6 +9,11 @@ internal sealed class SandboxForm : Form
     private readonly TextBox _input;
     private readonly Label _status;
     private int _clicks;
+    private Button _clickMe = null!;
+
+    public Point ButtonCenter => _clickMe.PointToScreen(new Point(_clickMe.Width / 2, _clickMe.Height / 2));
+    public Point InputCenter => _input.PointToScreen(new Point(_input.Width / 2, _input.Height / 2));
+    public bool HasVerifiedResult => _clicks > 0 && _input.Text == "hello";
 
     public SandboxForm()
     {
@@ -55,6 +60,7 @@ internal sealed class SandboxForm : Form
             _status.Text = $"Green button clicked {_clicks} time(s).";
             _status.AccessibleName = _status.Text;
         };
+        _clickMe = clickMe;
         Controls.Add(clickMe);
 
         Controls.Add(new Label { Left = 16, Top = 130, Width = 200, Text = "Type target:" });

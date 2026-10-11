@@ -47,15 +47,19 @@ if (-not $makeappx) {
 Write-Host "Using makeappx: $makeappx"
 
 New-Item -ItemType Directory -Force -Path $staging, $outDir | Out-Null
-Get-ChildItem $staging -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+$resolvedStaging = [IO.Path]::GetFullPath($staging)
+$expectedStaging = [IO.Path]::GetFullPath((Join-Path $root 'artifacts\msix\staging'))
+if ($resolvedStaging -ne $expectedStaging) { throw 'Unexpected package staging directory.' }
+Get-ChildItem -LiteralPath $resolvedStaging -Force | ForEach-Object {
+    if (-not $_.FullName.StartsWith($resolvedStaging + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe staging item.' }
+    Remove-Item -LiteralPath $_.FullName -Recurse -Force
+}
 Copy-Item -Path (Join-Path $payload "*") -Destination $staging -Recurse -Force
 Copy-Item -Path $manifestSrc -Destination (Join-Path $staging "AppxManifest.xml") -Force
 
 New-Item -ItemType Directory -Force -Path (Join-Path $staging "Assets") | Out-Null
-# Placeholder 1x1 PNGs so makeappx accepts the package; replace before Store submission.
-$pngBytes = [Convert]::FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
 foreach ($name in @("StoreLogo.png", "Square150x150Logo.png", "Square44x44Logo.png")) {
-    [IO.File]::WriteAllBytes((Join-Path $staging "Assets\$name"), $pngBytes)
+    Copy-Item -LiteralPath (Join-Path $root "packaging\msix\Assets\$name") -Destination (Join-Path $staging "Assets\$name") -Force
 }
 
 & $makeappx pack /d $staging /p $msix /o

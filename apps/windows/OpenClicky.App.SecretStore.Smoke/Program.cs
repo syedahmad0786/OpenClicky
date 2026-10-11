@@ -1,6 +1,9 @@
 using System.Text;
 using OpenClicky.App;
 using OpenClicky.Core;
+using System.Speech.Synthesis;
+
+if (args.Contains("--speech")) return await CheckSpeechAsync();
 
 // Local smoke: CredWrite for small secrets + DPAPI fallback for OAuth-sized blobs.
 Console.WriteLine("OpenClicky secret-store smoke starting…");
@@ -98,4 +101,37 @@ catch (Exception ex)
 static void Fail(string message)
 {
     throw new InvalidOperationException(message);
+}
+
+static async Task<int> CheckSpeechAsync()
+{
+    try
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        if (LocalSpeechSttClient.InstalledLanguages().Length == 0) Fail("No installed Windows speech language.");
+        using var wav = new MemoryStream();
+        using (var voice = new SpeechSynthesizer())
+        {
+            voice.SetOutputToWaveStream(wav);
+            voice.Speak("Hello there. Please open the window.");
+        }
+        var transcript = await new LocalSpeechSttClient().TranscribeAsync(wav.ToArray(), timeout.Token);
+        if (!transcript.Contains("window", StringComparison.OrdinalIgnoreCase)) Fail("Windows recognition did not recognize the fixture sentence: " + transcript);
+        Console.WriteLine("PASS local Windows recognition from synthesized WAV: " + transcript);
+        var tts = new LocalSpeechTtsClient { Enabled = false };
+        await tts.SpeakAsync("This should remain silent.");
+        tts.Enabled = true;
+        using var cancel = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            await tts.SpeakAsync(string.Join(" ", Enumerable.Repeat("Testing cancellation of a spoken reply.", 30)), cancel.Token).WaitAsync(TimeSpan.FromSeconds(5));
+            Fail("Speech was not cancelled.");
+        }
+        catch (OperationCanceledException) { }
+        if (clock.Elapsed > TimeSpan.FromSeconds(5)) Fail("Speech cancellation took too long.");
+        Console.WriteLine("PASS real Windows TTS cancellation in " + clock.ElapsedMilliseconds + "ms");
+        return 0;
+    }
+    catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
 }

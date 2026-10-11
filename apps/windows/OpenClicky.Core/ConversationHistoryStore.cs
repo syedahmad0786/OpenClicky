@@ -62,7 +62,9 @@ public static class ConversationHistoryStore
             .Select(t => new HistoryTurn { User = t.user, Assistant = t.assistant })
             .ToList();
         var json = JsonSerializer.Serialize(new HistoryFile { Turns = list }, JsonOptions);
-        File.WriteAllText(path, json);
+        var temporary = path + ".tmp";
+        File.WriteAllText(temporary, json);
+        File.Move(temporary, path, overwrite: true);
     }
 
     public static void Clear(string? path = null)

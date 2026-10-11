@@ -7,6 +7,7 @@ namespace OpenClicky.Providers;
 
 public sealed class OpenRouterAgentPlanner : IAgentPlanner
 {
+    private static readonly HttpClient DefaultHttp = new() { Timeout = TimeSpan.FromMinutes(2) };
     private readonly HttpClient _http;
     private readonly string _apiKey;
     private readonly string _baseUrl;
@@ -15,7 +16,7 @@ public sealed class OpenRouterAgentPlanner : IAgentPlanner
     {
         _apiKey = apiKey;
         _baseUrl = (baseUrl ?? "https://openrouter.ai/api/v1").TrimEnd('/');
-        _http = httpClient ?? new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
+        _http = httpClient ?? DefaultHttp;
     }
 
     public async Task<AgentPlanStep> NextStepAsync(
@@ -103,7 +104,11 @@ public sealed class OpenRouterAgentPlanner : IAgentPlanner
 
         using var doc = JsonDocument.Parse(trimmed);
         var root = doc.RootElement;
-        var tool = root.TryGetProperty("tool", out var toolEl) ? toolEl.GetString() ?? "done" : "done";
+        if (!root.TryGetProperty("tool", out var toolEl) || toolEl.ValueKind != JsonValueKind.String)
+            throw new FormatException("The agent response did not contain a tool.");
+        var tool = (toolEl.GetString() ?? "").Trim().ToLowerInvariant();
+        if (tool is not ("uia_snapshot" or "screenshot" or "click" or "type_text" or "hotkey" or "scroll" or "wait" or "done"))
+            throw new FormatException("The agent selected an unsupported tool.");
         var rationale = root.TryGetProperty("rationale", out var r) ? r.GetString() ?? string.Empty : string.Empty;
         var args = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (root.TryGetProperty("args", out var argsEl) && argsEl.ValueKind == JsonValueKind.Object)

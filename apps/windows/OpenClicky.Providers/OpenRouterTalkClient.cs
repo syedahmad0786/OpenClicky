@@ -7,6 +7,7 @@ namespace OpenClicky.Providers;
 
 public sealed class OpenRouterTalkClient : ITalkClient
 {
+    private static readonly HttpClient DefaultHttp = new() { Timeout = TimeSpan.FromMinutes(3) };
     private readonly HttpClient _http;
     private readonly string _apiKey;
     private readonly string _baseUrl;
@@ -15,7 +16,7 @@ public sealed class OpenRouterTalkClient : ITalkClient
     {
         _apiKey = apiKey;
         _baseUrl = (baseUrl ?? "https://openrouter.ai/api/v1").TrimEnd('/');
-        _http = httpClient ?? new HttpClient { Timeout = TimeSpan.FromMinutes(3) };
+        _http = httpClient ?? DefaultHttp;
     }
 
     public async Task<string> CompleteVisionTalkAsync(

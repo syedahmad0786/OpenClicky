@@ -1,140 +1,78 @@
 # OpenClicky
 
-Open-source Windows AI buddy — screen-aware voice help, cursor overlay pointing, and (soon) confirmed computer-use agents.
+<img src="assets/openclicky.png" alt="OpenClicky green pointer companion" width="112" />
 
-Inspired by the public UX of [HeyClicky](https://www.heyclicky.com/) and the MIT architecture of [farzaa/clicky](https://github.com/farzaa/clicky). **Clean-room:** we do not reverse-engineer commercial binaries.
+An open-source Windows companion that can explain your screen, point things out, and perform short desktop tasks with your approval. MIT licensed, with your own AI provider account.
 
-## CI
+Inspired by [HeyClicky](https://www.heyclicky.com/) and the public MIT project [farzaa/clicky](https://github.com/farzaa/clicky). OpenClicky has its own branding and Windows implementation. It is an independent project.
 
-GitHub Actions (`.github/workflows/windows-ci.yml`) on `windows-latest`: build solution, run unit tests, capture smoke, **agent↔sandbox smoke** (confirm-gated click/type with test-only auto-confirm), **overlay POINT smoke** (buddy tip HWND at virtual target), publish unsigned win-x64 EXE artifact `openclicky-win-x64` **and** unsigned MSIX artifact `openclicky-msix`. Tray/PTT/Talk/spoken POINT still need the human Win11 checklist below.
+## Try it
 
-## Status
+Windows 11, x64. The portable release includes its runtime; no .NET installation is needed to run it.
 
-**MVP in progress** — Talk + POINT fly-to + confirmed Agent on the Phase A shell.
+1. Extract the published folder and open **OpenClicky.exe**.
+2. Try **Pointing demo** or **Test desktop actions**. These clearly labeled demos work without an account. Approve each test action and inspect the green button count and the exact text `hello`.
+3. In **Settings → Connection**, add your OpenRouter API key yourself, choose a vision model, and save. Keys are stored using Windows Credential Manager.
+4. Type a request in **Ask**, or hold **Win+Alt+Space**, speak, and release. Typed requests give you three seconds to select the app you want help with.
+5. For a short task, select **Agent**. Review each proposed click, typing action, hotkey, or scroll. **Stop** or **Escape** cancels the task; declining an action ends the run.
 
-| Capability | Status |
-|------------|--------|
-| Tray + remappable PTT (`Win+Alt+Space`) | Done |
-| Click-through overlay buddy + POINT fly-to | Done |
-| In-memory screen capture | Done (WGC+D3D11 frame-pool; GDI fallback) |
-| OpenRouter vision Talk + POINT parse | Done (BYO API key) |
-| Sign in with ChatGPT (OSS OAuth / PKCE) | Done (alternate Talk/Agent auth; tokens in Credential Manager) |
-| STT via OpenRouter Whisper-compatible API | Done (BYO key; ChatGPT sign-in does not replace mic STT) |
-| Local Windows SAPI TTS | Done (no key) |
-| Optional localhost proxy | Done |
-| Agent (plan → confirm → UIA/SendInput) | Done (Windows + OpenRouter key **or** ChatGPT sign-in) |
-| Credential Manager for API keys / ChatGPT tokens | Done |
-| Soft agent deny-list | Done |
-| Text Talk history persistence | Done |
-| Agent sandbox demo app | Done |
-| Self-contained EXE publish scripts | Done (unsigned; CI artifact `openclicky-win-x64`) |
-| MSIX | Manifest + pack script + CI artifact `openclicky-msix` (unsigned) |
+The window closes to the tray. Double-click the tray icon to reopen it; choose **Quit** from the tray menu to exit. The voice shortcut can be changed in Settings. Escape is reserved for stopping.
 
-## Quick start (Windows 11)
+Windows speech recognition and spoken replies run locally by default. An installed Windows speech recognizer is required for voice input; typing always remains available. Optional OpenRouter transcription sends recorded audio to that provider. ChatGPT sign-in is an experimental alternative and has not been verified live in this release.
+
+## Release status
+
+**0.2 is a working Windows preview, with desktop verification and live-provider acceptance still separate.**
+
+| Capability | Evidence / limit |
+| --- | --- |
+| Home, tray, settings, original icons | Visually inspected on Windows 11 at this machine's display scaling |
+| Typed Ask and Agent requests | Shared cancellable pipeline; missing-provider errors are visible |
+| Pointing overlay | Actual overlay position verified, including a monitor left of the primary display |
+| Desktop actions with human approval | Built-in test clicked the green button and typed exact `hello`; decline stops input |
+| Screen capture | Actual in-memory JPEG capture on two monitors using WGC |
+| Local speech | Installed recognizer tested with generated speech; real TTS cancellation tested |
+| OpenRouter Talk / Agent | Implemented; no live request verified for this release yet |
+| Physical microphone / voice shortcut | Requires the human acceptance check |
+| Portable EXE / MSIX | Built locally; unsigned; MSIX installation not verified |
+
+OpenClicky does not yet provide HeyClicky's persistent named companions, drawing canvas, routines, scheduling, dictation into apps, or account connectors. See the [video research and scope](docs/heyclicky-research.md) and [verification record](docs/verification.md).
+
+## Privacy and control
+
+- Requests capture **all connected monitors** and send their images to your selected AI provider. Choose what is visible before starting. Images are held in memory rather than saved by OpenClicky.
+- There is no OpenClicky-hosted service. Providers have their own processing and retention policies; local capture does not make the AI request local.
+- API keys use Credential Manager. Oversized ChatGPT token records use a DPAPI-protected file. Non-secret settings live in `%AppData%\OpenClicky\settings.json`.
+- Optional text history is enabled by default and saved in `%AppData%\OpenClicky\history.json`; turn it off or clear it in Settings. Routine logs contain sizes, states, and error classes rather than request or response contents. Existing logs from older versions are not deleted automatically.
+- Every input action requires approval. The window-title deny-list is a convenience guard, not a security boundary. Review the destination and action each time. See [agent safety](docs/agent-safety.md).
+
+## Build from source
+
+Use a .NET 8 SDK or newer on Windows:
 
 ```powershell
-dotnet build OpenClicky.sln -c Debug
-dotnet run --project apps/windows/OpenClicky.App -c Debug
+dotnet build OpenClicky.sln -c Release
+dotnet test OpenClicky.sln -c Release --no-build
+dotnet run --project apps/windows/OpenClicky.App -c Release
 ```
 
-Or download CI artifacts from [windows-ci](.github/workflows/windows-ci.yml) Actions (`openclicky-win-x64` EXE folder, `openclicky-msix`) / publish locally:
+Publish the portable app and optional unsigned MSIX:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/publish-exe.ps1
-# → artifacts/exe/win-x64/OpenClicky.exe  (alias)
-# → artifacts/exe/win-x64/OpenClicky.App.exe
 powershell -ExecutionPolicy Bypass -File scripts/pack-msix.ps1
-# → artifacts/msix/OpenClicky.msix  (unsigned; needs makeappx / Windows SDK)
 ```
 
-See [docs/packaging.md](docs/packaging.md) and [docs/agent-safety.md](docs/agent-safety.md).
+Outputs are under `artifacts/exe/win-x64/` and `artifacts/msix/`. [Packaging](docs/packaging.md) explains distribution and signing. CI in [.github/workflows/windows-ci.yml](.github/workflows/windows-ci.yml) builds, tests, runs dedicated capture/action/overlay checks, and publishes artifacts; that is not a substitute for human acceptance.
 
-Optional proxy:
+The optional existing localhost proxy is under `services/local-proxy`. It only accepts an explicitly configured loopback URL. The normal app calls the selected provider directly.
 
-```bash
-cd services/local-proxy && npm install && npm start
-# Enable "Use local proxy" in Settings (http://127.0.0.1:8787)
-```
+## Development checks
 
-### Offline Talk smoke (no API keys)
+The built-in demos are the easiest manual check. Automated desktop checks use their own sandbox window; automatic approval exists only in the dedicated test executable. The legacy `OPENCLICKY_OFFLINE_TALK` and `OPENCLICKY_OFFLINE_AGENT` environment fixtures remain for development, with an explicit offline label. Debug transcript overrides are ignored on normal launches so an old fixture cannot silently replace microphone input.
 
-Opt-in fixture for proving Talk → POINT without OpenRouter or ChatGPT. Set the env var **before** launching the tray:
-
-```powershell
-$env:OPENCLICKY_OFFLINE_TALK = '1'   # or 'true'
-# Skip mic STT (still needed offline — ChatGPT/OpenRouter STT is not used):
-# Tray → Settings → debug transcript, e.g. "point at the center", Save
-Get-Process OpenClicky.App -ErrorAction SilentlyContinue | Stop-Process -Force
-dotnet run --project apps/windows/OpenClicky.App -c Debug
-```
-
-Hold **Win+Alt+Space**, release once. Pass: `%AppData%\OpenClicky\debug.log` contains `point=(x,y)` and a canned reply mentioning offline smoke. Unset the env var (or launch without it) to use real providers again.
-
-### Offline Agent smoke (no API keys)
-
-Opt-in fixture for proving the confirm-gated Agent UI + SendInput path without OpenRouter or ChatGPT. Set **before** launching the tray (works with or without `OPENCLICKY_OFFLINE_TALK`):
-
-```powershell
-$env:OPENCLICKY_OFFLINE_AGENT = '1'   # or 'true'
-# Optional — Talk→POINT also offline (independent flag):
-# $env:OPENCLICKY_OFFLINE_TALK = '1'
-# Tray → Settings → debug transcript, e.g. "openclicky agent type hello in notepad", Save
-Get-Process OpenClicky.App -ErrorAction SilentlyContinue | Stop-Process -Force
-dotnet run --project apps/windows/OpenClicky.App -c Debug
-```
-
-Hold **Win+Alt+Space**, release once (debug transcript must start with an agent intent prefix such as `openclicky agent …`).  
-**Pass:** Yes/No confirm dialog appears for the first mutating step (`hotkey: keys=win+r` — open Run). Do **not** auto-confirm; click Yes yourself. After Yes, focus must leave the confirm UI so Run opens, Notepad launches, and `hello` is typed (not into the tray/confirm). Log may show `agent_result=hotkey win+r` / `typed …` — also verify Notepad visually. Unset the env var to use real planners again.
-
-| Env var | Effect |
-|---------|--------|
-| `OPENCLICKY_OFFLINE_TALK=1` | Canned Talk reply with `[POINT:…]` (no keys) |
-| `OPENCLICKY_OFFLINE_AGENT=1` | Fixed Agent plan: Run → notepad → type `hello` (no keys; human Yes/No still required) |
-
-## Windows 11 smoke checklist (human)
-
-CI validates build/tests/capture on `windows-latest` — it does **not** exercise the tray, PTT hotkey, overlay, STT, or Agent confirms. Run this on a real interactive Windows 11 desktop:
-
-1. **Launch**  
-   `dotnet run --project apps/windows/OpenClicky.App -c Debug`  
-   **Pass:** tray icon “OpenClicky” appears; `%AppData%\OpenClicky\debug.log` gets a `tray ready` line. Second launch shows “already running”.
-
-2. **Auth**  
-   Tray → Settings → either paste **OpenRouter API key** → Save, **or** click **Continue with ChatGPT** (browser OAuth) and select the ChatGPT provider radio.  
-   Optional: set debug transcript `what is on my screen?` to skip mic (mic STT still needs an OpenRouter key).  
-   **Offline shortcut:** `$env:OPENCLICKY_OFFLINE_TALK='1'` and/or `$env:OPENCLICKY_OFFLINE_AGENT='1'` before launch + debug transcript (see [Offline Talk](#offline-talk-smoke-no-api-keys) / [Offline Agent](#offline-agent-smoke-no-api-keys)) — no keys required for those paths.  
-   **Pass:** log shows `openrouter_key=set` and/or `chatgpt=you@…` (or offline canned reply / offline agent confirm); secrets are **not** in `settings.json` (Credential Manager only).
-
-3. **Talk**  
-   Open Notepad with some text visible. Hold **Win+Alt+Space**, speak (or use debug transcript), release.  
-   **Pass:** overlay listening → processing; spoken reply; debug log has `capture_backend=wgc` (or `gdi` if forced), `transcript=…`, `reply=…`.
-
-4. **POINT**  
-   Ask where a visible UI control is (or use a debug transcript that prompts pointing).  
-   **Pass:** debug log has `point=(x,y)`; blue buddy **flies to** the control and **holds there while TTS speaks** (does not snap back to the cursor). CI covers HWND settle after `PointAt`+`ShowResponding` (`OpenClicky.Overlay.Smoke`); this checklist covers the Talk-orchestrated path. Offline fixture also emits `point=` near capture center.
-
-5. **Hotkey remap**  
-   Settings → set PTT to **Ctrl+Shift+Space** → Save.  
-   **Pass:** new chord triggers Talk; old Win+Alt+Space does not.
-
-6. **Agent**  
-   `dotnet run --project apps/windows/OpenClicky.Sandbox`  
-   Focus the sandbox, then (debug transcript or voice): `openclicky agent click the green button then type hello`.  
-   **Pass:** Yes/No confirm per mutating step; green button click count increases; text appears in the field; no crash.
-
-7. **Privacy**  
-   After a Talk turn, check `%AppData%\OpenClicky\` and Temp.  
-   **Pass:** no screenshot `.jpg`/`.png` written by OpenClicky (history JSON text-only is OK).
-
-## Privacy
-
-- Client-only BYO keys — no OpenClicky cloud.  
-- OpenRouter API key → **Windows Credential Manager** (`OpenClicky/openrouter-api-key`).  
-- Non-secret settings → `%AppData%\OpenClicky\settings.json` (never writes the API key).  
-- Screenshots stay in memory for the request.  
-- Optional text-only conversation history → `%AppData%\OpenClicky\history.json` (toggle/clear in Settings).  
-- Agent soft-blocks mutating actions over banking / password-manager window titles.
+See [architecture](docs/architecture.md) and [verification](docs/verification.md) for the test commands and acceptance checklist. Earlier phase documents are historical implementation notes.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+[MIT](LICENSE). The adapted public companion prompt retains its original [third-party notice](THIRD-PARTY-NOTICES.md). No HeyClicky logo, commercial binary, or marketing video is included in the release.

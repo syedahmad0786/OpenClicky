@@ -23,6 +23,8 @@ fi
 
 # Friendly alias for manual installs (MSIX still launches OpenClicky.App.exe).
 cp -f "$exe" "$out/OpenClicky.exe"
+cp -f "$root/LICENSE" "$root/THIRD-PARTY-NOTICES.md" "$out/"
+cp -f "$root/docs/portable-quick-start.md" "$out/README.md"
 
 size_mb=$(du -m "$exe" | awk '{print $1}')
 echo "Published: $exe (${size_mb} MB)"

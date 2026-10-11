@@ -29,6 +29,9 @@ internal sealed class SettingsForm : Form
     private readonly ChatGptOAuthService _chatGptOAuth = new(msg => DebugLog.Append(msg));
     private HotkeyChord _draft;
     private bool _signInBusy;
+    private readonly CheckBox _windowsSpeech;
+    private readonly CheckBox _speakReplies;
+    private readonly TextBox _transcriptionModelBox;
 
     public SettingsForm(AppSettings settings, ISecretStore secrets, Action onApplied, Action? onClearHistory = null)
     {
@@ -38,222 +41,128 @@ internal sealed class SettingsForm : Form
         _clearHistory = onClearHistory;
         _draft = settings.PushToTalk;
         _settings.EnsureChatGptHostId();
-
         Text = "OpenClicky Settings";
-        FormBorderStyle = FormBorderStyle.FixedDialog;
-        MaximizeBox = false;
-        MinimizeBox = false;
+        AppTheme.Apply(this);
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(540, 820);
-        AutoScroll = true;
+        ClientSize = new Size(660, 660);
+        MinimumSize = new Size(620, 600);
+        MaximizeBox = false;
 
-        var y = 16;
-        Controls.Add(LabelAt(y, "Push-to-talk hotkey (click field, then press the combo):"));
-        y += 22;
-        _hotkeyBox = new TextBox { Left = 16, Top = y, Width = 360, ReadOnly = true, Text = _draft.DisplayName };
-        _hotkeyBox.KeyDown += HotkeyBoxOnKeyDown;
-        Controls.Add(_hotkeyBox);
-        var resetHotkey = new Button { Left = 388, Top = y - 1, Width = 128, Text = "Reset default" };
-        resetHotkey.Click += (_, _) =>
-        {
-            _draft = HotkeyChord.Default;
-            _hotkeyBox.Text = _draft.DisplayName;
-            SetHotkeyHint(null);
-        };
-        Controls.Add(resetHotkey);
-        y += 28;
-        _hotkeyHint = new Label
-        {
-            Left = 16,
-            Top = y,
-            Width = 500,
-            Height = 36,
-            ForeColor = SystemColors.GrayText,
-            Text = "Default: Win+Alt+Space. Needs a modifier + key. Esc clears.",
-        };
-        Controls.Add(_hotkeyHint);
-        y += 40;
+        var header = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 100, Padding = new Padding(24, 18, 24, 8), FlowDirection = FlowDirection.TopDown, WrapContents = false };
+        header.Controls.Add(AppTheme.Label("Make your buddy feel at home.", 20, true));
+        header.Controls.Add(AppTheme.Label("Your provider. Your voice. Your control.", 10));
+        var tabs = new TabControl { Dock = DockStyle.Fill, Padding = new Point(16, 8), AccessibleName = "Settings sections" };
+        var provider = Page(tabs, "Connection");
+        var voice = Page(tabs, "Voice & shortcut");
+        var privacy = Page(tabs, "Privacy");
+        var advanced = Page(tabs, "Advanced");
 
-        Controls.Add(LabelAt(y, "Talk / Agent provider:"));
-        y += 22;
-        _providerOpenRouter = new RadioButton
-        {
-            Left = 16,
-            Top = y,
-            Width = 240,
-            Text = "OpenRouter API key",
-            Checked = _settings.AuthProvider != AuthProvider.ChatGPT,
-        };
-        _providerChatGpt = new RadioButton
-        {
-            Left = 260,
-            Top = y,
-            Width = 250,
-            Text = "ChatGPT account",
-            Checked = _settings.AuthProvider == AuthProvider.ChatGPT,
-        };
-        Controls.Add(_providerOpenRouter);
-        Controls.Add(_providerChatGpt);
-        y += 32;
-
-        Controls.Add(LabelAt(y, "OpenRouter API key (Credential Manager — not written to settings.json):"));
-        y += 22;
-        _apiKeyBox = new TextBox
-        {
-            Left = 16,
-            Top = y,
-            Width = 500,
-            UseSystemPasswordChar = true,
-            Text = _settings.OpenRouterApiKey ?? string.Empty,
-        };
-        Controls.Add(_apiKeyBox);
-        y += 36;
-
-        Controls.Add(LabelAt(y, "OpenRouter vision model id:"));
-        y += 22;
-        _modelBox = new TextBox { Left = 16, Top = y, Width = 500, Text = _settings.OpenRouterModel };
-        Controls.Add(_modelBox);
-        y += 36;
-
-        Controls.Add(LabelAt(y, "Sign in with ChatGPT (official OAuth / PKCE — opens your browser):"));
-        y += 22;
-        _chatGptStatus = new Label
-        {
-            Left = 16,
-            Top = y,
-            Width = 500,
-            Height = 36,
-            Text = ChatGptStatusText(),
-        };
-        Controls.Add(_chatGptStatus);
-        y += 40;
-
-        _chatGptSignIn = new Button { Left = 16, Top = y, Width = 200, Text = "Continue with ChatGPT" };
+        AddHeading(provider, "Connect your AI", "Choose where your screen and requests go. Provider usage may have its own cost.");
+        var providers = new FlowLayoutPanel { AutoSize = true, Width = 560, Margin = new Padding(0, 0, 0, 16) };
+        _providerOpenRouter = new RadioButton { Text = "OpenRouter", Checked = settings.AuthProvider != AuthProvider.ChatGPT, AutoSize = true };
+        _providerChatGpt = new RadioButton { Text = "ChatGPT (experimental)", Checked = settings.AuthProvider == AuthProvider.ChatGPT, AutoSize = true, Margin = new Padding(20,3,3,3) };
+        providers.Controls.AddRange(new Control[] { _providerOpenRouter, _providerChatGpt });
+        provider.Controls.Add(providers);
+        _apiKeyBox = Field(provider, "OpenRouter API key", settings.OpenRouterApiKey ?? "");
+        _apiKeyBox.UseSystemPasswordChar = true;
+        _apiKeyBox.AccessibleName = "OpenRouter API key";
+        provider.Controls.Add(AppTheme.Label("Saved securely with Windows. Never included in settings or logs.", 8));
+        _modelBox = Field(provider, "Vision model", settings.OpenRouterModel);
+        _chatGptStatus = AppTheme.Label(ChatGptStatusText(), 9);
+        provider.Controls.Add(_chatGptStatus);
+        var authButtons = new FlowLayoutPanel { AutoSize = true, Width = 560, Margin = Padding.Empty };
+        _chatGptSignIn = AppTheme.Button("Continue with ChatGPT");
         _chatGptSignIn.Click += async (_, _) => await SignInChatGptAsync();
-        _chatGptSignOut = new Button { Left = 228, Top = y, Width = 120, Text = "Sign out" };
+        _chatGptSignOut = AppTheme.Button("Sign out");
         _chatGptSignOut.Click += async (_, _) => await SignOutChatGptAsync();
-        Controls.Add(_chatGptSignIn);
-        Controls.Add(_chatGptSignOut);
-        y += 36;
+        authButtons.Controls.AddRange(new Control[] { _chatGptSignIn, _chatGptSignOut });
+        provider.Controls.Add(authButtons);
+        _chatGptModelBox = Field(provider, "ChatGPT model", settings.ChatGptModel);
 
-        Controls.Add(LabelAt(y, "ChatGPT model slug (Responses API):"));
-        y += 22;
-        _chatGptModelBox = new TextBox { Left = 16, Top = y, Width = 500, Text = _settings.ChatGptModel };
-        Controls.Add(_chatGptModelBox);
-        y += 36;
+        AddHeading(voice, "Talk from any app", "Hold your shortcut while speaking, then release. You can always type in Home.");
+        _hotkeyBox = Field(voice, "Shortcut · click the field and press your combination", _draft.DisplayName);
+        _hotkeyBox.ReadOnly = true;
+        _hotkeyBox.KeyDown += HotkeyBoxOnKeyDown;
+        var reset = AppTheme.Button("Reset to Win+Alt+Space");
+        reset.Click += (_, _) => { _draft = HotkeyChord.Default; _hotkeyBox.Text = _draft.DisplayName; SetHotkeyHint(null); };
+        voice.Controls.Add(reset);
+        _hotkeyHint = AppTheme.Label("Default: Win+Alt+Space. Use a modifier and a key.", 9);
+        voice.Controls.Add(_hotkeyHint);
+        _windowsSpeech = new CheckBox { Text = "Use local Windows speech recognition", Checked = settings.UseWindowsSpeech, AutoSize = true, Margin = new Padding(0,12,0,10) };
+        voice.Controls.Add(_windowsSpeech);
+        string languages;
+        try { languages = string.Join(", ", LocalSpeechSttClient.InstalledLanguages()); }
+        catch { languages = ""; }
+        voice.Controls.Add(AppTheme.Label(string.IsNullOrWhiteSpace(languages) ? "No Windows speech language found. Turn this off to use OpenRouter transcription." : "Installed: " + languages + ". Audio stays on this PC when Windows speech is on.", 9));
+        _transcriptionModelBox = Field(voice, "OpenRouter transcription model · used when local speech is off", settings.TranscriptionModel);
+        _speakReplies = new CheckBox { Text = "Read replies aloud using a Windows voice", Checked = settings.SpeakReplies, AutoSize = true, Margin = new Padding(0,12,0,10) };
+        voice.Controls.Add(_speakReplies);
 
-        _useProxy = new CheckBox
+        AddHeading(privacy, "You stay in charge", "All connected screens are captured for a request. Images stay in memory; your selected AI provider receives them to answer.");
+        privacy.Controls.Add(AppTheme.Label("There is no OpenClicky cloud account. Keys and ChatGPT tokens use Windows Credential Manager or encrypted DPAPI storage.", 10));
+        _persistHistory = new CheckBox { Text = "Remember my last ten conversations · text only", Checked = settings.PersistConversationHistory, AutoSize = true, Margin = new Padding(0,10,0,12) };
+        privacy.Controls.Add(_persistHistory);
+        var clear = AppTheme.Button("Clear conversation history");
+        clear.Click += (_, _) =>
         {
-            Left = 16,
-            Top = y,
-            Width = 500,
-            Text = "Use local proxy (OpenRouter path only)",
-            Checked = _settings.UseLocalProxy,
+            if (MessageBox.Show("Clear saved conversation history?", Text, MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes)
+                _clearHistory?.Invoke();
         };
-        Controls.Add(_useProxy);
-        y += 28;
+        privacy.Controls.Add(clear);
+        privacy.Controls.Add(AppTheme.Label("Agent asks before every click, keystroke, and scroll. Stop cancels the current task. Keep sensitive windows closed while sharing your screen.", 10));
+        _denyExtraBox = Field(privacy, "Extra protected window titles · separated by commas", settings.AgentDenyListExtra ?? "");
 
-        Controls.Add(LabelAt(y, "Local proxy base URL:"));
-        y += 22;
-        _proxyBox = new TextBox { Left = 16, Top = y, Width = 500, Text = _settings.LocalProxyBaseUrl };
-        Controls.Add(_proxyBox);
-        y += 36;
+        AddHeading(advanced, "For troubleshooting", "You can leave these at their defaults.");
+        _useProxy = new CheckBox { Text = "Use a localhost proxy for OpenRouter", Checked = settings.UseLocalProxy, AutoSize = true };
+        advanced.Controls.Add(_useProxy);
+        _proxyBox = Field(advanced, "Local proxy address · only localhost or loopback IP", settings.LocalProxyBaseUrl);
+        _forceGdi = new CheckBox { Text = "Use compatibility screen capture (GDI)", Checked = settings.ForceGdiCapture, AutoSize = true, Margin = new Padding(0,6,0,12) };
+        advanced.Controls.Add(_forceGdi);
+        _debugTranscriptBox = Field(advanced, "Fixture transcript · only for offline test launches", settings.DebugTranscriptOverride ?? "");
+        _logBox = new TextBox { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Width = 550, Height = 130, Font = new Font("Consolas",9), AccessibleName = "Diagnostic log" };
+        advanced.Controls.Add(_logBox);
+        var refresh = AppTheme.Button("Refresh diagnostics");
+        refresh.Click += (_, _) => _logBox.Text = DebugLog.Snapshot();
+        advanced.Controls.Add(refresh);
 
-        Controls.Add(LabelAt(y, "Debug transcript override (skips mic/STT when set):"));
-        y += 22;
-        _debugTranscriptBox = new TextBox
-        {
-            Left = 16,
-            Top = y,
-            Width = 500,
-            Text = _settings.DebugTranscriptOverride ?? string.Empty,
-        };
-        Controls.Add(_debugTranscriptBox);
-        y += 36;
-
-        _persistHistory = new CheckBox
-        {
-            Left = 16,
-            Top = y,
-            Width = 320,
-            Text = "Persist conversation history (text only)",
-            Checked = _settings.PersistConversationHistory,
-        };
-        Controls.Add(_persistHistory);
-        var clearHistoryButton = new Button { Left = 340, Top = y - 2, Width = 176, Text = "Clear history" };
-        clearHistoryButton.Click += (_, _) =>
-        {
-            _clearHistory?.Invoke();
-            MessageBox.Show("Conversation history cleared.", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
-        };
-        Controls.Add(clearHistoryButton);
-        y += 32;
-
-        _forceGdi = new CheckBox
-        {
-            Left = 16,
-            Top = y,
-            Width = 500,
-            Text = "Force GDI capture (skip Windows.Graphics.Capture)",
-            Checked = _settings.ForceGdiCapture,
-        };
-        Controls.Add(_forceGdi);
-        y += 28;
-
-        Controls.Add(LabelAt(y, "Extra agent deny-list fragments (comma-separated window titles):"));
-        y += 22;
-        _denyExtraBox = new TextBox
-        {
-            Left = 16,
-            Top = y,
-            Width = 500,
-            Text = _settings.AgentDenyListExtra ?? string.Empty,
-        };
-        Controls.Add(_denyExtraBox);
-        y += 36;
-
-        _logBox = new TextBox
-        {
-            Left = 16,
-            Top = y + 40,
-            Width = 500,
-            Height = 100,
-            Multiline = true,
-            ScrollBars = ScrollBars.Vertical,
-            ReadOnly = true,
-            Font = new Font(FontFamily.GenericMonospace, 8f),
-        };
-
-        var apply = new Button { Left = 16, Top = y, Width = 120, Text = "Save" };
+        var footer = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 68, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(20,12,20,8) };
+        var apply = AppTheme.Button("Save changes", true);
         apply.Click += (_, _) => Save();
-        var refreshLog = new Button { Left = 152, Top = y, Width = 120, Text = "Refresh log" };
-        refreshLog.Click += (_, _) => _logBox.Text = DebugLog.Snapshot();
-        var openLog = new Button { Left = 288, Top = y, Width = 140, Text = "Open log folder" };
-        openLog.Click += (_, _) =>
-        {
-            try
-            {
-                var dir = Path.GetDirectoryName(DebugLog.LogPath);
-                if (!string.IsNullOrEmpty(dir))
-                {
-                    Directory.CreateDirectory(dir);
-                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                    {
-                        FileName = dir,
-                        UseShellExecute = true,
-                    });
-                }
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
-        };
-        Controls.Add(apply);
-        Controls.Add(refreshLog);
-        Controls.Add(openLog);
-        Controls.Add(_logBox);
+        var done = AppTheme.Button("Close");
+        done.Click += (_, _) => Hide();
+        footer.Controls.AddRange(new Control[] { apply, done });
+        Controls.Add(tabs);
+        Controls.Add(header);
+        Controls.Add(footer);
         RefreshChatGptButtons();
+        ResumeLayout(true);
+    }
+
+    private static FlowLayoutPanel Page(TabControl tabs, string name)
+    {
+        var page = new TabPage(name) { BackColor = AppTheme.Background, Padding = new Padding(24,20,16,12) };
+        var flow = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoScroll = true, FlowDirection = FlowDirection.TopDown, WrapContents = false };
+        page.Controls.Add(flow);
+        tabs.TabPages.Add(page);
+        return flow;
+    }
+
+    private static void AddHeading(FlowLayoutPanel page, string title, string description)
+    {
+        page.Controls.Add(AppTheme.Label(title, 16, true));
+        var detail = AppTheme.Label(description);
+        detail.MaximumSize = new Size(530,0);
+        page.Controls.Add(detail);
+    }
+
+    private static TextBox Field(FlowLayoutPanel page, string label, string value)
+    {
+        var caption = AppTheme.Label(label, 9, true);
+        caption.Margin = new Padding(0,6,0,6);
+        page.Controls.Add(caption);
+        var box = new TextBox { Text = value, Width = 550, AccessibleName = label, Margin = new Padding(0,0,0,12) };
+        page.Controls.Add(box);
+        return box;
     }
 
     private string ChatGptStatusText()
@@ -292,6 +201,8 @@ internal sealed class SettingsForm : Form
             using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
             await _chatGptOAuth.SignInAsync(_settings, _secrets, cts.Token).ConfigureAwait(true);
             _providerChatGpt.Checked = true;
+            _settings.AuthProvider = AuthProvider.ChatGPT;
+            SettingsStore.Save(_settings);
             RefreshChatGptButtons();
             _onApplied();
             MessageBox.Show(
@@ -329,6 +240,8 @@ internal sealed class SettingsForm : Form
         {
             await _chatGptOAuth.SignOutAsync(_settings, _secrets).ConfigureAwait(true);
             _providerOpenRouter.Checked = true;
+            _settings.AuthProvider = AuthProvider.OpenRouter;
+            SettingsStore.Save(_settings);
             RefreshChatGptButtons();
             _onApplied();
             MessageBox.Show("Signed out of ChatGPT.", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -344,9 +257,6 @@ internal sealed class SettingsForm : Form
         }
     }
 
-    private static Label LabelAt(int top, string text) =>
-        new() { Left = 16, Top = top, Width = 500, Text = text };
-
     private void ApplyFormToSettings(bool persistSecrets)
     {
         _settings.PushToTalk = _draft;
@@ -356,15 +266,7 @@ internal sealed class SettingsForm : Form
         {
             if (string.IsNullOrEmpty(key))
             {
-                try
-                {
-                    _secrets.Delete(SecretNames.OpenRouterApiKey);
-                }
-                catch (Exception ex)
-                {
-                    DebugLog.Append($"secret_delete_error={ex.Message}");
-                }
-
+                _secrets.Delete(SecretNames.OpenRouterApiKey);
                 _settings.OpenRouterApiKey = null;
             }
             else
@@ -380,6 +282,9 @@ internal sealed class SettingsForm : Form
 
         _settings.OpenRouterModel = string.IsNullOrWhiteSpace(_modelBox.Text) ? "openai/gpt-4o-mini" : _modelBox.Text.Trim();
         _settings.ChatGptModel = string.IsNullOrWhiteSpace(_chatGptModelBox.Text) ? "gpt-4o" : _chatGptModelBox.Text.Trim();
+        _settings.UseWindowsSpeech = _windowsSpeech.Checked;
+        _settings.SpeakReplies = _speakReplies.Checked;
+        _settings.TranscriptionModel = string.IsNullOrWhiteSpace(_transcriptionModelBox.Text) ? "openai/whisper-1" : _transcriptionModelBox.Text.Trim();
         _settings.UseLocalProxy = _useProxy.Checked;
         _settings.LocalProxyBaseUrl = _proxyBox.Text.Trim();
         _settings.DebugTranscriptOverride = string.IsNullOrWhiteSpace(_debugTranscriptBox.Text)
@@ -407,24 +312,38 @@ internal sealed class SettingsForm : Form
             return;
         }
 
-        ApplyFormToSettings(persistSecrets: true);
-        if (_settings.AuthProvider == AuthProvider.ChatGPT && !ProviderFactory.IsChatGptSignedIn(_secrets))
+        try
         {
+            if (_useProxy.Checked) ProviderFactory.ResolveBaseUrl(new AppSettings { UseLocalProxy = true, LocalProxyBaseUrl = _proxyBox.Text });
+            ApplyFormToSettings(persistSecrets: true);
+            if (_settings.AuthProvider == AuthProvider.ChatGPT && !ProviderFactory.IsChatGptSignedIn(_secrets))
+            {
             MessageBox.Show(
                 "ChatGPT provider selected but you are not signed in. Click Continue with ChatGPT, or switch back to OpenRouter.",
                 Text,
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
-        }
+            }
 
-        SettingsStore.Save(_settings);
-        _onApplied();
-        SetHotkeyHint($"Active: {_draft.DisplayName}. Reloads after restart.", isError: false);
-        MessageBox.Show(
+            SettingsStore.Save(_settings);
+            _onApplied();
+            SetHotkeyHint($"Active now: {_draft.DisplayName}.", isError: false);
+            MessageBox.Show(
             $"Saved. Push-to-talk is now {_draft.DisplayName}.",
             Text,
             MessageBoxButtons.OK,
             MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show("Could not save changes: " + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        if (e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; Hide(); }
+        base.OnFormClosing(e);
     }
 
     private void HotkeyBoxOnKeyDown(object? sender, KeyEventArgs e)

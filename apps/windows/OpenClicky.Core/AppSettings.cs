@@ -19,6 +19,10 @@ public sealed class AppSettings
     /// <summary>OpenRouter model id for audio transcription (Whisper-compatible).</summary>
     public string TranscriptionModel { get; set; } = "openai/whisper-1";
 
+    public bool UseWindowsSpeech { get; set; } = true;
+
+    public bool SpeakReplies { get; set; } = true;
+
     /// <summary>
     /// Stable host id for Sign in with ChatGPT OSS registration (<c>ext_agent_host_id</c>).
     /// Not a secret — generated once per install.

@@ -8,48 +8,34 @@ public sealed class LocalSpeechTtsClient : ITtsClient
 {
     private readonly object _gate = new();
     private SpeechSynthesizer? _synth;
+    public bool Enabled { get; set; } = true;
 
-    public Task SpeakAsync(string text, CancellationToken cancellationToken = default)
+    public async Task SpeakAsync(string text, CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(text))
+        if (!Enabled || string.IsNullOrWhiteSpace(text))
         {
-            return Task.CompletedTask;
+            return;
         }
 
-        return Task.Run(() =>
+        cancellationToken.ThrowIfCancellationRequested();
+        using var synth = new SpeechSynthesizer { Rate = 2 };
+        synth.SetOutputToDefaultAudioDevice();
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        synth.SpeakCompleted += (_, e) =>
         {
+            if (e.Cancelled) completion.TrySetCanceled();
+            else if (e.Error is not null) completion.TrySetException(e.Error);
+            else completion.TrySetResult();
+        };
+        lock (_gate) _synth = synth;
+        try
+        {
+            synth.SpeakAsync(text);
+            using var registration = cancellationToken.Register(Stop);
+            await completion.Task.ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
-            lock (_gate)
-            {
-                _synth?.Dispose();
-                _synth = new SpeechSynthesizer();
-                _synth.Rate = 2;
-                _synth.SetOutputToDefaultAudioDevice();
-            }
-
-            using var reg = cancellationToken.Register(() =>
-            {
-                lock (_gate)
-                {
-                    try
-                    {
-                        _synth?.SpeakAsyncCancelAll();
-                    }
-                    catch
-                    {
-                        // ignore
-                    }
-                }
-            });
-
-            SpeechSynthesizer? local;
-            lock (_gate)
-            {
-                local = _synth;
-            }
-
-            local?.Speak(text);
-        }, cancellationToken);
+        }
+        finally { lock (_gate) { if (ReferenceEquals(_synth, synth)) _synth = null; } }
     }
 
     public void Stop()

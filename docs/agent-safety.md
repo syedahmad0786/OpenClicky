@@ -5,7 +5,9 @@ OpenClicky Agent can move the mouse, type, and send hotkeys. Treat it like handi
 ## Defaults
 
 - Every mutating action (`click`, `type_text`, `hotkey`, `scroll`) shows a **Yes/No** confirmation dialog (human only — no auto-confirm).
-- After Yes/No closes, OpenClicky restores foreground to the prior desktop window (or the shell if the prior HWND was ours/invalid) and settles briefly before SendInput. This prevents `win+r` / `type_text` from landing on the confirm UI or tray host.
+- After approval closes, OpenClicky restores the prior window and focused control, verifies focus, and settles briefly before input. If the target closed or focus cannot be restored, the task stops. It never falls back to typing into the desktop. The built-in sandbox is the sole trusted input target inside OpenClicky's own process.
+- Click coordinates must fall inside a current screenshot or monitor. Unknown tools and coordinate spaces are rejected before approval.
+- Escape or Stop cancels pending work and approvals. Declined or failed actions end the run.
 - Max **8** steps per agent run.
 - Screenshots stay in memory; BYO OpenRouter keys stay on the client (or optional localhost proxy).
 - No credential scraping tools.
@@ -20,6 +22,8 @@ OpenClicky Agent can move the mouse, type, and send hotkeys. Treat it like handi
 ## Deny-list (soft)
 
 Mutating tools are refused when the foreground window title matches banking / password-manager / authenticator fragments (see `AgentDenyList`). The model prompt also forbids inventing credentials and casual `alt+f4`.
+
+The title check runs again after approval. This is a convenience guard, not a security boundary: a sensitive page with an ordinary title can pass it. A local user approval is still required for every input action. Web and accessibility content are treated as untrusted material in the model prompt. Prompt instructions alone do not prevent every possible model mistake.
 
 ## Secrets
 

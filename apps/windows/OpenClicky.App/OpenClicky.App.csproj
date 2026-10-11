@@ -9,6 +9,10 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <StartupObject>OpenClicky.App.Program</StartupObject>
+    <ApplicationIcon>..\..\..\assets\openclicky.ico</ApplicationIcon>
+    <Version>0.2.0</Version>
+    <Product>OpenClicky</Product>
+    <Description>Open-source Windows screen and voice companion</Description>
     <!-- WGC/D3D + single-file publish target; matches sln x64 mapping. -->
     <Platforms>AnyCPU;x64</Platforms>
     <PlatformTarget>x64</PlatformTarget>
@@ -27,5 +31,8 @@
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="OpenClicky.App.SecretStore.Smoke" />
+    <EmbeddedResource Include="..\..\..\assets\openclicky.ico" LogicalName="OpenClicky.App.Assets.openclicky.ico" />
+    <EmbeddedResource Include="..\..\..\assets\openclicky.png" LogicalName="OpenClicky.App.Assets.openclicky.png" />
+    <Compile Include="..\OpenClicky.Sandbox\SandboxForm.cs" Link="SandboxForm.cs" />
   </ItemGroup>
 </Project>

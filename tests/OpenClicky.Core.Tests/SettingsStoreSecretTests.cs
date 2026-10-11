@@ -13,6 +13,8 @@ public class SettingsStoreSecretTests
                 OpenRouterApiKey = "sk-test-should-not-persist",
                 OpenRouterModel = "openai/gpt-4o-mini",
                 UseLocalProxy = true,
+                UseWindowsSpeech = false,
+                SpeakReplies = false,
             };
 
             SettingsStore.Save(settings, path);
@@ -22,6 +24,9 @@ public class SettingsStoreSecretTests
             var loaded = SettingsStore.Load(path);
             Assert.Null(loaded.OpenRouterApiKey);
             Assert.True(loaded.UseLocalProxy);
+            Assert.False(loaded.UseWindowsSpeech);
+            Assert.False(loaded.SpeakReplies);
+            Assert.False(File.Exists(path + ".tmp"));
             Assert.Equal("openai/gpt-4o-mini", loaded.OpenRouterModel);
         }
         finally

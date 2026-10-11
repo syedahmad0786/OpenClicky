@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.IO;
-using System.Runtime.InteropServices;
 using System.Windows.Automation;
 using OpenClicky.Agent;
 
@@ -40,14 +39,15 @@ internal static class Program
                 return 2;
             }
 
-            var window = await WaitForSandboxWindowAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(true);
+            var window = await WaitForSandboxWindowAsync(sandbox.Id, TimeSpan.FromSeconds(30)).ConfigureAwait(true);
             if (window is null)
             {
                 Console.Error.WriteLine("FAIL: sandbox window not found");
                 return 3;
             }
 
-            NativeMethods.SetForegroundWindow(new IntPtr(window.Current.NativeWindowHandle));
+            if (!ForegroundFocusRestorer.Restore(new IntPtr(window.Current.NativeWindowHandle)))
+                throw new InvalidOperationException("Could not bring the launched sandbox to the foreground.");
             await Task.Delay(400).ConfigureAwait(true);
 
             var confirm = new AutoConfirm();
@@ -113,9 +113,10 @@ internal static class Program
             Console.WriteLine("click_assert=ok");
 
             // Re-resolve the window/edit — UIA peers can go stale after the first click.
-            window = await WaitForSandboxWindowAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(true)
+            window = await WaitForSandboxWindowAsync(sandbox.Id, TimeSpan.FromSeconds(5)).ConfigureAwait(true)
                      ?? window;
-            NativeMethods.SetForegroundWindow(new IntPtr(window.Current.NativeWindowHandle));
+            if (!ForegroundFocusRestorer.Restore(new IntPtr(window.Current.NativeWindowHandle)))
+                throw new InvalidOperationException("Could not restore the launched sandbox.");
 
             var edit = FindDescendant(window, ControlType.Edit, "Type target")
                        ?? FindFirstEdit(window);
@@ -184,7 +185,7 @@ internal static class Program
                    ?? edit;
 
             if (!await WaitUntilAsync(
-                    () => ReadEditValue(edit)?.Contains(typed, StringComparison.Ordinal) == true,
+                    () => ReadEditValue(edit) == typed,
                     TimeSpan.FromSeconds(8)).ConfigureAwait(true))
             {
                 Console.Error.WriteLine($"FAIL: sandbox edit value did not become '{typed}' (got '{ReadEditValue(edit)}')");
@@ -263,7 +264,7 @@ internal static class Program
         return null;
     }
 
-    private static async Task<AutomationElement?> WaitForSandboxWindowAsync(TimeSpan timeout)
+    private static async Task<AutomationElement?> WaitForSandboxWindowAsync(int processId, TimeSpan timeout)
     {
         var deadline = DateTime.UtcNow + timeout;
         while (DateTime.UtcNow < deadline)
@@ -271,7 +272,8 @@ internal static class Program
             var root = AutomationElement.RootElement;
             var window = root.FindFirst(
                 TreeScope.Children,
-                new PropertyCondition(AutomationElement.NameProperty, "OpenClicky Agent Sandbox"));
+                new AndCondition(new PropertyCondition(AutomationElement.NameProperty, "OpenClicky Agent Sandbox"),
+                    new PropertyCondition(AutomationElement.ProcessIdProperty, processId)));
             if (window is not null)
             {
                 return window;
@@ -398,9 +400,4 @@ internal static class Program
         }
     }
 
-    private static class NativeMethods
-    {
-        [DllImport("user32.dll")]
-        public static extern bool SetForegroundWindow(IntPtr hWnd);
-    }
 }
