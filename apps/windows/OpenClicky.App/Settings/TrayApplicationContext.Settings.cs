@@ -23,9 +23,11 @@ internal sealed partial class TrayApplicationContext
     private SpeechSynthesizer? _voicePreview;
     private HotkeyRecorder? _hotkeyRecorder;
     private bool _accountBusy, _whisperBusy;
+    /// <summary>One native modal at a time from the notch: a double click must not stack warnings, prompts or pickers.</summary>
+    private bool _settingsModalOpen;
 
     private SettingsService NotchSettings => _settingsService ??= new SettingsService(_settings, s => SettingsStore.Save(s),
-        ConfirmAccessMode, text => _shell?.AddToast(text), RequestShellPush, OnNotchSettingApplied);
+        ConfirmAccessMode, text => _shell?.AddToast(text), RequestShellPush, OnNotchSettingApplied, Log);
 
     private SettingsRuntimeProbe SettingsProbe => _settingsProbe ??= new SettingsRuntimeProbe(_secrets, () => _settings,
         () => _chromePipe?.IsConnected == true, _work.RootDirectory, () => OnUi(RequestShellPush));
@@ -55,23 +57,37 @@ internal sealed partial class TrayApplicationContext
     }
 
     // Deferred: a modal dialog must not open inside the WebView2 message callback.
-    void IShellHost.PatchSetting(string key, JsonElement value) => OnUi(() => NotchSettings.Patch(key, value));
+    void IShellHost.PatchSetting(string key, JsonElement value) => OnUi(() =>
+    {
+        if (_settingsModalOpen) { Log("settings: patch ignored while a dialog is open"); RequestShellPush(); return; }
+        NotchSettings.Patch(key, value);
+    });
 
     void IShellHost.SettingsAction(string action, string? arg) => OnUi(() =>
     {
+        if (_settingsModalOpen) { Log("settings: action ignored while a dialog is open: " + action); return; }
         try { RunSettingsAction(action, arg); }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             Log($"settings_action_error action={action} type={ex.GetType().Name}");
-            _shell?.AddToast("That did not work: " + ex.Message);
+            _shell?.AddToast("That did not work: " + SettingsActionArgs.UserMessage(ex));
         }
     });
 
-    private bool ConfirmAccessMode(AgentAccessMode mode)
+    private bool ConfirmAccessMode(AgentAccessMode mode) => Modal(() =>
     {
         using var owner = NativeSettings.TopMostOwner();
         return MessageBox.Show(owner, NativeSettings.AccessWarning(mode), NativeSettings.AccessWarningTitle,
             MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) == DialogResult.Yes;
+    }, busy: false);
+
+    /// <summary>Runs a native modal under <see cref="_settingsModalOpen"/>; returns <paramref name="busy"/> if one is already open.</summary>
+    private T Modal<T>(Func<T> show, T busy)
+    {
+        if (_settingsModalOpen) return busy;
+        _settingsModalOpen = true;
+        try { return show(); }
+        finally { _settingsModalOpen = false; }
     }
 
     /// <summary>Side effects the classic form gets from OnSettingsApplied, limited to the key that changed.</summary>
@@ -82,6 +98,12 @@ internal sealed partial class TrayApplicationContext
             case "voice.readReplies": _tts.Enabled = _settings.SpeakReplies; break;
             case "access.rememberHistory": ResetShellChat(); break;
             case "access.mode": _home.RefreshAccess(); break;
+            // As the classic OnSettingsApplied: a new provider or proxy must not serve the task or turn in flight.
+            case "account.provider" or "advanced.useLocalProxy" or "advanced.proxyUrl":
+                CancelTask();
+                _talk.Cancel();
+                RefreshConnection();
+                break;
             case "microphone.deviceId": StopMicTest(); RefreshConnection(); break; // the recorders read the device id on each start
             case var account when account.StartsWith("account.", StringComparison.Ordinal): RefreshConnection(); break;
         }
@@ -117,7 +139,7 @@ internal sealed partial class TrayApplicationContext
             case "connector.remove": RemoveConnector(arg); break;
             case "chrome.setup":
                 if (arg == "disconnect") _shell?.AddToast("Remove the extension from Chrome to disconnect.");
-                else { ShowChromeSetup(); SettingsProbe.Refresh(); }
+                else if (Modal(() => { ShowChromeSetup(); return true; }, false)) SettingsProbe.Refresh();
                 break;
             case "recordHotkey": RecordHotkey(arg); break;
             case "resetHotkeys":
@@ -202,7 +224,7 @@ internal sealed partial class TrayApplicationContext
     /// <summary>OpenRouter key: masked native prompt, stored only in Credential Manager. Empty clears it.</summary>
     private void EditOpenRouterKey()
     {
-        if (NativeSettings.PromptSecret("OpenRouter API key", "Paste your OpenRouter API key. It is saved with Windows Credential Manager, never in settings or logs. Leave it empty to remove the key.")
+        if (Modal(() => NativeSettings.PromptSecret("OpenRouter API key", "Paste your OpenRouter API key. It is saved with Windows Credential Manager, never in settings or logs. Leave it empty to remove the key."), null)
             is not { Secret: var key }) return;
         if (key.Length == 0) _secrets.Delete(SecretNames.OpenRouterApiKey);
         else _secrets.Set(SecretNames.OpenRouterApiKey, key);
@@ -314,13 +336,12 @@ internal sealed partial class TrayApplicationContext
 
     private void ExportMemory()
     {
-        using var owner = NativeSettings.TopMostOwner();
         using var dialog = new SaveFileDialog
         {
             Title = "Export companion memory", Filter = "JSON files (*.json)|*.json|All files (*.*)|*.*", DefaultExt = "json",
             AddExtension = true, FileName = "openclicky-companion-memory.json", OverwritePrompt = true,
         };
-        if (dialog.ShowDialog(owner) != DialogResult.OK) return;
+        if (!Modal(() => { using var owner = NativeSettings.TopMostOwner(); return dialog.ShowDialog(owner) == DialogResult.OK; }, false)) return;
         try { _shell?.AddToast(CompanionMemoryStore.ExportTo(dialog.FileName) ? "Companion memory exported." : "There is no companion memory to export yet."); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { _shell?.AddToast("Memory could not be exported: " + ex.Message); }
     }
@@ -331,10 +352,10 @@ internal sealed partial class TrayApplicationContext
     /// </summary>
     private void ChooseAgentFolder()
     {
-        using var owner = NativeSettings.TopMostOwner();
         using var dialog = new FolderBrowserDialog { Description = "Choose the folder agents work in", UseDescriptionForTitle = true, ShowNewFolderButton = true };
         if (!string.IsNullOrWhiteSpace(_settings.AgentFolder)) dialog.InitialDirectory = _settings.AgentFolder;
-        if (dialog.ShowDialog(owner) != DialogResult.OK || string.IsNullOrWhiteSpace(dialog.SelectedPath)) return;
+        if (!Modal(() => { using var owner = NativeSettings.TopMostOwner(); return dialog.ShowDialog(owner) == DialogResult.OK; }, false)
+            || string.IsNullOrWhiteSpace(dialog.SelectedPath)) return;
         var folder = Path.GetFullPath(dialog.SelectedPath);
         if (!Writable(folder)) { _shell?.AddToast("OpenClicky cannot write to that folder. Choose another one."); return; }
         if (NotchSettings.Change(s => s.AgentFolder = folder)) _shell?.AddToast("Agent folder saved.");
@@ -369,7 +390,7 @@ internal sealed partial class TrayApplicationContext
         {
             case ConnectorAuth.Browser: _shell?.AddToast("Browser sign-in arrives with the connectors update."); return;
             case ConnectorAuth.ApiKey:
-                if (NativeSettings.PromptSecret($"{draft.Name} key", "Paste the connector's API key. It is saved with Windows Credential Manager, never in settings or logs.", "Authorization")
+                if (Modal(() => NativeSettings.PromptSecret($"{draft.Name} key", "Paste the connector's API key. It is saved with Windows Credential Manager, never in settings or logs.", "Authorization"), null)
                     is not { Secret: { Length: > 0 } secret } entered) return;
                 (header, value) = SettingsActionArgs.ApiKeyHeader(entered.Header, secret);
                 break;
@@ -379,7 +400,7 @@ internal sealed partial class TrayApplicationContext
             var info = _connectors.Add(draft.Name, draft.Url, header, value);
             _shell?.AddToast($"Added {info.DisplayName}. Test it to see its tools.");
         }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) { _shell?.AddToast(ex.Message); }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) { _shell?.AddToast(SettingsActionArgs.UserMessage(ex)); }
         RequestShellPush();
     }
 
@@ -392,22 +413,29 @@ internal sealed partial class TrayApplicationContext
         try
         {
             var secret = await Task.Run(() => _connectors.Secret(info.Key));
-            if (secret is null) { _connectorChecks[info.Key] = (ConnectorStatus.NeedsSignIn, null); _shell?.AddToast($"{info.DisplayName} needs its address and key again."); return; }
+            if (secret is null) { SetConnectorCheck(info.Key, ConnectorStatus.NeedsSignIn, null); _shell?.AddToast($"{info.DisplayName} needs its address and key again."); return; }
             using var connector = new RemoteMcpConnector(info.Key, info.DisplayName, secret);
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
             cts.CancelAfter(TimeSpan.FromSeconds(30));
             var tools = await connector.ListToolsAsync(cts.Token);
-            _connectorChecks[info.Key] = (ConnectorStatus.Connected, tools.Count);
+            SetConnectorCheck(info.Key, ConnectorStatus.Connected, tools.Count);
             _shell?.AddToast($"{info.DisplayName}: {tools.Count} tool{(tools.Count == 1 ? "" : "s")} available.");
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             // The message may name the endpoint URL (which can carry account ids): show it, but log only the type.
             Log("connector_test_error=" + ex.GetType().Name);
-            _connectorChecks[info.Key] = (ConnectorStatus.Error, null);
-            _shell?.AddToast($"{info.DisplayName} could not be reached: " + (ex is OperationCanceledException ? "it did not answer within 30 seconds." : ex.Message));
+            SetConnectorCheck(info.Key, ConnectorStatus.Error, null);
+            _shell?.AddToast($"{info.DisplayName} could not be reached: " + (ex is OperationCanceledException ? "it did not answer within 30 seconds." : SettingsActionArgs.UserMessage(ex)));
         }
         finally { RequestShellPush(); }
+    }
+
+    /// <summary>A test that finishes after its connector was removed must not leave a stale entry behind.</summary>
+    private void SetConnectorCheck(string key, ConnectorStatus status, int? tools)
+    {
+        if (_connectors.List().Any(c => c.Key == key)) _connectorChecks[key] = (status, tools);
+        else _connectorChecks.Remove(key);
     }
 
     private void RemoveConnector(string? key)

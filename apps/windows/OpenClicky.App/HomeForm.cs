@@ -42,6 +42,7 @@ internal sealed class HomeForm : Form
     private string? _completedStreamText;
     private VisualWorkspacePanel? _visualWorkspace;
     private bool _syncingAccess;
+    private readonly TabPage _notesPage;
     private (SizeType Type, float Height)[]? _nativeComposerRows;
     private float _nativeComposerHeight;
 
@@ -230,7 +231,7 @@ internal sealed class HomeForm : Form
         var workPage = new TabPage("Work") { BackColor = Color.White };
         if (work is not null && runJob is not null) { _work = new WorkPanel(work, runJob); workPage.Controls.Add(_work); }
         var memoryPage = new TabPage("Memory") { BackColor = Color.White }; memoryPage.Controls.Add(new CompanionMemoryPanel());
-        var notesPage = new TabPage("Notes") { BackColor = Color.White }; notesPage.Controls.Add(new NotesPanel());
+        var notesPage = _notesPage = new TabPage("Notes") { BackColor = Color.White }; notesPage.Controls.Add(new NotesPanel());
         var connectionsPage = new TabPage("Connections") { BackColor = Color.White, Padding = new Padding(20) };
         var connectionInfo = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true };
         connectionInfo.Controls.Add(AppTheme.Label("Your accounts, under your control", 17, true));
@@ -397,7 +398,7 @@ internal sealed class HomeForm : Form
         if (!_busy) _status.Text = running ? "Task running · voice pauses it" : "Ready when you are";
     }
     public void ShowTasks() => _workspace.SelectedIndex = 1;
-    public void ShowNotes() => _workspace.SelectedIndex = 4;
+    public void ShowNotes() => _workspace.SelectedTab = _notesPage;
 
     /// <summary>The access mode changed elsewhere (the notch page, after its own warning): show it without asking again.</summary>
     public void RefreshAccess()

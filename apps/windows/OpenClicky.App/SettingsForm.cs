@@ -1,5 +1,6 @@
 using OpenClicky.App.Settings;
 using OpenClicky.Core;
+using OpenClicky.Core.Settings;
 using OpenClicky.Providers;
 using OpenClicky.Input;
 
@@ -17,6 +18,7 @@ internal sealed class SettingsForm : Form
     private readonly RadioButton _providerOpenRouter;
     private readonly RadioButton _providerChatGpt;
     private readonly TextBox _apiKeyBox;
+    private readonly Button _removeKey;
     private readonly TextBox _modelBox;
     private readonly ComboBox _chatGptModelBox;
     private readonly ComboBox _quickModelBox;
@@ -79,9 +81,13 @@ internal sealed class SettingsForm : Form
         _openRouterPanel = new FlowLayoutPanel { AutoSize = true, Width = 560, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = Padding.Empty };
         _chatGptPanel = new FlowLayoutPanel { AutoSize = true, Width = 560, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = Padding.Empty };
         provider.Controls.AddRange(new Control[] { _chatGptPanel, _openRouterPanel });
-        _apiKeyBox = Field(_openRouterPanel, "OpenRouter API key", settings.OpenRouterApiKey ?? "");
+        // The saved key is never shown: the box only takes a new key. Empty keeps the saved one; Remove key deletes it.
+        _apiKeyBox = Field(_openRouterPanel, "OpenRouter API key", "");
         _apiKeyBox.UseSystemPasswordChar = true;
         _apiKeyBox.AccessibleName = "OpenRouter API key";
+        _removeKey = AppTheme.Button("Remove key");
+        _removeKey.Click += (_, _) => RemoveOpenRouterKey();
+        _openRouterPanel.Controls.Add(_removeKey);
         _openRouterPanel.Controls.Add(AppTheme.Label("Saved securely with Windows. Never included in settings or logs.", 8));
         _modelBox = Field(_openRouterPanel, "Vision model", settings.OpenRouterModel);
         _chatGptStatus = AppTheme.Label(ChatGptStatusText(), 9);
@@ -130,7 +136,15 @@ internal sealed class SettingsForm : Form
         voice.Controls.Add(AppTheme.Label("While testing, speak and watch the level move. Test audio is discarded. Save your selection below.", 9));
         _meterTimer.Tick += (_, _) => _microphoneLevel.Value = Math.Clamp((int)((_microphoneTest?.PeakLevel ?? 0) * 100), 0, 100);
         _microphoneBox.SelectedIndexChanged += (_, _) => StopMicrophoneTest();
-        VisibleChanged += (_, _) => { if (!Visible) StopMicrophoneTest(); };
+        // Built once but shown many times: reload every control from the live settings each time it opens, so Save
+        // never writes back values that were changed elsewhere (the notch settings page) while it was hidden.
+        VisibleChanged += async (_, _) =>
+        {
+            if (!Visible) { StopMicrophoneTest(); return; }
+            LoadFromSettings();
+            // LoadFromSettings shows a model list from this session (classic or notch); otherwise fetch it as before.
+            if (NativeSettings.CachedModels.Count == 0) await RefreshModelsAsync();
+        };
         Disposed += (_, _) => { StopMicrophoneTest(); _meterTimer.Dispose(); _voiceDownload.Cancel(); _voiceDownload.Dispose(); };
         RefreshMicrophones();
         _voiceModelStatus = AppTheme.Label(LocalWhisperModel.IsAvailable ? "Whisper is ready · English speech stays on this PC." : "Compatibility voice is active. Download Whisper for stronger recognition and live previews.", 9);
@@ -269,6 +283,18 @@ internal sealed class SettingsForm : Form
         if (_providerChatGpt.Checked) _windowsSpeech.Checked = true;
         _windowsSpeech.Enabled = !_providerChatGpt.Checked;
         _transcriptionModelBox.Enabled = !_providerChatGpt.Checked;
+    }
+
+    /// <summary>Fills both model lists with the saved choices selected; changes nothing in the settings.</summary>
+    private void ShowModels(IReadOnlyList<ChatGptModel> models)
+    {
+        _chatGptModelBox.DataSource = models.ToList();
+        _chatGptModelBox.SelectedItem = NativeSettings.PickModel(models, _settings.ChatGptModel);
+        var quick = new List<ChatGptModel> { new("", "Use the same model") };
+        quick.AddRange(models);
+        _quickModelBox.DataSource = quick;
+        _quickModelBox.SelectedItem = quick.FirstOrDefault(m => m.Slug == _settings.ChatGptQuickModel) ?? quick[0];
+        RefreshChatGptButtons();
     }
 
     private async Task RefreshModelsAsync()
@@ -422,26 +448,62 @@ internal sealed class SettingsForm : Form
         _microphoneLevel.Value = 0;
     }
 
+    /// <summary>Every control from the live settings; the model lists from the session cache (empty until fetched).</summary>
+    private void LoadFromSettings()
+    {
+        _draft = HotkeyChord.NormalizeOrDefault(_settings.PushToTalk);
+        _hotkeyBox.Text = _draft.DisplayName;
+        SetHotkeyHint(null);
+        _providerChatGpt.Checked = _settings.AuthProvider == AuthProvider.ChatGPT;
+        _providerOpenRouter.Checked = !_providerChatGpt.Checked;
+        _apiKeyBox.Text = "";
+        var keySaved = !string.IsNullOrWhiteSpace(_settings.OpenRouterApiKey);
+        _apiKeyBox.PlaceholderText = keySaved ? "Saved — leave empty to keep" : "Paste your OpenRouter API key";
+        _removeKey.Enabled = keySaved;
+        _modelBox.Text = _settings.OpenRouterModel;
+        if (NativeSettings.CachedModels is { Count: > 0 } models) ShowModels(models);
+        else { _chatGptModelBox.DataSource = null; _quickModelBox.DataSource = null; }
+        _windowsSpeech.Checked = _settings.UseWindowsSpeech;
+        _transcriptionModelBox.Text = _settings.TranscriptionModel;
+        _speakReplies.Checked = _settings.SpeakReplies;
+        _persistHistory.Checked = _settings.PersistConversationHistory;
+        _denyExtraBox.Text = _settings.AgentDenyListExtra ?? "";
+        _useProxy.Checked = _settings.UseLocalProxy;
+        _proxyBox.Text = _settings.LocalProxyBaseUrl;
+        _forceGdi.Checked = _settings.ForceGdiCapture;
+        _debugTranscriptBox.Text = _settings.DebugTranscriptOverride ?? "";
+        _microphoneBox.Items.Clear(); // so RefreshMicrophones selects the saved device, not the old selection
+        RefreshMicrophones();
+        _voiceModelStatus.Text = LocalWhisperModel.IsAvailable ? "Whisper is ready · English speech stays on this PC." : "Compatibility voice is active. Download Whisper for stronger recognition and live previews.";
+        _logBox.Text = DebugLog.Snapshot();
+        RefreshChatGptButtons();
+        RefreshProviderPanels();
+    }
+
+    /// <summary>The explicit way to delete the saved OpenRouter key (an empty box never deletes it).</summary>
+    private void RemoveOpenRouterKey()
+    {
+        if (MessageBox.Show("Remove the saved OpenRouter API key from this PC?", Text, MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
+        try
+        {
+            _secrets.Delete(SecretNames.OpenRouterApiKey);
+            _settings.OpenRouterApiKey = null;
+            _apiKeyBox.Text = "";
+            _apiKeyBox.PlaceholderText = "Paste your OpenRouter API key";
+            _removeKey.Enabled = false;
+            _onApplied();
+        }
+        catch (Exception ex) { MessageBox.Show("Could not remove the key: " + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Error); }
+    }
+
     private void ApplyFormToSettings(bool persistSecrets)
     {
         _settings.PushToTalk = _draft;
         _settings.AuthProvider = _providerChatGpt.Checked ? AuthProvider.ChatGPT : AuthProvider.OpenRouter;
-        var key = string.IsNullOrWhiteSpace(_apiKeyBox.Text) ? null : _apiKeyBox.Text.Trim();
-        if (persistSecrets && _providerOpenRouter.Checked)
+        // Only a newly typed key is saved; empty keeps the saved key (Remove key deletes it).
+        if (SettingsActionArgs.TypedSecret(_apiKeyBox.Text) is { } key && _providerOpenRouter.Checked)
         {
-            if (string.IsNullOrEmpty(key))
-            {
-                _secrets.Delete(SecretNames.OpenRouterApiKey);
-                _settings.OpenRouterApiKey = null;
-            }
-            else
-            {
-                _secrets.Set(SecretNames.OpenRouterApiKey, key);
-                _settings.OpenRouterApiKey = key;
-            }
-        }
-        else if (_providerOpenRouter.Checked)
-        {
+            if (persistSecrets) _secrets.Set(SecretNames.OpenRouterApiKey, key);
             _settings.OpenRouterApiKey = key;
         }
 
@@ -485,6 +547,7 @@ internal sealed class SettingsForm : Form
             if (_useProxy.Checked) ProviderFactory.ResolveBaseUrl(new AppSettings { UseLocalProxy = true, LocalProxyBaseUrl = _proxyBox.Text });
             ApplyFormToSettings(persistSecrets: true);
             SettingsStore.Save(_settings);
+            LoadFromSettings(); // the typed key is now saved: clear the box and show "Saved"
             _onApplied();
             SetHotkeyHint($"Active now: {_draft.DisplayName}.", isError: false);
             MessageBox.Show(
@@ -558,16 +621,4 @@ internal sealed class SettingsForm : Form
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern short GetAsyncKeyState(int vKey);
-
-    protected override async void OnShown(EventArgs e)
-    {
-        base.OnShown(e);
-        // Drop unsaved capture edits when the dialog is reopened.
-        _draft = HotkeyChord.NormalizeOrDefault(_settings.PushToTalk);
-        _hotkeyBox.Text = _draft.DisplayName;
-        SetHotkeyHint(null);
-        _logBox.Text = DebugLog.Snapshot();
-        RefreshChatGptButtons();
-        await RefreshModelsAsync();
-    }
 }

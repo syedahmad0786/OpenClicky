@@ -13,8 +13,9 @@ namespace OpenClicky.Core.Settings;
 /// <param name="save">Persists a full copy (secrets already cleared). Throws on I/O failure.</param>
 /// <param name="confirmAccess">Shows the native Auto/Full access warning; true only when the user accepted.</param>
 /// <param name="applied">Called with the patch key after it took effect, for side effects (TTS on/off, history reload…).</param>
+/// <param name="trace">Diagnostics (keys and results only, never values).</param>
 public sealed class SettingsService(AppSettings settings, Action<AppSettings> save, Func<AgentAccessMode, bool> confirmAccess,
-    Action<string> toast, Action push, Action<string>? applied = null)
+    Action<string> toast, Action push, Action<string>? applied = null, Action<string>? trace = null)
 {
     public PatchResult Patch(string key, JsonElement value)
     {
@@ -43,7 +44,9 @@ public sealed class SettingsService(AppSettings settings, Action<AppSettings> sa
         var result = SettingsPatch.TryApply(draft, key, value, out error, confirmed);
         if (result != PatchResult.Applied) return result;
         if (!TrySave(draft, out var saveError)) { error = saveError; return PatchResult.Rejected; }
-        SettingsPatch.TryApply(settings, key, value, out _, confirmed); // same input on equal settings: same outcome
+        // Same input on equal settings gives the same outcome; anything else means the live settings moved meanwhile.
+        var live = SettingsPatch.TryApply(settings, key, value, out _, confirmed);
+        if (live != PatchResult.Applied) trace?.Invoke($"settings_reapply_mismatch key={key} result={live}");
         applied?.Invoke(key);
         return PatchResult.Applied;
     }
@@ -125,7 +128,7 @@ public static class SettingsActionArgs
             if (name is not { Length: > 0 and <= 60 } || name.Any(char.IsControl)) { error = "Give the connector a name of up to 60 characters."; return false; }
             if (auth is null || url is null) return false;
             try { url = ConnectorRegistry.ValidateUrl(url).AbsoluteUri; }
-            catch (ArgumentException e) { error = e.Message; return false; }
+            catch (ArgumentException e) { error = UserMessage(e); return false; }
             draft = new ConnectorDraft(name, url, auth.Value);
             return true;
         }
@@ -135,18 +138,29 @@ public static class SettingsActionArgs
             root.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? ShellIntentParser.ReadString(v) : null;
     }
 
+    private static readonly System.Text.RegularExpressions.Regex AuthScheme =
+        new(@"^[A-Za-z][A-Za-z0-9-]* \S", System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(50));
+
     /// <summary>
-    /// Header for an API-key connector: Authorization by default, and an Authorization value gets "Bearer " unless the
-    /// user typed a scheme already. Other headers (X-Api-Key…) carry the value as typed.
+    /// Header for an API-key connector: Authorization by default. An Authorization value that does not already start
+    /// with a scheme word and a space ("Bearer ", "Basic ", "Token "…) gets "Bearer ". Other headers (X-Api-Key…)
+    /// carry the value as typed.
     /// </summary>
     public static (string Name, string Value) ApiKeyHeader(string? headerName, string secret)
     {
         var name = string.IsNullOrWhiteSpace(headerName) ? "Authorization" : headerName.Trim();
         var value = secret.Trim();
-        if (name.Equals("Authorization", StringComparison.OrdinalIgnoreCase) && !value.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        if (name.Equals("Authorization", StringComparison.OrdinalIgnoreCase) && !AuthScheme.IsMatch(value))
             value = "Bearer " + value;
         return (name, value);
     }
+
+    /// <summary>A newly typed secret, or null when the box was left empty (meaning: keep the saved one).</summary>
+    public static string? TypedSecret(string? text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
+
+    /// <summary>An exception message fit for a toast: ArgumentException's " (Parameter 'x')" suffix removed.</summary>
+    public static string UserMessage(Exception e) =>
+        e is ArgumentException { ParamName: { } name } ? e.Message.Replace($" (Parameter '{name}')", "", StringComparison.Ordinal) : e.Message;
 
     public static Routine Pause(Routine routine) => routine with { IsPaused = true };
 

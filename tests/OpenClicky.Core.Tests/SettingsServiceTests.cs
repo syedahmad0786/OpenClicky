@@ -16,12 +16,14 @@ public class SettingsServiceTests
         public int Pushes { get; private set; }
         public bool Accept { get; set; }
         public bool FailSave { get; set; }
+        public List<string> Traces { get; } = [];
+        public Action<AppSettings>? DuringSave { get; set; }
         public SettingsService Service { get; }
 
         public Rig() => Service = new SettingsService(Settings,
-            s => { if (FailSave) throw new IOException("disk full"); Saved.Add(s); },
+            s => { if (FailSave) throw new IOException("disk full"); DuringSave?.Invoke(Settings); Saved.Add(s); },
             mode => { Asked.Add(mode); return Accept; },
-            Toasts.Add, () => Pushes++, Applied.Add);
+            Toasts.Add, () => Pushes++, Applied.Add, Traces.Add);
     }
 
     private static JsonElement Json(object value) => JsonSerializer.SerializeToElement(value);
@@ -208,6 +210,9 @@ public class SettingsServiceTests
     [InlineData("", "Bearer abc", "Authorization", "Bearer abc")]
     [InlineData("authorization", "abc", "authorization", "Bearer abc")]
     [InlineData("X-Api-Key", "abc", "X-Api-Key", "abc")]
+    [InlineData(null, "Basic dXNlcjpwdw==", "Authorization", "Basic dXNlcjpwdw==")]
+    [InlineData(null, "Token abc", "Authorization", "Token abc")]
+    [InlineData(null, "bearer abc", "Authorization", "bearer abc")]
     public void ApiKeyHeadersDefaultToBearerAuthorization(string? name, string secret, string header, string value) =>
         Assert.Equal((header, value), SettingsActionArgs.ApiKeyHeader(name, secret));
 
@@ -281,5 +286,32 @@ public class SettingsServiceTests
         var value = SettingsActionArgs.RecordedHotkey(s, "handsFree", [0xA2, 0xA0]);
         Assert.Equal("""{"keys":["Ctrl","Shift"],"trigger":"doubleTap"}""", value!.Value.GetRawText());
         Assert.Null(SettingsActionArgs.RecordedHotkey(s, "nope", [0xA2]));
+    }
+
+    [Fact]
+    public void LiveReapplyMismatchIsTraced()
+    {
+        var rig = new Rig();
+        // The live settings change between the copy and the re-apply: Alt+T is taken by Dictate by then.
+        rig.DuringSave = live => live.DictateHotkey = new HotkeyBinding(["Alt", "T"], HotkeyTrigger.Hold);
+        Assert.Equal(PatchResult.Applied, rig.Service.Patch("shortcuts.text", Json(new { keys = new[] { "Alt", "T" }, trigger = "hold" })));
+        Assert.Equal("settings_reapply_mismatch key=shortcuts.text result=Rejected", Assert.Single(rig.Traces));
+    }
+
+    [Theory]
+    [InlineData("  sk-new  ", "sk-new")]
+    [InlineData("", null)]
+    [InlineData("   ", null)]
+    [InlineData(null, null)]
+    public void TypedSecretIsOnlyANewNonEmptyValue(string? typed, string? expected) =>
+        Assert.Equal(expected, SettingsActionArgs.TypedSecret(typed));
+
+    [Fact]
+    public void UserMessagesDropTheParameterSuffix()
+    {
+        Assert.Equal("Give the connector a name.", SettingsActionArgs.UserMessage(new ArgumentException("Give the connector a name.", "displayName")));
+        Assert.Equal("Up to 20.", SettingsActionArgs.UserMessage(new InvalidOperationException("Up to 20.")));
+        Assert.False(SettingsActionArgs.TryParseConnector("""{"name":"X","url":"http://evil.example/mcp","auth":"none"}""", out _, out var error));
+        Assert.DoesNotContain("(Parameter", error);
     }
 }
