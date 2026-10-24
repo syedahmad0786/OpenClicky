@@ -31,7 +31,7 @@ it("ShellApp renders nothing until shell.state arrives, then the collapsed notch
   host.send({ kind: "shell.state", state: { ...fixture, version: 2 } });
   expect(view.container).toBeEmptyDOMElement();
 
-  host.send({ kind: "shell.state", state: fixture });
+  host.send({ kind: "shell.state", state: { ...fixture, notch: { tab: "home", open: false } } });
   const notch = screen.getByLabelText("OpenClicky");
   expect(notch).toHaveClass("notch", "notch--collapsed");
   expect(notch).toHaveAttribute("data-region");
