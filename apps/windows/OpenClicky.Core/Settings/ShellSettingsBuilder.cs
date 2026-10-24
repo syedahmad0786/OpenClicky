@@ -1,0 +1,178 @@
+using System.Text.RegularExpressions;
+using OpenClicky.Core.Shell;
+
+namespace OpenClicky.Core.Settings;
+
+/// <summary>A Windows voice found on this machine.</summary>
+public sealed record InstalledVoice(string Id, string Name);
+
+/// <summary>
+/// What the machine knows right now and AppSettings does not: devices, voices, models, sign-in, Whisper, connectors,
+/// routines, privacy consent and Chrome. Filled by the host's probe; <see cref="Empty"/> is the nothing-known state.
+/// Secrets never go in here, only whether they are saved.
+/// </summary>
+public sealed record SettingsRuntime
+{
+    public static SettingsRuntime Empty { get; } = new();
+
+    public IReadOnlyList<Device> CaptureDevices { get; init; } = [];
+    public IReadOnlyList<Device> RenderDevices { get; init; } = [];
+    public IReadOnlyList<InstalledVoice> InstalledVoices { get; init; } = [];
+    /// <summary>Email or name of the signed-in ChatGPT account; null when signed out.</summary>
+    public string? SignedInAs { get; init; }
+    public IReadOnlyList<string> Models { get; init; } = [];
+    public bool OpenRouterKeySet { get; init; }
+    public bool OpenAiKeySet { get; init; }
+    public WhisperState Whisper { get; init; } = WhisperState.Missing;
+    public double WhisperProgress { get; init; }
+    public ChromeState Chrome { get; init; } = ChromeState.NotInstalled;
+    public IReadOnlyList<ConnectorView> Connectors { get; init; } = [];
+    public IReadOnlyList<RoutineView> Routines { get; init; } = [];
+    /// <summary>Windows privacy consent states (documents, pictures, contacts, calendar, microphone, camera, location).</summary>
+    public IReadOnlyList<ReachItem> Reach { get; init; } = [];
+    /// <summary>Where agents work when <see cref="AppSettings.AgentFolder"/> is empty.</summary>
+    public string DefaultAgentFolder { get; init; } = "";
+}
+
+/// <summary>Maps AppSettings plus <see cref="SettingsRuntime"/> to the contract's <see cref="SettingsView"/>, and clamps any view to the contract caps.</summary>
+public static class ShellSettingsBuilder
+{
+    public const int MaxModels = 64, MaxVoices = 64, MaxDevices = 32, MaxLanguages = 128, MaxConnectors = 64, MaxReach = 16, MaxRoutines = 100, MaxHotkeyKeys = 6;
+    private static readonly Regex Hex = new("^#[0-9a-fA-F]{6}$", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(50));
+    private const string UnavailableMicrophone = "Unavailable microphone";
+    private const string UnavailableOutput = "Unavailable speaker";
+
+    public static SettingsView Build(AppSettings s, SettingsRuntime runtime)
+    {
+        var account = new SettingsAccount(
+            s.AuthProvider == AuthProvider.ChatGPT ? AccountProvider.Chatgpt : AccountProvider.Openrouter,
+            runtime.SignedInAs, s.ChatGptModel ?? "", s.ChatGptQuickModel ?? "", runtime.Models,
+            runtime.OpenRouterKeySet, s.OpenRouterModel ?? "");
+
+        var voices = Voices(runtime);
+        var voice = voices.Any(v => v.Id == s.VoiceId) ? s.VoiceId : SettingsCatalog.WindowsDefaultVoice;
+        var (outputId, outputs) = Devices(s.OutputDeviceId, runtime.RenderDevices, UnavailableOutput);
+        var (micId, mics) = Devices(s.MicrophoneDeviceId, runtime.CaptureDevices, UnavailableMicrophone);
+
+        var view = new SettingsView(
+            account,
+            new SettingsVoice(voice, voices, SettingsCatalog.SnapSpeed(s.SpeechSpeed), s.Captions, s.SpeakReplies, outputId, outputs),
+            new SettingsMicrophone(micId, mics, runtime.Whisper, runtime.WhisperProgress),
+            new SettingsDictation(s.DictationAutoDetect, SettingsCatalog.Languages.Any(l => l.Code == s.DictationLanguage) ? s.DictationLanguage : "en", SettingsCatalog.Languages, s.DictionaryWords ?? []),
+            new SettingsShortcuts(
+                HotkeyBinding.OrDefault(s.TalkHotkey, HotkeyBinding.DefaultTalk).ToView(),
+                HotkeyBinding.OrDefault(s.TextHotkey, HotkeyBinding.DefaultText).ToView(),
+                HotkeyBinding.OrDefault(s.DictateHotkey, HotkeyBinding.DefaultDictate).ToView(),
+                HotkeyBinding.OrDefault(s.HandsFreeHotkey, HotkeyBinding.DefaultHandsFree).ToView()),
+            new SettingsCursor(s.AccentColor, s.CursorHidden, s.ScreenHighlight, s.ShakeToDetach),
+            new SettingsIntegrations(runtime.Chrome, runtime.Connectors),
+            new SettingsAgents(
+                string.IsNullOrWhiteSpace(s.AgentFolder) ? runtime.DefaultAgentFolder : s.AgentFolder,
+                string.IsNullOrWhiteSpace(s.AgentFolder), s.SpeakJobAnnouncements, s.CursorJobUpdates, runtime.Reach),
+            runtime.Routines,
+            new SettingsAccess(AccessMode(s.AgentAccess), s.AgentDenyListExtra ?? "", s.PersistConversationHistory),
+            new SettingsAdvanced(s.UseLocalProxy, s.LocalProxyBaseUrl, s.ForceGdiCapture));
+        return Clamp(view);
+    }
+
+    public static AccessModeView AccessMode(AgentAccessMode mode) => mode switch
+    {
+        AgentAccessMode.Preview => AccessModeView.Preview,
+        AgentAccessMode.Auto => AccessModeView.Auto,
+        AgentAccessMode.FullAccess => AccessModeView.Full,
+        _ => AccessModeView.ConfirmEach,
+    };
+
+    /// <summary>Windows default, installed voices, then the OpenAI voices (unavailable until an OpenAI key is saved).</summary>
+    private static List<VoiceOption> Voices(SettingsRuntime runtime)
+    {
+        var voices = new List<VoiceOption> { new(SettingsCatalog.WindowsDefaultVoice, "Windows default", "Installed voice", true) };
+        voices.AddRange(runtime.InstalledVoices
+            .Where(v => v.Id != SettingsCatalog.WindowsDefaultVoice && !SettingsCatalog.OpenAiVoices.Contains(v.Id))
+            .Take(MaxVoices - 1 - SettingsCatalog.OpenAiVoices.Count)
+            .Select(v => new VoiceOption(v.Id, v.Name, "Installed voice", true)));
+        voices.AddRange(SettingsCatalog.OpenAiVoices.Select(name => new VoiceOption(
+            name, char.ToUpperInvariant(name[0]) + name[1..], runtime.OpenAiKeySet ? "OpenAI voice" : "Needs your OpenAI key", runtime.OpenAiKeySet)));
+        return voices;
+    }
+
+    /// <summary>
+    /// The saved device is selected only while it is active. A saved device that is unplugged (listed unavailable) or
+    /// missing is added to the list as unavailable and the selection falls back to System Default (null); the saved id
+    /// is kept in settings so plugging it back in restores it.
+    /// </summary>
+    private static (string? Selected, List<Device> Devices) Devices(string? saved, IReadOnlyList<Device> found, string unavailableName)
+    {
+        var devices = found.ToList();
+        if (string.IsNullOrWhiteSpace(saved)) return (null, devices);
+        var match = devices.FirstOrDefault(d => d.Id == saved);
+        if (match is null) devices.Insert(0, new Device(saved, unavailableName, DeviceState.Unavailable));
+        return (match is { State: DeviceState.Active } ? saved : null, devices);
+    }
+
+    /// <summary>
+    /// Brings any view inside the contract caps so one oversized or hand-edited field cannot invalidate the whole
+    /// shell state: lists, strings, speed, hotkey length, dictionary, deny list and the proxy URL (credentials removed).
+    /// </summary>
+    public static SettingsView Clamp(SettingsView v)
+    {
+        var d = SettingsView.Default;
+        var account = v.Account ?? d.Account;
+        var voice = v.Voice ?? d.Voice;
+        var mic = v.Microphone ?? d.Microphone;
+        var dictation = v.Dictation ?? d.Dictation;
+        var shortcuts = v.Shortcuts ?? d.Shortcuts;
+        var cursor = v.Cursor ?? d.Cursor;
+        var integrations = v.Integrations ?? d.Integrations;
+        var agents = v.Agents ?? d.Agents;
+        var access = v.Access ?? d.Access;
+        var advanced = v.Advanced ?? d.Advanced;
+        var voices = WithId(voice.Voices, o => o.Id, MaxVoices)
+            .Select(o => new VoiceOption(Cut(o.Id, 160), Cut(o.Name, 80), Cut(o.Detail, 160), o.Available)).ToList();
+        var languages = Take(dictation.Languages, MaxLanguages).Select(l => new DictationLanguage(Cut(l.Code, 16), Cut(l.Name, 80), Cut(l.Native, 80))).ToList();
+
+        return new SettingsView(
+            new SettingsAccount(account.Provider, CutOrNull(account.SignedInAs, 160), Cut(account.Model, 80), Cut(account.QuickModel, 80),
+                Take(account.Models, MaxModels).Select(m => Cut(m, 80)).ToList(), account.OpenRouterKeySet, Cut(account.OpenRouterModel, 120)),
+            new SettingsVoice(Cut(voice.Voice, 80), voices, Math.Clamp(double.IsFinite(voice.Speed) ? voice.Speed : 1, 0.5, 1.5),
+                voice.Captions, voice.ReadReplies, CutOrNull(voice.OutputDeviceId, 160), Devs(voice.OutputDevices)),
+            new SettingsMicrophone(CutOrNull(mic.DeviceId, 160), Devs(mic.Devices), mic.Whisper,
+                Math.Clamp(double.IsFinite(mic.WhisperProgress) ? mic.WhisperProgress : 0, 0, 1)),
+            new SettingsDictation(dictation.AutoDetect, Cut(dictation.Language, 16), languages,
+                SettingsCatalog.CleanDictionary(dictation.Dictionary)),
+            new SettingsShortcuts(
+                Key(shortcuts.Talk, HotkeyBinding.DefaultTalk), Key(shortcuts.Text, HotkeyBinding.DefaultText),
+                Key(shortcuts.Dictate, HotkeyBinding.DefaultDictate), Key(shortcuts.HandsFree, HotkeyBinding.DefaultHandsFree)),
+            new SettingsCursor(Hex.IsMatch(cursor.Colour ?? "") ? cursor.Colour!.ToUpperInvariant() : ShellStateBuilder.DefaultAccent,
+                cursor.Hidden, cursor.ScreenHighlight, cursor.ShakeToDetach),
+            new SettingsIntegrations(integrations.Chrome, WithId(integrations.Connectors, c => c.Key, MaxConnectors)
+                .Select(c => new ConnectorView(Cut(c.Key, 160), Cut(c.Name, 80), Cut(c.Host, 255), c.Status, c.ToolCount is < 0 ? null : c.ToolCount)).ToList()),
+            new SettingsAgents(Cut(agents.Folder, 4_096), agents.FolderIsDefault, agents.SpeakAnnouncements, agents.CursorUpdates,
+                WithId(agents.Reach, r => r.Id, MaxReach)
+                    .Select(r => new ReachItem(Cut(r.Id, 160), Cut(r.Label, 160), r.State)).ToList()),
+            WithId(v.Routines, r => r.Id, MaxRoutines).Select(r => new RoutineView(Cut(r.Id, 160), Cut(r.Title, 160),
+                Cut(r.Schedule, 160), Iso(r.Next), Iso(r.Last), r.Status)).ToList(),
+            new SettingsAccess(access.Mode, SettingsCatalog.CleanDenyList(access.DenyList), access.RememberHistory),
+            new SettingsAdvanced(advanced.UseLocalProxy, SettingsCatalog.LoopbackUrl(advanced.ProxyUrl, stripUserInfo: true) ?? SettingsCatalog.DefaultProxyUrl,
+                advanced.ForceGdiCapture));
+
+        static List<Device> Devs(IReadOnlyList<Device>? devices) =>
+            WithId(devices, x => x.Id, MaxDevices).Select(x => new Device(Cut(x.Id, 160), Cut(x.Name, 160), x.State)).ToList();
+
+        static Hotkey Key(Hotkey? hotkey, HotkeyBinding fallback)
+        {
+            var keys = (hotkey?.Keys ?? []).Take(MaxHotkeyKeys).Select(k => Cut(k ?? "", 24)).Where(k => k.Length > 0).ToList();
+            return keys.Count == 0 ? fallback.ToView() : new Hotkey(keys, hotkey!.Trigger);
+        }
+    }
+
+    /// <summary>Entries with a non-empty id (the page schema requires one), then at most <paramref name="max"/> of them.</summary>
+    private static IEnumerable<T> WithId<T>(IReadOnlyList<T>? list, Func<T, string?> id, int max) =>
+        (list ?? []).Where(x => !string.IsNullOrEmpty(id(x))).Take(max);
+    private static IEnumerable<T> Take<T>(IReadOnlyList<T>? list, int max) => (list ?? []).Take(max);
+    private static string Cut(string? value, int max) => SettingsCatalog.Cut(value ?? "", max);
+    /// <summary>Routine times must be ISO-8601 with an offset or the page schema rejects the whole state.</summary>
+    private static string? Iso(string? value) => value is not null && DateTimeOffset.TryParse(value, System.Globalization.CultureInfo.InvariantCulture,
+        System.Globalization.DateTimeStyles.AssumeUniversal, out var at) ? ShellStateBuilder.Iso(at) : null;
+    private static string? CutOrNull(string? value, int max) => value is null ? null : SettingsCatalog.Cut(value, max);
+}

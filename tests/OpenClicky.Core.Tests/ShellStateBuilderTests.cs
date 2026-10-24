@@ -18,7 +18,7 @@ public class ShellStateBuilderTests
         var state = ShellStateBuilder.Build(Inputs());
         Assert.Equal("general", state.Notch.Section);
         Assert.Contains(state.Notch.Section, ShellContract.Sections);
-        Assert.Same(SettingsView.Default, state.Settings);
+        Assert.Equal("windows-default", state.Settings.Voice.Voice);
         Assert.Equal(1, state.Settings.Voice.Speed);
         Assert.Equal("#3380FF", state.Settings.Cursor.Colour);
         Assert.Equal(HotkeyTrigger.DoubleTap, state.Settings.Shortcuts.HandsFree.Trigger);
@@ -148,5 +148,33 @@ public class ShellStateBuilderTests
         Assert.Contains("\"kind\":\"doc\"", json);
         Assert.Contains("\"at\":\"2026-10-24T12:00:00.000Z\"", json);
         Assert.NotNull(ShellContract.Deserialize(json));
+    }
+
+    [Fact]
+    public void BoundsFilesUpdateAndEmptyIds()
+    {
+        var longPath = @"C:\" + new string('p', 5_000) + ".md";
+        var jobs = new[]
+        {
+            new ShellJobInput(Job("keep", "completed", Now), [longPath, @"C:\ok.md"], []),
+            new ShellJobInput(Job("", "completed", Now), [@"C:\ghost.md"], []),
+        };
+        var inputs = new ShellInputs(new AppSettings(), jobs, [], [new ConnectorInfo("", "No key", "h", Now), new ConnectorInfo("gh", "GitHub", "api.github.com", Now)],
+            ShellPhase.Idle, Now)
+        {
+            Update = new ShellUpdate(new string('1', 90), new string('2', 90), UpdateState.Available, 7),
+        };
+        var state = ShellStateBuilder.Build(inputs);
+
+        var job = Assert.Single(state.Jobs);
+        Assert.Equal("keep", job.Id);
+        Assert.Equal(@"C:\ok.md", Assert.Single(job.Files).Path); // the over-long path is dropped, never cut
+        Assert.Equal("gh", Assert.Single(state.Apps.Connected).Id);
+        Assert.Equal(40, state.Update.Current.Length);
+        Assert.Equal(40, state.Update.Available!.Length);
+        Assert.Equal(1, state.Update.Progress);
+
+        var json = ShellContract.Serialize(state);
+        Assert.Equal(json, ShellContract.Serialize(ShellContract.Deserialize(json)!));
     }
 }

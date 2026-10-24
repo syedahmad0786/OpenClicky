@@ -1,3 +1,5 @@
+using OpenClicky.Core.Settings;
+
 namespace OpenClicky.Core;
 
 public sealed class AppSettings
@@ -73,6 +75,31 @@ public sealed class AppSettings
 
     /// <summary>While paused the talk hotkey is ignored.</summary>
     public bool Paused { get; set; }
+
+    // Settings page (sub-project S). Old settings.json files lack these and get the defaults.
+
+    /// <summary>"windows-default", an installed Windows voice id, or an OpenAI voice name.</summary>
+    public string VoiceId { get; set; } = SettingsCatalog.WindowsDefaultVoice;
+    /// <summary>0.5, 0.75, 1, 1.25 or 1.5.</summary>
+    public double SpeechSpeed { get; set; } = 1;
+    public bool Captions { get; set; } = true;
+    public string? OutputDeviceId { get; set; }
+    public bool DictationAutoDetect { get; set; } = true;
+    public string DictationLanguage { get; set; } = "en";
+    /// <summary>At most 50 words of 40 characters, de-duplicated ignoring case.</summary>
+    public List<string> DictionaryWords { get; set; } = [];
+    /// <summary>Shown on the settings page; the push-to-talk monitor still follows <see cref="PushToTalk"/> until sub-project B.</summary>
+    public HotkeyBinding TalkHotkey { get; set; } = HotkeyBinding.DefaultTalk;
+    public HotkeyBinding TextHotkey { get; set; } = HotkeyBinding.DefaultText;
+    public HotkeyBinding DictateHotkey { get; set; } = HotkeyBinding.DefaultDictate;
+    public HotkeyBinding HandsFreeHotkey { get; set; } = HotkeyBinding.DefaultHandsFree;
+    public bool CursorHidden { get; set; }
+    public bool ScreenHighlight { get; set; } = true;
+    public bool ShakeToDetach { get; set; } = true;
+    /// <summary>Folder agents work in; empty = the app default.</summary>
+    public string? AgentFolder { get; set; }
+    public bool SpeakJobAnnouncements { get; set; } = true;
+    public bool CursorJobUpdates { get; set; } = true;
 
     public string ResolveVisionModel() =>
         AuthProvider == AuthProvider.ChatGPT

@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
 
+using OpenClicky.Core.Settings;
+
 namespace OpenClicky.Core.Shell;
 
 /// <summary>One saved job plus what the host knows about it right now. <see cref="Files"/> are full paths.</summary>
@@ -32,8 +34,10 @@ public sealed record ShellInputs(
     public IReadOnlyList<NotchCard> Cards { get; init; } = [];
     public ShellUpdate? Update { get; init; }
     public DocumentView? Document { get; init; }
-    /// <summary>What the settings page shows. Defaults until the settings builder (S2) supplies it.</summary>
-    public SettingsView SettingsPage { get; init; } = SettingsView.Default;
+    /// <summary>An explicit settings page to show; otherwise built from <see cref="Settings"/> and <see cref="SettingsRuntime"/>. Either way it is clamped to the contract caps.</summary>
+    public SettingsView? SettingsPage { get; init; }
+    /// <summary>Machine facts for the settings page; used only when <see cref="SettingsPage"/> is not supplied.</summary>
+    public SettingsRuntime SettingsRuntime { get; init; } = SettingsRuntime.Empty;
 }
 
 /// <summary>
@@ -46,6 +50,8 @@ public static class ShellStateBuilder
     public const int MaxJobs = 80, MaxChatRows = 200, MaxCards = 6, MaxBullets = 4, MaxFiles = 6, MaxCardActions = 3, MaxDocument = 200_000;
     /// <summary>Per chat row in state (longer text ends in "…"), and the whole serialized state (oldest chat rows dropped first).</summary>
     public const int MaxRowText = 8_000, MaxStateChars = 1_000_000;
+    /// <summary>Longest file path the page schema accepts; longer paths are dropped, never cut (the open allow-list needs them exact).</summary>
+    public const int MaxPath = 4_096;
     public const string DefaultAccent = "#3380FF";
     private static readonly Regex Hex = new("^#[0-9a-fA-F]{6}$", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(50));
     private static readonly JobColour[] Colours = [JobColour.Red, JobColour.Blue, JobColour.Yellow, JobColour.Green];
@@ -54,7 +60,7 @@ public static class ShellStateBuilder
     {
         var settings = inputs.Settings;
         // Newest first (index 0 = most recently run or created), then trimmed.
-        var cards = inputs.Jobs.OrderByDescending(j => j.Job.LastRunAt ?? j.Job.CreatedAt).Select(MapJob).ToList();
+        var cards = inputs.Jobs.Where(j => !string.IsNullOrEmpty(j.Job.Id)).OrderByDescending(j => j.Job.LastRunAt ?? j.Job.CreatedAt).Select(MapJob).ToList();
         var jobs = cards.Take(MaxJobs).ToList();
         var featured = Featured(inputs, cards);
         var rows = inputs.Chat.SelectMany(TurnRows).Concat(inputs.LiveRows).TakeLast(MaxChatRows)
@@ -73,11 +79,12 @@ public static class ShellStateBuilder
             jobs,
             new ShellChat(rows),
             inputs.Cards.Take(MaxCards).Select(c => c with { Actions = c.Actions.Take(MaxCardActions).ToList() }).ToList(),
-            new ShellApps(inputs.Connectors.Take(64).Select(c => new ConnectedApp(Cut(c.Key, 160), Cut(c.DisplayName, 80))).ToList()),
+            new ShellApps(inputs.Connectors.Where(c => !string.IsNullOrEmpty(c.Key)).Take(64).Select(c => new ConnectedApp(Cut(c.Key, 160), Cut(c.DisplayName, 80))).ToList()),
             new ShellGeneral(settings.ShowInTaskbar, settings.ShowInScreenRecordings, settings.LaunchAtLogin, settings.Paused),
-            inputs.Update ?? new ShellUpdate(Cut(inputs.CurrentVersion, 40), null, UpdateState.Idle, 0),
-            inputs.Document is { } doc && doc.Content.Length > MaxDocument ? doc with { Content = doc.Content[..MaxDocument], Truncated = true } : inputs.Document,
-            inputs.SettingsPage);
+            BoundUpdate(inputs.Update) ?? new ShellUpdate(Cut(inputs.CurrentVersion, 40), null, UpdateState.Idle, 0),
+            inputs.Document is { } pathDoc && pathDoc.Path.Length > MaxPath ? null
+                : inputs.Document is { } doc && doc.Content.Length > MaxDocument ? doc with { Content = doc.Content[..MaxDocument], Truncated = true } : inputs.Document,
+            ShellSettingsBuilder.Clamp(inputs.SettingsPage ?? ShellSettingsBuilder.Build(settings, inputs.SettingsRuntime)));
         return WithinBudget(state);
 
         JobCard MapJob(ShellJobInput input)
@@ -100,7 +107,7 @@ public static class ShellStateBuilder
                 string.IsNullOrWhiteSpace(job.Summary) ? null : Cut(job.Summary, 2_000),
                 null,
                 input.Bullets.Take(MaxBullets).Select(b => Cut(b, 400)).ToList(),
-                input.Files.Take(MaxFiles).Select(path => new JobFile(Cut(Path.GetFileName(path), 260), path, FileKind(path))).ToList(),
+                UsableFiles(input.Files).Select(path => new JobFile(Cut(Path.GetFileName(path), 260), path, FileKind(path))).ToList(),
                 state == JobState.Working && !string.IsNullOrWhiteSpace(input.LiveLine) ? Cut(input.LiveLine, 400) : null,
                 [],
                 Iso(job.LastRunAt ?? job.CreatedAt));
@@ -122,12 +129,22 @@ public static class ShellStateBuilder
         return state;
     }
 
+    private static IEnumerable<string> UsableFiles(IReadOnlyList<string> files) =>
+        files.Where(path => path.Length is > 0 and <= MaxPath).Take(MaxFiles);
+
+    private static ShellUpdate? BoundUpdate(ShellUpdate? update) => update is null ? null : update with
+    {
+        Current = Cut(update.Current ?? "", 40),
+        Available = update.Available is null ? null : Cut(update.Available, 40),
+        Progress = double.IsFinite(update.Progress) ? Math.Clamp(update.Progress, 0, 1) : 0,
+    };
+
     /// <summary>The job the host chose (job.open), else the most recently run job that produced files.</summary>
     private static JobCard? Featured(ShellInputs inputs, List<JobCard> cards)
     {
         if (inputs.FeaturedJobId is { } chosen && cards.FirstOrDefault(c => c.Id == chosen) is { } picked) return picked;
         return inputs.Jobs
-            .Where(j => j.Job.LastRunAt is not null && j.Files.Count > 0 && !inputs.DismissedJobIds.Contains(j.Job.Id))
+            .Where(j => !string.IsNullOrEmpty(j.Job.Id) && j.Job.LastRunAt is not null && UsableFiles(j.Files).Any() && !inputs.DismissedJobIds.Contains(j.Job.Id))
             .OrderByDescending(j => j.Job.LastRunAt)
             .Select(j => cards.First(c => c.Id == Cut(j.Job.Id, 160)))
             .FirstOrDefault();
