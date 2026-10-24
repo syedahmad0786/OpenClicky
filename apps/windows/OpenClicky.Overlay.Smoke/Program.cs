@@ -235,6 +235,14 @@ internal static class Program
             return 25;
         }
 
+        var ringFailure = ValidateClickRing(overlay, vs, targetX, targetY);
+        if (ringFailure is not null)
+        {
+            Console.Error.WriteLine("FAIL: click ring " + ringFailure);
+            return 15;
+        }
+        Console.WriteLine("PASS: spring flight onto the target, dashed click ring, return flight, Hide clears the ring");
+
         var dockFailure = ValidateDockAndDetach(overlay, fixture, vs, targetX, targetY);
         if (dockFailure is not null)
         {
@@ -255,6 +263,102 @@ internal static class Program
         }
 
         return 0;
+    }
+
+    /// <summary>
+    /// A POINT with a control frame lands the tip exactly on the target and draws the ring round the frame (checked on the real
+    /// screen, not just the window rectangles); ShowIdle clears the ring and flies the companion back to the cursor; Hide clears
+    /// the ring. Only the cursor position is set; nothing is clicked or typed anywhere.
+    /// </summary>
+    private static string? ValidateClickRing(BuddyOverlayController overlay, Rectangle vs, int targetX, int targetY)
+    {
+        var cursorWindow = overlay.WindowHandle;
+        var drawing = overlay.WindowHandles[1];
+        static bool Visible(IntPtr hwnd) => NativeMethods.IsWindowVisible(hwnd);
+        static void Pump(int ms) => PumpUntil(() => false, TimeSpan.FromMilliseconds(ms));
+        static bool Covers(IntPtr hwnd, Point p) =>
+            NativeMethods.GetWindowRect(hwnd, out var r) && r.Left <= p.X && p.X < r.Right && r.Top <= p.Y && p.Y < r.Bottom;
+
+        var saved = Cursor.Position;
+        var home = new Point(vs.Left + vs.Width * 3 / 4, vs.Top + vs.Height * 3 / 4);
+        try
+        {
+            Cursor.Position = home;
+            overlay.ApplyStyle(new CompanionStyle("#3380FF", CursorPresence.Following, true, true, false));
+            overlay.ShowIdle();
+            Pump(900);
+
+            // The frame is wide so its left edge (and glow) is far from the companion's triangle at the target.
+            const int halfW = 90, halfH = 24;
+            var frame = new OpenClicky.Core.Drawing.Box(targetX - halfW, targetY - halfH, halfW * 2, halfH * 2);
+            overlay.PointAt(targetX, targetY, "ring-check", null, frame);
+            if (Visible(drawing)) return "the ring was drawn before the tip landed";
+            if (!PumpUntil(() => overlay.IsPointFlyComplete, TimeSpan.FromSeconds(5))) return "the flight did not land";
+            if (!overlay.TryGetBuddyVirtualPoint(out var bx, out var by) || bx != targetX || by != targetY)
+                return $"the tip landed at ({bx},{by}), not exactly on ({targetX},{targetY})";
+            if (!PumpUntil(() => Visible(drawing), TimeSpan.FromSeconds(2))) return "the ring window never appeared after landing";
+            if (!Covers(drawing, new Point(targetX - halfW, targetY - halfH)) || !Covers(drawing, new Point(targetX + halfW - 1, targetY + halfH - 1)))
+                return "the ring window does not cover the control frame";
+            Pump(500); // past the spring reveal
+
+            // The destination: pixels left of the frame (the companion is 80+ px away) differ with and without the ring.
+            var strip = new Rectangle(targetX - halfW - 14, targetY - 12, 24, 24);
+            if (Environment.GetEnvironmentVariable("OPENCLICKY_RING_SHOT") is { Length: > 0 } shot) // local eyeballing only
+                Grab(new Rectangle(targetX - halfW - 40, targetY - halfH - 70, halfW * 2 + 80, halfH * 2 + 110)).Save(shot, System.Drawing.Imaging.ImageFormat.Png);
+            var away = new Rectangle(strip.X, strip.Y + 160, strip.Width, strip.Height); // control: nothing of ours is drawn here
+            var withRing = Grab(strip);
+            var awayBefore = Grab(away);
+            overlay.Hide();
+            if (overlay.WindowHandles.Any(Visible)) return "Hide left an overlay window (the ring?) visible";
+            Pump(IOverlayController.HideSettleMilliseconds + 60);
+            var without = Grab(strip);
+            var changed = CountChanged(withRing, without);
+            var awayChanged = CountChanged(awayBefore, Grab(away));
+            if (changed < 40 || awayChanged > changed / 4) return $"the screen shows no ring left of the control (changed pixels={changed}, control strip={awayChanged})";
+            Console.WriteLine($"ring_pixels_changed={changed} control_pixels_changed={awayChanged}");
+
+            // Back after a Hide the held POINT flies in again and re-draws its ring; then ShowIdle clears the ring at once.
+            overlay.ShowResponding("ring check");
+            if (!PumpUntil(() => overlay.IsPointFlyComplete && Visible(drawing), TimeSpan.FromSeconds(5))) return "the held POINT did not fly in and re-draw its ring after Hide";
+            overlay.ShowIdle();
+            if (Visible(drawing)) return "ShowIdle left the ring up";
+
+            // Return flight: still near the target a moment after ShowIdle, then at the resting spot beside the real cursor.
+            var restingTip = new Point(home.X + (int)(CursorConstants.TipOffsetX * DpiOf(home)), home.Y + (int)(CursorConstants.TipOffsetY * DpiOf(home)));
+            Pump(60);
+            if (Covers(cursorWindow, restingTip)) return "the companion jumped to the cursor instead of flying back";
+            if (!PumpUntil(() => Covers(cursorWindow, restingTip), TimeSpan.FromSeconds(3))) return "the companion did not fly back to the cursor";
+            return null;
+        }
+        finally
+        {
+            overlay.Hide();
+            Cursor.Position = saved;
+        }
+
+        static Bitmap Grab(Rectangle area)
+        {
+            var bitmap = new Bitmap(area.Width, area.Height);
+            using var g = Graphics.FromImage(bitmap);
+            g.CopyFromScreen(area.Location, Point.Empty, area.Size);
+            return bitmap;
+        }
+
+        static int CountChanged(Bitmap a, Bitmap b)
+        {
+            var changed = 0;
+            for (var y = 0; y < a.Height; y++)
+            {
+                for (var x = 0; x < a.Width; x++)
+                {
+                    Color p = a.GetPixel(x, y), q = b.GetPixel(x, y);
+                    if (Math.Abs(p.R - q.R) + Math.Abs(p.G - q.G) + Math.Abs(p.B - q.B) > 12) changed++;
+                }
+            }
+            return changed;
+        }
+
+        static float DpiOf(Point at) => DpiScale.ForPoint(at);
     }
 
     /// <summary>Six lines at most with "…" when cut, never wider than 300 DIP, and the 4 s hold then 400 ms fade.</summary>
@@ -454,17 +558,22 @@ internal static class Program
             if (!PumpUntil(() => !Visible(catcher), TimeSpan.FromSeconds(1))) return "a starting task left the click target up";
             overlay.DetachSuppressed = null;
 
-            // A full-screen foreground window (a game, F11 video) owns the mouse.
+            // A full-screen foreground window of another app (a game, F11 video) owns the mouse; one of ours (the shell surface
+            // while it takes input) does not. A second process is not available here, so the window test is run on the geometry
+            // check directly (it does see the fixture as full-screen once its own process is not ignored), and the live shake
+            // proves that OpenClicky's own full-screen window leaves the companion free to detach.
             var monitor = Screen.FromPoint(home).Bounds;
             using (var full = new Form { FormBorderStyle = FormBorderStyle.None, StartPosition = FormStartPosition.Manual, Bounds = monitor, Text = "OpenClicky full-screen fixture" })
             {
                 full.Show();
                 full.Activate();
                 if (!PumpUntil(() => NativeMethods.GetForegroundWindow() == full.Handle, TimeSpan.FromSeconds(5))) return "the full-screen fixture did not become foreground";
-                Pump(400);
+                if (!ForegroundFullscreen.IsFullscreen(full.Handle, ignoreProcessId: 0)) return "a window covering its monitor was not seen as full-screen";
+                if (ForegroundFullscreen.IsActive()) return "OpenClicky's own full-screen window counted as a full-screen app";
+                Pump(1100);
                 Shake();
-                Pump(300);
-                if (Visible(catcher)) return "a shake detached the companion over a full-screen window";
+                if (!PumpUntil(() => Visible(catcher), TimeSpan.FromSeconds(2))) return "a shake did not detach over OpenClicky's own full-screen window";
+                if (!PumpUntil(() => !Visible(catcher), TimeSpan.FromSeconds(4))) return "an unclicked companion did not reattach after 3 s";
             }
             fixture.Activate();
             Pump(1100);

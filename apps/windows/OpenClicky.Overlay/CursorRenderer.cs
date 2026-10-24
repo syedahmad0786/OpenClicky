@@ -186,14 +186,51 @@ internal static class CursorRenderer
     {
         radius = Math.Min(radius, Math.Min(rect.Width, rect.Height) / 2);
         if (radius <= 0) { g.FillRectangle(brush, rect); return; }
-        using var path = new GraphicsPath();
+        using var path = RoundedRect(rect, radius);
+        g.FillPath(brush, path);
+    }
+
+    private static GraphicsPath RoundedRect(RectangleF rect, float radius)
+    {
+        var path = new GraphicsPath();
         var d = radius * 2;
         path.AddArc(rect.X, rect.Y, d, d, 180, 90);
         path.AddArc(rect.Right - d, rect.Y, d, d, 270, 90);
         path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90);
         path.AddArc(rect.X, rect.Bottom - d, d, d, 90, 90);
         path.CloseFigure();
-        g.FillPath(brush, path);
+        return path;
+    }
+
+    /// <summary>How far past the ring's box the click ring paints (pulse inflate, widest glow stroke), per side, in DIP.</summary>
+    public const float RingPulseDip = ClickRingLayout.PulseInflateDip, RingLineDip = 2.5f;
+    public const float RingPaintMarginDip = RingPulseDip + (RingLineDip + 12) / 2 + 1;
+    private static readonly float[] RingGlowExtraDip = [4, 8, 12]; // added to the line width
+    private static readonly int[] RingGlowAlphas = [8, 18, 30]; // widest stroke is the faintest
+    private const int RingFillAlpha = 20; // 8 %
+
+    /// <summary>
+    /// The click ring: the accent at 8 % inside, a three-stroke glow, then a dashed outline (6 DIP dashes, 4 DIP gaps, 2.5 DIP wide).
+    /// <paramref name="alpha"/> (0..1) fades all of it.
+    /// </summary>
+    public static void DrawClickRing(Graphics g, RectangleF ring, float corner, float s, Color accent, float alpha)
+    {
+        corner = Math.Min(corner, Math.Min(ring.Width, ring.Height) / 2);
+        using var path = RoundedRect(ring, corner);
+        Color Tint(int a) => Color.FromArgb((int)Math.Round(a * Math.Clamp(alpha, 0, 1)), accent);
+        using (var fill = new SolidBrush(Tint(RingFillAlpha))) g.FillPath(fill, path);
+        for (var i = 0; i < RingGlowExtraDip.Length; i++)
+        {
+            using var glow = new Pen(Tint(RingGlowAlphas[i]), (RingLineDip + RingGlowExtraDip[^(i + 1)]) * s) { LineJoin = LineJoin.Round };
+            g.DrawPath(glow, path);
+        }
+        using var dashed = new Pen(Tint(255), RingLineDip * s)
+        {
+            LineJoin = LineJoin.Round,
+            DashStyle = DashStyle.Custom,
+            DashPattern = [6 / RingLineDip, 4 / RingLineDip], // in pen widths
+        };
+        g.DrawPath(dashed, path);
     }
 
     public static Color Lerp(Color a, Color b, float t) => Color.FromArgb(a.A,

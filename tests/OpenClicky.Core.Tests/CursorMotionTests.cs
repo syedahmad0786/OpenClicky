@@ -340,4 +340,23 @@ public class CursorMotionTests
         d.Presence = CursorPresence.Docked;
         Assert.False(d.Detached);
     }
+
+    [Fact]
+    public void ReturnFlightCancelsPastOneHundredDipOfCursorMove()
+    {
+        var began = new Pt(500, 500);
+        Assert.False(ReturnFlight.Cancelled(began, new Pt(500, 500), 1));
+        Assert.False(ReturnFlight.Cancelled(began, new Pt(600, 500), 1));   // exactly 100: still flying
+        Assert.True(ReturnFlight.Cancelled(began, new Pt(600.5f, 500), 1));
+        Assert.False(ReturnFlight.Cancelled(began, new Pt(570, 570), 1));   // 98.99 px along the diagonal
+    }
+
+    [Fact]
+    public void ReturnFlightDistanceIsInDipNotPixels()
+    {
+        var began = new Pt(0, 0);
+        Assert.False(ReturnFlight.Cancelled(began, new Pt(190, 0), 2));     // 95 DIP at 200 %
+        Assert.True(ReturnFlight.Cancelled(began, new Pt(210, 0), 2));      // 105 DIP
+        Assert.True(ReturnFlight.Cancelled(began, new Pt(101, 0), float.NaN)); // a nonsense scale counts as 1
+    }
 }

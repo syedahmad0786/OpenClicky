@@ -1,5 +1,6 @@
 using System.Drawing;
 using OpenClicky.Core.CompanionCursor;
+using OpenClicky.Core.Drawing;
 
 namespace OpenClicky.Core;
 
@@ -16,6 +17,14 @@ public interface IOverlayController : IDisposable
     /// does not need a follow-up <see cref="ShowResponding"/> that could race.
     /// </param>
     void PointAt(int virtualX, int virtualY, string? label, string? spokenText = null);
+
+    /// <summary>
+    /// POINT at a control: <paramref name="controlFrame"/> (virtual-screen px) is the control's bounds, so the click ring
+    /// outlines it instead of a plain circle. Without a frame (or on an overlay that ignores it) this is the plain POINT.
+    /// </summary>
+    void PointAt(int virtualX, int virtualY, string? label, string? spokenText, Box? controlFrame) =>
+        PointAt(virtualX, virtualY, label, spokenText);
+
     Task<Rectangle?> SelectRegionAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult<Rectangle?>(null);
 

@@ -104,6 +104,18 @@ public sealed class FlightPath
     }
 }
 
+public static class ReturnFlight
+{
+    /// <summary>True when the real cursor is more than <see cref="CursorConstants.ReturnCancelDistance"/> DIP from where it was when the return flight began.</summary>
+    public static bool Cancelled(Pt began, Pt now, float dipScale)
+    {
+        var scale = float.IsFinite(dipScale) && dipScale > 0 ? dipScale : 1;
+        var dx = now.X - began.X;
+        var dy = now.Y - began.Y;
+        return float.IsFinite(dx) && float.IsFinite(dy) && MathF.Sqrt(dx * dx + dy * dy) / scale > CursorConstants.ReturnCancelDistance;
+    }
+}
+
 /// <summary>Detects a rapid back-and-forth cursor shake (the "detach" gesture).</summary>
 public sealed class ShakeDetector
 {

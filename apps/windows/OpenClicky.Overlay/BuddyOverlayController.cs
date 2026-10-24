@@ -74,6 +74,7 @@ public sealed class BuddyOverlayController : IOverlayController
     private const int MaxLabelChars = 120;
     private const float CatcherDip = 36;
     private const string DockBubbleText = "i'll wait up here";
+    private const float RingStartScale = 0.85f, RingStiffness = 300, RingDamping = 26;
 
     /// <summary>Marshals calls onto the thread that owns the windows (the one that constructed the controller).</summary>
     private readonly Control _ui = new();
@@ -94,6 +95,18 @@ public sealed class BuddyOverlayController : IOverlayController
     private double _lastTick;
     private Point? _pointTarget;
     private string? _pointLabel;
+    private Box? _pointFrame;
+    /// <summary>The curved flight in progress (a POINT's, or the return to the cursor); the tip is placed on it each frame.</summary>
+    private FlightPath? _flight;
+    private double _flightStart;
+    private bool _returning;
+    private Point _returnFrom;
+    /// <summary>A POINT whose flight starts on the next visible frame, from wherever the tip is by then (e.g. the notch).</summary>
+    private bool _flightPending;
+    /// <summary>The tip has landed: the click ring is revealed from then (spring from 0.85 to 1, then the breathing pulse).</summary>
+    private bool _pointArrived;
+    private double _arrivedAt, _ringLastStep;
+    private CursorSpring? _ringSpring;
     private string? _line;
     private bool _lineInstant;
     private double _lineStart;
@@ -107,7 +120,7 @@ public sealed class BuddyOverlayController : IOverlayController
     private bool _drawingDirty;
     private Bitmap? _cursorBitmap, _drawingBitmap;
     /// <summary>What the last still cursor frame showed; an unchanged still frame is not redrawn.</summary>
-    private (Pt Tip, float Scale, Mode Mode, string? Label, Color Accent, float DockScale, float DockAlpha) _lastStill;
+    private (Pt Tip, float Scale, Mode Mode, Color Accent, float DockScale, float DockAlpha) _lastStill;
 
     // Dock into the notch, and shake to detach.
     private readonly ShakeDetector _shake = new();
@@ -150,7 +163,7 @@ public sealed class BuddyOverlayController : IOverlayController
 
     /// <summary>True once a POINT has brought the tip to rest on its target (still pointing).</summary>
     public bool IsPointFlyComplete => InvokeRead(() =>
-        _mode == Mode.Pointing && _pointTarget is { } target && _spring is { } spring
+        _mode == Mode.Pointing && _pointTarget is { } target && _spring is { } spring && _flight is null && !_flightPending
         && Distance(spring.Position, target) <= 0.5f && MathF.Sqrt(spring.Velocity.X * spring.Velocity.X + spring.Velocity.Y * spring.Velocity.Y) < 5);
 
     /// <summary>Companion tip in virtual-screen pixels during / after a POINT; false when not pointing.</summary>
@@ -209,10 +222,19 @@ public sealed class BuddyOverlayController : IOverlayController
         Show();
     });
 
-    public void PointAt(int virtualX, int virtualY, string? label, string? spokenText = null) => Post(() =>
+    public void PointAt(int virtualX, int virtualY, string? label, string? spokenText = null) =>
+        PointAt(virtualX, virtualY, label, spokenText, null);
+
+    public void PointAt(int virtualX, int virtualY, string? label, string? spokenText, Box? controlFrame) => Post(() =>
     {
         _pointTarget = new Point(virtualX, virtualY);
         _pointLabel = string.IsNullOrWhiteSpace(label) ? null : label.Length > MaxLabelChars ? label[..MaxLabelChars] + "…" : label;
+        _pointFrame = controlFrame;
+        // The flight starts on the next visible frame; the ring is drawn once the tip has landed.
+        _flight = null;
+        _returning = false;
+        _flightPending = true;
+        _pointArrived = false;
         if (spokenText is not null) SetLine(spokenText, false);
         _mode = Mode.Pointing;
         Show();
@@ -220,7 +242,9 @@ public sealed class BuddyOverlayController : IOverlayController
 
     public void ShowIdle() => Post(() =>
     {
+        var wasPointing = _pointTarget is not null;
         ClearPointing();
+        if (wasPointing) BeginReturn();
         if (_line is not null) _lineIdleAt ??= Now; // the last spoken line fades out rather than vanishing
         _mode = Mode.Idle;
         Show();
@@ -296,7 +320,12 @@ public sealed class BuddyOverlayController : IOverlayController
             _hidden = true;
             _timer.Stop();
             _cursorWindow.HideWindow();
-            _drawingWindow.HideWindow();
+            _drawingWindow.HideWindow(); // marks and the click ring
+            // A POINT that is still held flies in again, and its ring is drawn again, when the overlay next appears.
+            _flight = null;
+            _returning = false;
+            _flightPending = _pointTarget is not null;
+            _pointArrived = false;
             HideCatcher();
             _cursorShown = false;
             ApplyDockEffect(_dock.Interrupt()); // docking is abandoned; the next appearance grows out of the notch
@@ -363,6 +392,39 @@ public sealed class BuddyOverlayController : IOverlayController
     {
         _pointTarget = null;
         _pointLabel = null;
+        _pointFrame = null;
+        _flight = null;
+        _returning = false;
+        _flightPending = false;
+        _pointArrived = false;
+        _ringSpring = null;
+    }
+
+    /// <summary>
+    /// After a POINT the tip flies back to the real cursor's resting spot. With reduced motion (or when the companion is not on
+    /// screen) there is no flight: the spring just follows. <see cref="DrawCursorFrame"/> cancels the flight when the cursor moves.
+    /// </summary>
+    private void BeginReturn()
+    {
+        if (_style.ReducedMotion || _spring is not { } spring || !_cursorShown) return;
+        var cursor = Cursor.Position;
+        var scale = DpiScale.ForPoint(cursor);
+        _flight = new FlightPath(spring.Position, new Pt(cursor.X + CursorConstants.TipOffsetX * scale, cursor.Y + CursorConstants.TipOffsetY * scale));
+        _flightStart = Now;
+        _returning = true;
+        _returnFrom = cursor;
+    }
+
+    /// <summary>
+    /// A return flight ends when the real cursor has moved more than <see cref="CursorConstants.ReturnCancelDistance"/> DIP since
+    /// it began; the spring then follows the cursor. Cancelling is final.
+    /// </summary>
+    private bool ReturnCancelled(Point cursor, float cursorScale)
+    {
+        if (!_returning || !ReturnFlight.Cancelled(new Pt(_returnFrom.X, _returnFrom.Y), new Pt(cursor.X, cursor.Y), cursorScale)) return false;
+        _flight = null;
+        _returning = false;
+        return true;
     }
 
     private void SetLine(string? text, bool instant)
@@ -380,6 +442,7 @@ public sealed class BuddyOverlayController : IOverlayController
         _drawingWindow.HideWindow();
         _drawingBitmap?.Dispose();
         _drawingBitmap = null;
+        _drawingDirty = true; // a held click ring is drawn again on its own
     }
 
     private void Frame()
@@ -418,16 +481,39 @@ public sealed class BuddyOverlayController : IOverlayController
         StepDetach(cursor, now, spring.Position);
         var target = _mode == Mode.Pointing && _pointTarget is { } point ? new Pt(point.X, point.Y) : _detach.Detached ? _detach.At : follow;
         if (!_cursorShown && _dock.Phase != DockPhase.Grow) spring.Snap(follow); // reappearing: start beside the real cursor, not where it was last seen
-        if (_dock.FlightAt(now) is { } flying) spring.Snap(flying);
-        else if (_dock.Phase == DockPhase.Shrink) { if (!_style.ReducedMotion) spring.Snap(Notch); }
-        else if (_style.ReducedMotion) spring.Snap(target);
+        if (_flightPending && _pointTarget is { } landing)
+        {
+            _flightPending = false;
+            if (!_style.ReducedMotion)
+            {
+                _flight = new FlightPath(spring.Position, new Pt(landing.X, landing.Y));
+                _flightStart = now;
+                _returning = false;
+            }
+        }
+        if (_dock.FlightAt(now) is { } flying) { _flight = null; spring.Snap(flying); }
+        else if (_dock.Phase == DockPhase.Shrink) { _flight = null; if (!_style.ReducedMotion) spring.Snap(Notch); }
+        else if (_style.ReducedMotion) { _flight = null; spring.Snap(target); }
+        else if (_flight is { } flight && !ReturnCancelled(cursor, cursorScale))
+        {
+            var elapsed = now - _flightStart;
+            spring.Snap(flight.At(elapsed)); // the last point of a flight is the target itself
+            if (elapsed >= flight.DurationSeconds) _flight = null;
+        }
         else spring.Step(target, dt);
+        if (_flight is null) _returning = false;
+        if (_pointTarget is not null && !_pointArrived && _flight is null && !_flightPending)
+        {
+            _pointArrived = true;
+            _arrivedAt = _ringLastStep = now;
+            _ringSpring = new CursorSpring(new Pt(RingStartScale, 0), RingStiffness, RingDamping);
+        }
 
         var (dockScale, dockAlpha) = _dock.Look(now, _style.ReducedMotion);
         var tip = new PointF(spring.Position.X, spring.Position.Y);
         var s = DpiScale.ForPoint(Point.Round(tip));
         UpdateCatcher(tip, s);
-        var still = (spring.Position, s, _mode, _pointLabel, _accent, dockScale, dockAlpha);
+        var still = (spring.Position, s, _mode, _accent, dockScale, dockAlpha);
         if (_mode is not (Mode.Listening or Mode.Processing) && _line is null && _cursorShown && still == _lastStill) return;
         _lastStill = still;
         var chrome = _dock.Chrome; // bars, dots and bubbles stay behind as it flies into the notch
@@ -450,13 +536,6 @@ public sealed class BuddyOverlayController : IOverlayController
 
         var workArea = Screen.FromPoint(Point.Round(tip)).WorkingArea;
         var work = new Box(workArea.X, workArea.Y, workArea.Width, workArea.Height);
-        RectangleF? labelBox = null;
-        if (chrome && _mode == Mode.Pointing && _pointLabel is { } label)
-        {
-            var size = CursorRenderer.LabelSize(label, s);
-            labelBox = ToRect(BubbleLayout.Label(new Pt(tip.X, tip.Y), size.Width, size.Height, work));
-            bounds = RectangleF.Union(bounds, labelBox.Value);
-        }
         RectangleF? messageBox = null;
         var (revealed, alpha) = MessageState(now, s);
         if (chrome && _lineLayout is { } layout && alpha > 0)
@@ -478,7 +557,6 @@ public sealed class BuddyOverlayController : IOverlayController
             CursorRenderer.DrawCompanion(g, triangle, cs, _accent);
             if (listening) CursorRenderer.DrawBars(g, tip, s, _bars, _accent);
             if (processing) CursorRenderer.DrawDots(g, centroid, s, now, _style.ReducedMotion, _accent);
-            if (labelBox is { } lb) CursorRenderer.DrawLabel(g, lb, _pointLabel!, s, _accent);
             if (messageBox is { } mb) CursorRenderer.DrawMessage(g, mb, _lineLayout!, revealed, alpha);
         }
         _cursorWindow.Present(bitmap, frame.Location, (byte)Math.Round(255 * dockAlpha));
@@ -583,35 +661,96 @@ public sealed class BuddyOverlayController : IOverlayController
         return (float)Math.Clamp(1 - (now - fadeStart) / fade, 0, 1);
     }
 
-    /// <summary>Repaints the marks while their pen reveal runs (350 ms each, one after another); false once they are still.</summary>
-    // ponytail: a full virtual-screen bitmap is re-sent each frame of the reveal; C6's drawing layer owns damage tracking.
+    /// <summary>
+    /// Repaints the marks while their pen reveal runs (350 ms each, one after another) and the click ring while it reveals and
+    /// breathes; false once everything is still. The window covers the whole virtual screen while marks show, and only the ring
+    /// (and its label) otherwise.
+    /// </summary>
+    // ponytail: with marks showing, a full virtual-screen bitmap is re-sent each ring frame; C6's drawing layer owns damage tracking.
     private bool DrawDrawingFrame(double now)
     {
-        if (_marks.Count == 0)
+        var ring = CurrentRing(now);
+        if (_marks.Count == 0 && ring is null)
         {
             _drawingWindow.HideWindow();
             return false;
         }
-        if (!_drawingDirty) return false;
+        var ringAnimating = ring is { Animating: true };
+        if (!_drawingDirty && !ringAnimating) return false;
 
-        var screen = SystemInformation.VirtualScreen;
-        var bitmap = EnsureBitmap(ref _drawingBitmap, screen.Size);
+        var area = _marks.Count > 0 ? SystemInformation.VirtualScreen : Rectangle.Ceiling(ring!.Value.Paint);
+        var bitmap = EnsureBitmap(ref _drawingBitmap, area.Size);
         var animating = false;
         using (var g = Graphics.FromImage(bitmap))
         {
             g.Clear(Color.Transparent);
             CursorRenderer.Prepare(g);
-            g.TranslateTransform(-screen.X, -screen.Y);
+            g.TranslateTransform(-area.X, -area.Y);
             for (var index = 0; index < _marks.Count; index++)
             {
                 var progress = _style.ReducedMotion ? 1f : (float)Math.Clamp((now - _marksStart - index * MarkSeconds) / MarkSeconds, 0, 1);
                 if (progress < 1) animating = true;
                 if (progress > 0) DrawMark(g, _marks[index], progress);
             }
+            if (ring is { } r) DrawRing(g, r);
         }
-        _drawingWindow.Present(bitmap, screen.Location);
+        _drawingWindow.Present(bitmap, area.Location);
         _drawingDirty = animating;
-        return animating;
+        return animating || ringAnimating;
+    }
+
+    /// <summary>Everything the click ring needs for one frame.</summary>
+    private readonly record struct RingFrame(RectangleF Ring, float Corner, float Scale, float Alpha, float Dip, RectangleF? Label, RectangleF Paint, bool Animating);
+
+    /// <summary>
+    /// The ring round the POINT target once the tip has landed: its box (the control's frame, or a 28 DIP circle), the spring
+    /// reveal (scale 0.85 to 1) and the 1.6 s breathing pulse (opacity 0.75 to 1, up to 3 DIP bigger). Reduced motion: no spring
+    /// and no pulse, just a 120 ms fade. Null when there is nothing to draw.
+    /// </summary>
+    private RingFrame? CurrentRing(double now)
+    {
+        if (_hidden || !_pointArrived || _pointTarget is not { } target || _ringSpring is not { } spring) return null;
+        var dip = DpiScale.ForPoint(target);
+        var workArea = Screen.FromPoint(target).WorkingArea;
+        var layout = ClickRingLayout.From(_pointFrame, new Pt(target.X, target.Y), dip,
+            new Box(workArea.X, workArea.Y, workArea.Width, workArea.Height));
+
+        var elapsed = now - _arrivedAt;
+        var reduced = _style.ReducedMotion;
+        var scale = 1f;
+        if (!reduced)
+        {
+            scale = spring.Step(new Pt(1, 0), now - _ringLastStep).X;
+            _ringLastStep = now;
+        }
+        var (alpha, inflateDip) = ClickRingLayout.Pulse(elapsed, reduced);
+
+        var box = ToRect(layout.Ring);
+        box.Inflate(inflateDip * dip, inflateDip * dip);
+        var centre = new PointF(box.X + box.Width / 2, box.Y + box.Height / 2);
+        var ring = new RectangleF(centre.X - box.Width * scale / 2, centre.Y - box.Height * scale / 2, box.Width * scale, box.Height * scale);
+
+        // What can ever be painted, so the window (and its bitmap) keeps one size: the biggest pulse, a spring overshoot, the glow.
+        var reach = Math.Max(layout.Ring.W, layout.Ring.H) * 0.15f + CursorRenderer.RingPaintMarginDip * dip;
+        var paint = ToRect(layout.Ring);
+        paint.Inflate(reach, reach);
+
+        RectangleF? label = null;
+        if (_pointLabel is { } text)
+        {
+            var size = CursorRenderer.LabelSize(text, dip);
+            var x = Math.Clamp(layout.LabelAnchor.X - size.Width / 2, workArea.Left, Math.Max(workArea.Left, workArea.Right - size.Width));
+            var y = layout.LabelBelow ? layout.LabelAnchor.Y : layout.LabelAnchor.Y - size.Height;
+            label = new RectangleF(x, y, size.Width, size.Height);
+            paint = RectangleF.Union(paint, label.Value);
+        }
+        return new RingFrame(ring, layout.CornerRadius * scale, scale, alpha, dip, label, paint, Animating: !reduced || elapsed < ClickRingLayout.FadeInSeconds);
+    }
+
+    private void DrawRing(Graphics g, RingFrame ring)
+    {
+        CursorRenderer.DrawClickRing(g, ring.Ring, ring.Corner, ring.Dip, _accent, ring.Alpha);
+        if (ring.Label is { } box && _pointLabel is { } text) CursorRenderer.DrawLabel(g, box, text, ring.Dip, _accent);
     }
 
     private void DrawMark(Graphics g, VirtualAnnotation mark, float progress)
