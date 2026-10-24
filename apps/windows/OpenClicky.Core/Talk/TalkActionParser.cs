@@ -17,6 +17,8 @@ public static class TalkActionParser
 {
     public const int MaxActions = 3;
     public const int MaxTextLength = 2000;
+    /// <summary>Leaves room in a 2,000-char card body for the punycode host line of a lookalike domain.</summary>
+    public const int MaxUrlLength = 1700;
 
     private static readonly (string Prefix, TalkActionKind Kind)[] Tags =
         [("[OPEN:", TalkActionKind.Open), ("[COPY:", TalkActionKind.Copy), ("[TYPE:", TalkActionKind.Type)];
@@ -81,9 +83,11 @@ public static class TalkActionParser
     private static TalkAction? Validate(TalkActionKind kind, string value)
     {
         if (value.Length == 0) return null;
+        // A TYPE of only control characters would type nothing but spaces.
+        if (kind == TalkActionKind.Type && string.IsNullOrWhiteSpace(TalkActionText.SanitizeForTyping(value))) return null;
         if (kind != TalkActionKind.Open) return value.Length <= MaxTextLength ? new(kind, value) : null;
         return Uri.TryCreate(value, UriKind.Absolute, out var uri)
-            && uri.Scheme is "http" or "https" && uri.UserInfo.Length == 0 && uri.AbsoluteUri.Length <= MaxTextLength
+            && uri.Scheme is "http" or "https" && uri.UserInfo.Length == 0 && uri.AbsoluteUri.Length <= MaxUrlLength
             ? new(kind, uri.AbsoluteUri) : null;
     }
 }

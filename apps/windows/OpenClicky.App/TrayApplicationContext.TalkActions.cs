@@ -23,9 +23,7 @@ internal sealed partial class TrayApplicationContext
         _talk.ActionsRequested += actions =>
         {
             var snapshot = Interlocked.Exchange(ref _talkReplyAccess, 0);
-            // No snapshot means nothing to trust: preview. A mode narrowed since the reply applies; a wider one never does.
-            var mode = snapshot == 0 ? AgentAccessMode.Preview
-                : (AgentAccessMode)Math.Min(snapshot - 1, (int)_settings.AgentAccess);
+            var mode = TalkActionPolicy.EffectiveMode(snapshot == 0 ? null : (AgentAccessMode)(snapshot - 1), _settings.AgentAccess);
             _uiContext.Post(_ => _ = RunTalkActionsAsync(actions, mode), null);
         };
     }
@@ -37,18 +35,21 @@ internal sealed partial class TrayApplicationContext
         {
             try
             {
-                var decision = TalkActionPolicy.Decide(action, mode);
-                Log($"talk_action kind={action.Kind} decision={decision} mode={mode}");
+                // Checked per action, on the UI thread: a running (not paused) agent task may be typing too.
+                var taskRunning = _taskCts is not null && !_taskControl.IsPaused;
+                var decision = TalkActionPolicy.Decide(action, mode, taskRunning);
+                Log($"talk_action kind={action.Kind} decision={decision} mode={mode} task_running={taskRunning}");
                 switch (decision)
                 {
                     case TalkActionDecision.PreviewOnly:
-                        ShowTalkActionCard(TalkActionText.Preview(action));
+                        ShowTalkActionCard(mode != AgentAccessMode.Preview && action.Kind == TalkActionKind.Type
+                            ? TalkActionText.TypeHeldForTask(action) : TalkActionText.Preview(action));
                         break;
                     case TalkActionDecision.AskFirst when action.Kind == TalkActionKind.Type:
                         await TypeTalkTextAsync(action, ask: true);
                         break;
                     case TalkActionDecision.AskFirst:
-                        if (await _confirm.ConfirmNonInputAsync(TalkActionText.ConfirmSummary(action), _lifetime.Token)) RunTalkAction(action, asked: true);
+                        if (await _confirm.ConfirmTalkAsync(TalkActionText.ConfirmSummary(action), restoreTarget: false, _lifetime.Token)) RunTalkAction(action, asked: true);
                         break;
                     default:
                         if (action.Kind == TalkActionKind.Type) await TypeTalkTextAsync(action, ask: false);
@@ -107,7 +108,7 @@ internal sealed partial class TrayApplicationContext
             if (string.IsNullOrEmpty(copy.Previous)) Clipboard.Clear();
             else Clipboard.SetText(copy.Previous, TextDataFormat.UnicodeText);
         }
-        catch (Exception ex) when (ex is System.Runtime.InteropServices.ExternalException or ThreadStateException)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             Log("talk_copy_undo_error=" + ex.GetType().Name);
             _shell?.AddToast("I couldn't restore the clipboard.");
@@ -130,20 +131,21 @@ internal sealed partial class TrayApplicationContext
         var exclusions = AgentDenyList.ParseExtraFragments(_settings.AgentDenyListExtra);
         if (!DictationTarget.TryCapture(out var target, out var error, exclusions) || target is null)
         {
-            TalkActionNotice("I didn't type it. " + error);
+            TalkActionNotice(TalkActionText.TypeRefused(error));
             return;
         }
-        if (ask && !await _confirm.ConfirmAsync(TalkActionText.ConfirmSummary(action, $"{target.ControlName} in {target.AppTitle}"), _lifetime.Token))
+        if (ask && !await _confirm.ConfirmTalkAsync(TalkActionText.ConfirmSummary(action, $"{target.ControlName} in {target.AppTitle}"), restoreTarget: true, _lifetime.Token))
             return;
         if (!await WaitForModifiersReleasedAsync(_lifetime.Token))
         {
             TalkActionNotice("I didn't type it because keys were still held down.");
             return;
         }
-        var result = await target.InsertAsync(TalkActionText.SanitizeForTyping(action.Value), _executor, _lifetime.Token,
-            requireCurrentFocus: true, exclusions: exclusions);
+        var text = TalkActionText.SanitizeForTyping(action.Value);
+        var result = await target.InsertAsync(text, _executor, _lifetime.Token, requireCurrentFocus: true, exclusions: exclusions);
         Log($"talk_type attempted={result.InputAttempted} verified={result.Verified}");
-        TalkActionNotice(result.Message);
+        // The insertion's own messages are worded for dictation drafts.
+        TalkActionNotice(TalkActionText.TypeResult(result.InputAttempted, result.InputCompleted, result.Verified, result.FinalText is not null, text.Length));
     }
 
     private void ShowTalkActionCard(NotchCard card)

@@ -71,3 +71,18 @@ it("cards without autoDismissMs stay until dismissed", () => {
   act(() => { vi.advanceTimersByTime(600_000); });
   expect(host.posts("card.dismiss")).toEqual([]);
 });
+
+it("a body that overflows takes keyboard focus and is named; a short one does not", () => {
+  mockHost();
+  vi.spyOn(Element.prototype, "clientHeight", "get").mockReturnValue(100);
+  const tall = vi.spyOn(Element.prototype, "scrollHeight", "get").mockReturnValue(400);
+  const { unmount } = render(<NotchCards cards={[card("long", { title: "Preview: I would copy this", body: "x".repeat(2_000) })]} />);
+  const region = screen.getByRole("region", { name: "Preview: I would copy this, full text" });
+  expect(region.tabIndex).toBe(0);
+  unmount();
+  tall.mockReturnValue(100);
+  const { container } = render(<NotchCards cards={[card("short", { body: "short" })]} />);
+  const body = container.querySelector(".notch-card__body")!;
+  expect(body.hasAttribute("tabindex")).toBe(false);
+  expect(screen.queryByRole("region")).toBeNull();
+});

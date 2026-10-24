@@ -44,6 +44,63 @@ public class TalkActionTextTests
     }
 
     [Fact]
+    public void SnippetNeverSplitsASurrogatePair()
+    {
+        var text = new string('a', 59) + "\U0001F600" + "tail";
+        Assert.Equal(new string('a', 59) + "…", TalkActionText.Snippet(text));
+        Assert.Equal(new string('a', 58) + "\U0001F600…", TalkActionText.Snippet(new string('a', 58) + "\U0001F600" + "tail"));
+    }
+
+    [Fact]
+    public void LookalikeHostsAlsoShowTheirPunycodeHost()
+    {
+        const string cyrillic = "https://аpple.com/";
+        Assert.Contains("xn--pple-43d.com", TalkActionText.DescribeUrl(cyrillic));
+        Assert.StartsWith(cyrillic, TalkActionText.DescribeUrl(cyrillic));
+        Assert.Contains("xn--pple-43d.com", TalkActionText.ConfirmSummary(new(TalkActionKind.Open, cyrillic)));
+        Assert.Contains("xn--pple-43d.com", TalkActionText.Opened(cyrillic).Body);
+        Assert.Contains("xn--pple-43d.com", TalkActionText.Preview(new(TalkActionKind.Open, cyrillic)).Body);
+        Assert.Equal("https://example.com/", TalkActionText.DescribeUrl("https://example.com/"));
+    }
+
+    [Fact]
+    public void TheLongestAllowedLookalikeAddressFitsACardBody()
+    {
+        var host = string.Join('.', Enumerable.Repeat("аааааааааа", 8)) + ".com";
+        var parsed = TalkActionParser.Parse($"[OPEN:https://{host}/{new string('p', TalkActionParser.MaxUrlLength)}]").Actions;
+        Assert.Empty(parsed); // over the cap: dropped
+        var url = Assert.Single(TalkActionParser.Parse($"[OPEN:https://{host}/{new string('p', 1500)}]").Actions).Value;
+        Assert.True(TalkActionText.Opened(url).Body!.Length <= 2000);
+        Assert.Contains("xn--", TalkActionText.Opened(url).Body);
+    }
+
+    [Fact]
+    public void TypeNoticesUseTalkWording()
+    {
+        Assert.Contains("password", TalkActionText.TypeRefused("Dictation is unavailable in password or protected fields."));
+        Assert.Contains("excluded", TalkActionText.TypeRefused("This app is excluded from dictation. Nothing was inspected."));
+        Assert.Contains("read-only", TalkActionText.TypeRefused("The selected text field is read-only."));
+        string[] notices =
+        [
+            TalkActionText.TypeRefused("Select an editable text field in another app, then start dictation again."),
+            TalkActionText.TypeResult(true, true, true, true, 5), TalkActionText.TypeResult(false, false, false, false, 5),
+            TalkActionText.TypeResult(true, false, false, false, 5), TalkActionText.TypeResult(true, true, false, false, 5),
+            TalkActionText.TypeResult(true, true, false, true, 5),
+        ];
+        Assert.Equal(notices.Length, notices.Distinct().Count());
+        Assert.All(notices, n => { Assert.DoesNotContain("dictat", n, StringComparison.OrdinalIgnoreCase); Assert.DoesNotContain("draft", n); });
+    }
+
+    [Fact]
+    public void TaskHeldTypeCardExplainsWhy()
+    {
+        var card = TalkActionText.TypeHeldForTask(new(TalkActionKind.Type, "a\tb"));
+        Assert.Contains("task is running", card.Title);
+        Assert.Equal("a b", card.Body);
+        Assert.Empty(card.Actions);
+    }
+
+    [Fact]
     public void ConfirmationShowsTheFullAddressOrText()
     {
         var text = new string('t', 2000);

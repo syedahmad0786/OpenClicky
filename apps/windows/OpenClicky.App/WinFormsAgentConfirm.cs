@@ -22,15 +22,21 @@ internal sealed class WinFormsAgentConfirm : IAgentConfirm
     }
 
     public Task<bool> ConfirmAsync(string summary, CancellationToken cancellationToken = default)
-        => ConfirmCoreAsync(summary, false, true, cancellationToken);
+        => ConfirmCoreAsync(summary, Wording.Action, true, cancellationToken);
 
     public Task<bool> ConfirmNonInputAsync(string summary, CancellationToken cancellationToken = default)
-        => ConfirmCoreAsync(summary, false, false, cancellationToken);
+        => ConfirmCoreAsync(summary, Wording.Action, false, cancellationToken);
 
     public Task<bool> ConfirmTaskAsync(string summary, CancellationToken cancellationToken = default)
-        => ConfirmCoreAsync(summary, true, true, cancellationToken);
+        => ConfirmCoreAsync(summary, Wording.Task, true, cancellationToken);
 
-    private Task<bool> ConfirmCoreAsync(string summary, bool wholeTask, bool restoreTarget, CancellationToken cancellationToken)
+    /// <summary>A talk reply's OPEN or TYPE: declining only skips that action. Restore the target when typing follows.</summary>
+    public Task<bool> ConfirmTalkAsync(string summary, bool restoreTarget, CancellationToken cancellationToken = default)
+        => ConfirmCoreAsync(summary, Wording.Talk, restoreTarget, cancellationToken);
+
+    private enum Wording { Action, Task, Talk }
+
+    private Task<bool> ConfirmCoreAsync(string summary, Wording wording, bool restoreTarget, CancellationToken cancellationToken)
     {
         var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         void Show()
@@ -47,7 +53,7 @@ internal sealed class WinFormsAgentConfirm : IAgentConfirm
             _isDialogOpen = true;
             try
             {
-                using var dialog = new AgentConfirmDialog(summary, wholeTask);
+                using var dialog = new AgentConfirmDialog(summary, wording);
                 using var registration = cancellationToken.Register(() => _ui.Post(_ =>
                 {
                     if (!dialog.IsDisposed) dialog.Close();
@@ -85,9 +91,11 @@ internal sealed class WinFormsAgentConfirm : IAgentConfirm
     /// <summary>Top-most Yes/No form that fully closes before SendInput continues.</summary>
     private sealed class AgentConfirmDialog : Form
     {
-        public AgentConfirmDialog(string summary, bool wholeTask)
+        public AgentConfirmDialog(string summary, Wording wording)
         {
-            Text = "OpenClicky Agent";
+            var wholeTask = wording == Wording.Task;
+            var talk = wording == Wording.Talk;
+            Text = talk ? "OpenClicky" : "OpenClicky Agent";
             AppTheme.Apply(this);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterScreen;
@@ -103,13 +111,14 @@ internal sealed class WinFormsAgentConfirm : IAgentConfirm
                 Dock = DockStyle.Fill, Multiline = true, ReadOnly = true,
                 ScrollBars = ScrollBars.Vertical, BorderStyle = BorderStyle.None,
                 BackColor = AppTheme.Background, ForeColor = AppTheme.Ink,
-                Text = (wholeTask ? "Approve this task plan?" : "Allow this one action?") + "\r\n\r\n" + summary + "\r\n\r\nThe task stops if you decline or press Escape.",
+                Text = (talk ? "Do this?" : wholeTask ? "Approve this task plan?" : "Allow this one action?") + "\r\n\r\n" + summary
+                    + (talk ? "\r\n\r\nNothing happens if you decline." : "\r\n\r\nThe task stops if you decline or press Escape."),
                 AccessibleName = "Proposed desktop action",
             };
 
-            var yes = AppTheme.Button(wholeTask ? "Approve task" : "Allow action", true);
+            var yes = AppTheme.Button(talk ? "Allow" : wholeTask ? "Approve task" : "Allow action", true);
             yes.DialogResult = DialogResult.Yes;
-            var no = AppTheme.Button("Stop task");
+            var no = AppTheme.Button(talk ? "Don't" : "Stop task");
             no.DialogResult = DialogResult.No;
             var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 58, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(0,12,0,0) };
             buttons.Controls.AddRange(new Control[] { no, yes });

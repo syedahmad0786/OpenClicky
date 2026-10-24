@@ -107,6 +107,14 @@ public class TalkActionParserTests
     }
 
     [Fact]
+    public void TypeOfOnlyControlCharactersIsDroppedButStripped()
+    {
+        var r = TalkActionParser.Parse("x [TYPE:\u0007\u0001] y [TYPE:\t] z");
+        Assert.Empty(r.Actions);
+        Assert.Equal("x y z", r.Text);
+    }
+
+    [Fact]
     public void MarkLabelsThatLookLikeActionsAreLeftAlone()
     {
         const string reply = "here [MARK:text:10,20:OPEN:https://example.com:screen1] and [MARK:rect:1,2,3,4:COPY: TYPE:x:screen1]";

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { postPage } from "../bridge";
 import type { NotchCard } from "../contract";
 import { CloseIcon, PillButton, type PillVariant } from "../ui";
@@ -12,6 +12,22 @@ function Lead({ kind }: { kind: NotchCard["kind"] }) {
   return kind === "activity"
     ? <span className="notch-card__lead notch-card__dots" aria-hidden="true"><i /><i /><i /></span>
     : <span className="notch-card__lead notch-card__dot" aria-hidden="true" />;
+}
+
+/** A body taller than its max height scrolls; then it takes keyboard focus so it can be scrolled without a mouse. */
+function CardBody({ text, title }: { text: string; title: string }) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  const [scrolls, setScrolls] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el) setScrolls(el.scrollHeight > el.clientHeight);
+  }, [text]);
+  return (
+    <p ref={ref} className="notch-card__body" tabIndex={scrolls ? 0 : undefined}
+      role={scrolls ? "region" : undefined} aria-label={scrolls ? `${title}, full text` : undefined}>
+      {text}
+    </p>
+  );
 }
 
 function CardView({ card, onDismiss, active }: { card: NotchCard; onDismiss: (id: string) => void; active: boolean }) {
@@ -63,7 +79,7 @@ function CardView({ card, onDismiss, active }: { card: NotchCard; onDismiss: (id
       <Lead kind={card.kind} />
       <div className="notch-card__main">
         <p className="notch-card__title">{card.title}</p>
-        {card.body ? <p className="notch-card__body">{card.body}</p> : null}
+        {card.body ? <CardBody text={card.body} title={card.title} /> : null}
         {card.actions.length ? (
           <div className="notch-card__actions">
             {card.actions.slice(0, 3).map((action) => (
