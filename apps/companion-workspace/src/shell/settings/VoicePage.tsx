@@ -48,7 +48,7 @@ export function VoicePage({ state }: { state: ShellState }) {
               onClick={() => (voice.available ? choose(voice.id) : act("secret.edit", "openai"))} />
           ))}
         </div>
-        <Row title="OpenAI key" description="Used only for OpenAI voices. Windows keeps it in Credential Manager.">
+        <Row title="OpenAI key" description="Used only for OpenAI voices. With one selected, the text of each reply sentence (and the voice preview) is sent to api.openai.com to be spoken; the audio is not kept. Windows keeps the key in Credential Manager.">
           <PillButton onClick={() => act("secret.edit", "openai")}>{needsKey ? "Add key" : "Change"}</PillButton>
         </Row>
       </Group>

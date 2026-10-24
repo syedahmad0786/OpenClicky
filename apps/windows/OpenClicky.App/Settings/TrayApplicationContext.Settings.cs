@@ -245,7 +245,7 @@ internal sealed partial class TrayApplicationContext
         if (SettingsActionArgs.SecretFor(arg) is not { } secret) { Log("settings: unknown secret"); return; }
         var (name, title) = secret;
         var openAi = name == SecretNames.OpenAiApiKey;
-        var use = openAi ? " It is used only for OpenAI voices." : "";
+        var use = openAi ? " It is used only for OpenAI voices: with one selected, the text of each reply sentence is sent to api.openai.com to be spoken." : "";
         if (Modal(() => NativeSettings.PromptSecret(title, $"Paste your {title}.{use} It is saved with Windows Credential Manager, never in settings or logs. Leave it empty to remove the key."), null)
             is not { Secret: var key }) return;
         if (key.Length == 0) _secrets.Delete(name);

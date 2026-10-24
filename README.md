@@ -41,13 +41,14 @@ Performance is measured separately for capture, transcription, model response an
 
 ## Privacy and control
 
-- Screen questions share every connected display (up to four, the one with your cursor first) with OpenClicky's own windows left out, or only the area you select, plus request text, with ChatGPT. Tasks inspect relevant windows/tabs and may retrieve requested saved context. Raw audio is transcribed locally and discarded.
+- Screen questions share every connected display (up to four, the one with your cursor first) with OpenClicky's own windows left out, or only the area you select, plus request text, with ChatGPT. A display showing a protected window (Settings → Access) is left out. Tasks inspect relevant windows/tabs and may retrieve requested saved context. Raw audio is transcribed locally and discarded.
 - Ambient awareness starts with local activity signals and asks before inspecting a task. Exclusions are applied before supported inspection/capture paths. Window titles are convenience guards, not a security boundary.
 - ChatGPT credentials stay in the protected store. The private local inference adapter gives the managed OpenWork engine short-lived local authentication, not stored provider credentials.
 - Conversations, notes, clips and artifact references persist locally in SQLite; original JSON imports remain for recovery. The history preference is respected. Memory is editable and source-linked; forgetting suppresses recreation from its retained source.
 - **Confirm each** remains the default. Preview disables mutations. Auto confirms the plan and actions its rules classify as consequential/uncertain. Full access requires explicit warning acceptance. A running task keeps its initial access snapshot. Stop cannot undo completed input.
 - Generated visuals use constrained data and isolated rendering. Desktop actions still pass through the host broker. The task profile cannot use unrestricted shell tools.
 - Existing optional OpenRouter settings are retained for compatibility; cloud audio is sent only when explicitly selected.
+- Windows voices speak replies on the PC. With an OpenAI voice selected (Settings → Voice), the text of each reply sentence, and the voice preview line, is sent to api.openai.com with your OpenAI key to be spoken; the audio comes back and is not kept.
 
 See [agent safety](docs/agent-safety.md), [architecture](docs/architecture.md) and [video requirements](docs/video-acceptance-matrix.md). The video review is sampled visual evidence, not a claim of frame-by-frame inspection or complete feature parity.
 
