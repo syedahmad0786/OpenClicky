@@ -287,6 +287,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         try { _physicalInput.Start(); }
         catch (Exception ex) { Log("takeover_monitor_error=" + ex.GetType().Name); ClassicMessage("Automatic pause on physical input is unavailable. Use Stop before taking over a running task."); }
         _companionDock.Show();
+        ApplyCompanionStyle();
         if (_settings.AwarenessEnabled) _guideTimer.Start();
         Log($"tray ready — {TalkGesture} to talk");
         if (string.IsNullOrWhiteSpace(_settings.OpenRouterApiKey)
@@ -911,7 +912,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             _activeTaskGoal = "";
             _activeJob = null;
             job.Dispose();
-            OnUi(() => { _home.SetTaskRunning(false); if (_talk.State == CompanionVoiceState.Idle) _overlay.Hide(); SaveTasks(); RequestShellPush(); });
+            OnUi(() => { _home.SetTaskRunning(false); if (_talk.State == CompanionVoiceState.Idle) _overlay.ShowIdle(); SaveTasks(); RequestShellPush(); });
             _talk.ResumeConversation();
         }
     }
@@ -949,10 +950,10 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
     private void PauseTask()
     {
         if (_taskCts is null) return;
-        _overlay.Hide();
         var alreadyPaused = _taskControl.IsPaused;
         _taskControl.Pause();
         if (alreadyPaused) return;
+        if (_talk.State == CompanionVoiceState.Idle) _overlay.ShowIdle(); // a talk turn (a held press) owns the companion
         if (_runningTaskId is { } id) RecordProgress(id, new(0, "paused", "Paused at the next action boundary. Say resume task to continue."));
     }
 
@@ -1140,7 +1141,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         }
         finally
         {
-            _overlay.Hide();
+            _overlay.ShowIdle();
             if (ReferenceEquals(_submissionCts, selection)) _submissionCts = null;
             _home.SetState(_talk.State);
             if (!selected)
@@ -1441,6 +1442,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
                 Log($"selected_region=({area.X},{area.Y},{area.Width},{area.Height})");
                 await _talk.SubmitRegionAsync(string.IsNullOrWhiteSpace(text) ? "Explain this selected area and point out the next useful control." : text, (area.X, area.Y, area.Width, area.Height));
             }
+            else _overlay.ShowIdle(); // selection hid the companion
         }
         catch (Exception ex) { ClassicMessage("Selected area request could not finish: " + ex.Message); }
         finally { ShowClassic(); }
@@ -1507,6 +1509,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         IgnoreLegacyFixtureTranscript();
         _tts.Enabled = _settings.SpeakReplies;
         ApplyShortcutBindings();
+        ApplyCompanionStyle();
         RefreshConnection();
         ResetShellChat();
         Log(

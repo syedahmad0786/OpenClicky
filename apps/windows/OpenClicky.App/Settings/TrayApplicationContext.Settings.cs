@@ -106,6 +106,7 @@ internal sealed partial class TrayApplicationContext
             case "microphone.deviceId": StopMicTest(); RefreshConnection(); break; // the recorders read the device id on each start
             case var account when account.StartsWith("account.", StringComparison.Ordinal): RefreshConnection(); break;
             case var shortcut when shortcut.StartsWith("shortcuts.", StringComparison.Ordinal): ApplyShortcutBindings(); break;
+            case var cursor when cursor.StartsWith("cursor.", StringComparison.Ordinal): ApplyCompanionStyle(); break;
         }
     }
 

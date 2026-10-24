@@ -82,7 +82,8 @@ internal sealed partial class TrayApplicationContext
     }
 
     /// <summary>
-    /// A revealed talk hold: sample the recording microphone every 100 ms until listening ends. A hold of 3 s or more (from
+    /// A revealed talk hold: sample the recording microphone every 100 ms until listening ends (the level also drives the
+    /// companion's listening bars). A hold of 3 s or more (from
     /// the press) that never reached 0.01 gets the microphone card. Only NAudio recorders have a level; with any other
     /// recognizer it is skipped. A cancelled hold (Esc, Stop) disposes the watch first, so it never warns.
     /// </summary>
@@ -102,7 +103,11 @@ internal sealed partial class TrayApplicationContext
                 var mic = _mic is NAudioMicrophoneRecorder { IsRecording: true } shared ? shared
                     : _sttMic is { IsRecording: true } live ? live : null;
                 if (mic is null) measurable = false;
-                else maxPeak = Math.Max(maxPeak, mic.PeakLevel);
+                else
+                {
+                    maxPeak = Math.Max(maxPeak, mic.PeakLevel);
+                    _overlay.ShowMicLevel(mic.PeakLevel);
+                }
                 heldMs = Environment.TickCount64 - pressedAt;
                 return;
             }

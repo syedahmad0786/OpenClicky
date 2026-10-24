@@ -190,7 +190,7 @@ public sealed class TalkOrchestrator : IDisposable
             catch (Exception ex) { _log($"mic_stop_error={ex.GetType().Name}"); }
         }
         SetState(CompanionVoiceState.Idle);
-        _overlay.Hide();
+        _overlay.ShowIdle();
     }
 
     public void BeginListening() => BeginListening(false);
@@ -377,7 +377,7 @@ public sealed class TalkOrchestrator : IDisposable
                 if (ReferenceEquals(Interlocked.CompareExchange(ref _turnCts, null, turn), turn))
                 {
                     SetState(CompanionVoiceState.Idle);
-                    _overlay.Hide();
+                    _overlay.ShowIdle();
                 }
                 turn.Dispose();
             }
@@ -891,7 +891,7 @@ public sealed class TalkOrchestrator : IDisposable
             if (ReferenceEquals(Interlocked.CompareExchange(ref _turnCts, null, turn), turn))
             {
                 SetState(CompanionVoiceState.Idle);
-                _overlay.Hide();
+                _overlay.ShowIdle();
             }
             if (entered) _turnGate.Release();
             turn.Dispose();

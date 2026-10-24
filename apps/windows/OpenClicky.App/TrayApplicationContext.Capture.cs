@@ -68,7 +68,7 @@ internal sealed partial class TrayApplicationContext
 
     /// <summary>
     /// Every visible top-level window of this process (shell, dock, forms, confirm dialogs, menus, setup windows),
-    /// plus the buddy overlay and its tip. EnumWindows touches no WinForms handles, so it is safe off the UI thread;
+    /// plus every companion overlay window. EnumWindows touches no WinForms handles, so it is safe off the UI thread;
     /// only the overlay handles are read through the UI thread.
     /// </summary>
     private IReadOnlyList<OwnWindow> OwnWindowsForCapture()
@@ -76,7 +76,7 @@ internal sealed partial class TrayApplicationContext
         var overlay = new HashSet<nint>();
         _uiContext.Send(_ =>
         {
-            foreach (var hwnd in new[] { _overlay.WindowHandle, _overlay.BuddyTipHandle })
+            foreach (var hwnd in _overlay.WindowHandles)
                 if (hwnd != 0) overlay.Add(hwnd);
         }, null);
         var mine = (uint)Environment.ProcessId;

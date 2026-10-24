@@ -269,6 +269,7 @@ internal sealed partial class TrayApplicationContext : IShellHost
             catch (InvalidOperationException ex) { Log("hotkey_resume_error=" + ex.Message); }
         }
         if (_pauseItem is not null) _pauseItem.Text = paused ? "Resume" : "Pause";
+        ApplyCompanionStyle();
         RequestShellPush();
     }
 
@@ -288,12 +289,12 @@ internal sealed partial class TrayApplicationContext : IShellHost
         }
     }
 
-    /// <summary>"Show in screen recordings" off excludes the shell and the buddy overlay windows that exist now.</summary>
+    /// <summary>"Show in screen recordings" off excludes the shell and the companion overlay windows that exist now.</summary>
     private void ApplyCaptureExclusion()
     {
         var exclude = !_settings.ShowInScreenRecordings;
         if (_shellSurface is not null) _shellSurface.Window.ExcludeFromCapture = exclude;
-        foreach (var hwnd in new[] { _overlay.WindowHandle, _overlay.BuddyTipHandle })
+        foreach (var hwnd in _overlay.WindowHandles)
             if (hwnd != 0 && !GeneralBehaviour.ApplyCaptureExclusion(hwnd, exclude)) Log("overlay_capture_affinity_failed");
     }
 

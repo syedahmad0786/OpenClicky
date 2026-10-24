@@ -5,7 +5,7 @@ using OpenClicky.Overlay;
 namespace OpenClicky.Overlay.Smoke;
 
 // Windows CI / local proof: real BuddyOverlayController POINT fly-to to a known
-// virtual-screen coordinate, then assert the buddy tip HWND landed there.
+// virtual-screen coordinate, then assert the companion tip landed there.
 // No screenshots. Does NOT exercise tray, PTT, Talk, STT, vision, or TTS.
 internal static class Program
 {
@@ -50,6 +50,7 @@ internal static class Program
             return 0;
         }
 
+        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2); // as the app: overlay coordinates are physical pixels
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
 
@@ -67,6 +68,12 @@ internal static class Program
         }
 
         Console.WriteLine($"overlay_hwnd=0x{overlay.WindowHandle:X}");
+        if (overlay.WindowHandles.Count != 2 || overlay.WindowHandles.Distinct().Count() != 2 || overlay.WindowHandles.Contains(IntPtr.Zero)
+            || overlay.BuddyTipHandle != overlay.WindowHandle)
+        {
+            Console.Error.WriteLine($"FAIL: expected the cursor and drawing windows, got [{string.Join(",", overlay.WindowHandles)}]");
+            return 2;
+        }
 
         using var fixture = new Form
         {
@@ -166,36 +173,23 @@ internal static class Program
         overlay.PointAt(targetX, targetY, "ci-point");
         overlay.ShowResponding("overlay smoke");
 
-        if (!PumpUntil(() => overlay.IsPointFlyComplete && overlay.BuddyTipHandle != IntPtr.Zero, TimeSpan.FromSeconds(5)))
+        if (!PumpUntil(() => overlay.IsPointFlyComplete, TimeSpan.FromSeconds(5)))
         {
-            Console.Error.WriteLine(
-                $"FAIL: fly-to did not settle (complete={overlay.IsPointFlyComplete} tip=0x{overlay.BuddyTipHandle:X})");
+            Console.Error.WriteLine($"FAIL: fly-to did not settle (complete={overlay.IsPointFlyComplete})");
             return 3;
         }
 
         if (NativeMethods.GetForegroundWindow() != fixture.Handle)
         {
             Console.Error.WriteLine(
-                $"FAIL: PointAt/ShowResponding changed foreground fixture=0x{fixture.Handle:X} actual=0x{NativeMethods.GetForegroundWindow():X} overlay=0x{overlay.WindowHandle:X} tip=0x{overlay.BuddyTipHandle:X}");
+                $"FAIL: PointAt/ShowResponding changed foreground fixture=0x{fixture.Handle:X} actual=0x{NativeMethods.GetForegroundWindow():X} overlay=0x{overlay.WindowHandle:X}");
             return 24;
         }
 
-        var tip = overlay.BuddyTipHandle;
-        if (!NativeMethods.GetWindowRect(tip, out var rect))
+        if (!NativeMethods.IsWindowVisible(overlay.WindowHandle))
         {
-            Console.Error.WriteLine($"FAIL: GetWindowRect tip failed win32={Marshal.GetLastWin32Error()}");
+            Console.Error.WriteLine("FAIL: the cursor window is not visible while pointing");
             return 4;
-        }
-
-        Console.WriteLine($"buddy_tip_hwnd=0x{tip:X} rect=[{rect.Left},{rect.Top},{rect.Right - rect.Left}x{rect.Bottom - rect.Top}]");
-
-        var dx = Math.Abs(rect.Left - targetX);
-        var dy = Math.Abs(rect.Top - targetY);
-        if (dx > SettleTolerancePx || dy > SettleTolerancePx)
-        {
-            Console.Error.WriteLine(
-                $"FAIL: buddy tip HWND at ({rect.Left},{rect.Top}) not within ±{SettleTolerancePx}px of ({targetX},{targetY}) dx={dx} dy={dy}");
-            return 5;
         }
 
         if (!overlay.TryGetBuddyVirtualPoint(out var buddyX, out var buddyY))
@@ -211,28 +205,8 @@ internal static class Program
             return 7;
         }
 
-        if (overlay.TrailPointCount is <= 0 or > 18)
-        {
-            Console.Error.WriteLine($"FAIL: trail sample count out of bounds: {overlay.TrailPointCount}");
-            return 8;
-        }
-
-        // Host overlay HWND must remain a real top-level window covering the virtual screen.
-        if (!NativeMethods.GetWindowRect(overlay.WindowHandle, out var host))
-        {
-            Console.Error.WriteLine("FAIL: GetWindowRect overlay host failed");
-            return 9;
-        }
-
-        if (host.Left > targetX || host.Top > targetY || host.Right <= targetX || host.Bottom <= targetY)
-        {
-            Console.Error.WriteLine(
-                $"FAIL: overlay host HWND [{host.Left},{host.Top},{host.Right},{host.Bottom}] does not contain target");
-            return 10;
-        }
-
         Console.WriteLine(
-            $"PASS tip=({rect.Left},{rect.Top}) buddy=({buddyX},{buddyY}) target=({targetX},{targetY}) tol={SettleTolerancePx}");
+            $"PASS buddy=({buddyX},{buddyY}) target=({targetX},{targetY}) tol={SettleTolerancePx}");
         overlay.Hide();
         Application.DoEvents();
         if (NativeMethods.GetForegroundWindow() != fixture.Handle)
@@ -313,7 +287,7 @@ internal static class Program
             Application.DoEvents();
             if (predicate())
             {
-                // Extra frames so SetWindowPos for the tip catches the final anchor.
+                // Extra frames so the settled position is rendered.
                 for (var i = 0; i < 4; i++)
                 {
                     Application.DoEvents();
@@ -332,18 +306,6 @@ internal static class Program
 
     private static class NativeMethods
     {
-        [StructLayout(LayoutKind.Sequential)]
-        public struct Rect
-        {
-            public int Left;
-            public int Top;
-            public int Right;
-            public int Bottom;
-        }
-
-        [DllImport("user32.dll", SetLastError = true)]
-        public static extern bool GetWindowRect(IntPtr hWnd, out Rect lpRect);
-
         [DllImport("user32.dll")]
         public static extern IntPtr GetForegroundWindow();
 

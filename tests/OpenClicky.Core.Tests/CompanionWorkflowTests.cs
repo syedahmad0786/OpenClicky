@@ -47,6 +47,18 @@ public class CompanionWorkflowTests
         Assert.Equal(AgentAccessMode.FullAccess, settings.AgentAccess);
     }
 
+    [Fact]
+    public async Task TurnEndsWithShowIdleNotHide()
+    {
+        var overlay = new Overlay();
+        using var talk = new TalkOrchestrator(new Hotkey(), overlay, new Capture(), new Mic(), () => null,
+            () => new Talk((_, _) => Task.FromResult("Here it is. [POINT:none]")), new Tts(),
+            () => new AppSettings { PersistConversationHistory = false, SpeakReplies = true }, log: _ => { });
+        await talk.SubmitTextAsync("hello", false);
+        Assert.Contains(nameof(Overlay.ShowResponding), overlay.Calls);
+        Assert.Equal(nameof(Overlay.ShowIdle), overlay.Calls.Last());
+    }
+
     private sealed class WideningTts(Action onSpeak) : ITtsClient
     {
         public Task SpeakAsync(string text, CancellationToken token = default) { onSpeak(); return Task.CompletedTask; }
@@ -1427,12 +1439,14 @@ public class CompanionWorkflowTests
     {
         public (int,int)? LastPoint;
         public IReadOnlyList<VirtualAnnotation> Marks = [];
-        public void ShowAnnotations(IReadOnlyList<VirtualAnnotation> marks) => Marks = marks;
-        public void ShowListening() { }
-        public void ShowProcessing() { }
-        public void ShowResponding(string text) { }
-        public void PointAt(int x, int y, string? label, string? text = null) => LastPoint = (x,y);
-        public void Hide() { }
+        public readonly System.Collections.Concurrent.ConcurrentQueue<string> Calls = new();
+        public void ShowAnnotations(IReadOnlyList<VirtualAnnotation> marks) { Marks = marks; Calls.Enqueue(nameof(ShowAnnotations)); }
+        public void ShowListening() => Calls.Enqueue(nameof(ShowListening));
+        public void ShowProcessing() => Calls.Enqueue(nameof(ShowProcessing));
+        public void ShowResponding(string text) => Calls.Enqueue(nameof(ShowResponding));
+        public void PointAt(int x, int y, string? label, string? text = null) { LastPoint = (x,y); Calls.Enqueue(nameof(PointAt)); }
+        public void Hide() => Calls.Enqueue(nameof(Hide));
+        public void ShowIdle() => Calls.Enqueue(nameof(ShowIdle));
         public void Dispose() { }
     }
     private sealed class Tts : ITtsClient

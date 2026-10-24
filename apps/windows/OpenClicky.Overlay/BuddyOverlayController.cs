@@ -1,7 +1,9 @@
-using System.Drawing;
+using System.Diagnostics;
 using System.Drawing.Drawing2D;
-using System.Runtime.InteropServices;
+using System.Drawing.Imaging;
 using OpenClicky.Core;
+using OpenClicky.Core.CompanionCursor;
+using OpenClicky.Core.Drawing;
 
 namespace OpenClicky.Overlay;
 
@@ -61,127 +63,151 @@ internal static class ResponseBubblePlacement
 }
 
 /// <summary>
-/// Layered, topmost, click-through, non-activating overlay spanning the virtual screen.
+/// The companion overlay: a small per-pixel-alpha cursor window that follows the pointer on a spring (the glowing accent
+/// triangle with its listening bars, thinking dots and bubbles), and a virtual-screen drawing window for marks. Both are
+/// topmost, click-through and never activate. Public members may be called from any thread.
 /// </summary>
 public sealed class BuddyOverlayController : IOverlayController
 {
-    private readonly OverlayForm _form;
+    private const double WordSeconds = 0.06, HoldSeconds = 4, FadeSeconds = 0.4, ReducedFadeSeconds = 0.12, MarkSeconds = 0.35;
+    private const float BarEase = 0.35f, ListeningBubbleShiftDip = 16;
+    private const int MaxLabelChars = 120;
+
+    /// <summary>Marshals calls onto the thread that owns the windows (the one that constructed the controller).</summary>
+    private readonly Control _ui = new();
+    private readonly LayeredWindow _cursorWindow = new("OpenClicky Companion");
+    private readonly LayeredWindow _drawingWindow = new("OpenClicky Drawing");
+    private readonly System.Windows.Forms.Timer _timer = new() { Interval = 16 };
+    private readonly Stopwatch _clock = Stopwatch.StartNew();
     private CancellationTokenSource? _selectionCancellation;
-    private bool _disposed;
+    private volatile bool _disposed;
+
+    // UI-thread state.
+    private Mode _mode = Mode.Idle;
+    private bool _hidden;
+    private CompanionStyle _style = CompanionStyle.From(new AppSettings(), reducedMotion: false);
+    private Color _accent;
+    private CursorSpring? _spring;
+    private bool _cursorShown;
+    private double _lastTick;
+    private Point? _pointTarget;
+    private string? _pointLabel;
+    private string? _line;
+    private bool _lineInstant;
+    private double _lineStart;
+    private CursorRenderer.MessageLayout? _lineLayout;
+    private double _micLevel;
+    private readonly float[] _bars = new float[CursorRenderer.BarCount];
+    private IReadOnlyList<VirtualAnnotation> _marks = [];
+    private double _marksStart;
+    private bool _drawingDirty;
+    private Bitmap? _cursorBitmap, _drawingBitmap;
+    /// <summary>What the last still cursor frame showed; an unchanged still frame is not redrawn.</summary>
+    private (Pt Tip, float Scale, Mode Mode, string? Label, Color Accent) _lastStill;
 
     public BuddyOverlayController()
     {
-        _form = new OverlayForm();
-        _form.Text = "OpenClicky Overlay";
-        _ = _form.Handle;
+        _ = _ui.Handle;
+        _accent = ParseAccent(_style.AccentHex);
+        _timer.Tick += (_, _) => Frame();
     }
 
-    /// <summary>Underlying overlay HWND (full virtual-screen host). Smoke / diagnostics only.</summary>
-    public IntPtr WindowHandle => _form.IsHandleCreated ? _form.Handle : IntPtr.Zero;
+    /// <summary>The cursor window. Smoke / diagnostics only.</summary>
+    public IntPtr WindowHandle => _cursorWindow.Handle;
 
-    /// <summary>
-    /// Small tip HWND parked at the buddy tip during POINT (for position asserts / a11y).
-    /// </summary>
-    public IntPtr BuddyTipHandle => InvokeRead(() => _form.BuddyTipHandle);
+    /// <summary>The cursor window (it carries the companion tip).</summary>
+    public IntPtr BuddyTipHandle => _cursorWindow.Handle;
 
-    /// <summary>
-    /// True once a POINT fly-to has finished easing to its target (still in Pointing mode).
-    /// </summary>
-    public bool IsPointFlyComplete => InvokeRead(() => _form.IsFlyComplete);
+    /// <summary>Both overlay windows exist from construction until disposal.</summary>
+    public IReadOnlyList<nint> WindowHandles => _disposed ? [] : [_cursorWindow.Handle, _drawingWindow.Handle];
 
-    /// <summary>Current fading trail sample count. Smoke / diagnostics only.</summary>
-    public int TrailPointCount => InvokeRead(() => _form.TrailPointCount);
+    /// <summary>True once a POINT has brought the tip to rest on its target (still pointing).</summary>
+    public bool IsPointFlyComplete => InvokeRead(() =>
+        _mode == Mode.Pointing && _pointTarget is { } target && _spring is { } spring
+        && Distance(spring.Position, target) <= 0.5f && MathF.Sqrt(spring.Velocity.X * spring.Velocity.X + spring.Velocity.Y * spring.Velocity.Y) < 5);
 
-    /// <summary>
-    /// Buddy tip position in virtual-screen coordinates after / during POINT.
-    /// Returns false when not pointing.
-    /// </summary>
+    /// <summary>Companion tip in virtual-screen pixels during / after a POINT; false when not pointing.</summary>
     public bool TryGetBuddyVirtualPoint(out int virtualX, out int virtualY)
     {
-        var x = 0;
-        var y = 0;
-        var ok = InvokeRead(() => _form.TryGetBuddyVirtual(out x, out y));
+        var (ok, x, y) = InvokeRead(() => _mode != Mode.Pointing && _pointTarget is null || _spring is null
+            ? (false, 0, 0)
+            : (true, (int)MathF.Round(_spring.Position.X), (int)MathF.Round(_spring.Position.Y)));
         virtualX = x;
         virtualY = y;
         return ok;
     }
 
-    private T InvokeRead<T>(Func<T> read)
+    public void ShowListening() => Post(() =>
     {
-        if (_form.IsHandleCreated && _form.InvokeRequired)
-        {
-            return (T)_form.Invoke(read)!;
-        }
-
-        return read();
-    }
-
-    public void ShowListening()
-    {
-        _form.BeginInvoke(() =>
-        {
-            _form.ClearPointing();
-            _form.BuddyText = null;
-            _form.Mode = OverlayMode.Listening;
-            _form.ShowInactive();
-        });
-    }
-
-    public void ShowProcessing()
-    {
-        _form.BeginInvoke(() =>
-        {
-            _form.ClearPointing();
-            _form.BuddyText = null;
-            _form.Mode = OverlayMode.Processing;
-            _form.ShowInactive();
-        });
-    }
-
-    public void ShowTranscript(string text) => _form.BeginInvoke(() =>
-    {
-        if (_form.Mode != OverlayMode.Listening) return;
-        _form.BuddyText = text;
-        _form.Invalidate();
+        ClearPointing();
+        SetLine(null, false);
+        ClearMarks(); // a new question starts a clean screen
+        _mode = Mode.Listening;
+        _micLevel = 0;
+        Array.Fill(_bars, CursorRenderer.BarTarget(0, 0));
+        Show();
     });
 
-    public void ShowAnnotations(IReadOnlyList<VirtualAnnotation> marks) => _form.BeginInvoke(() =>
+    public void ShowProcessing() => Post(() =>
     {
-        _form.Marks = marks.ToArray();
-        _form.Invalidate();
+        ClearPointing();
+        SetLine(null, false);
+        _mode = Mode.Processing;
+        Show();
     });
 
-    public void ShowResponding(string spokenText)
+    public void ShowTranscript(string text) => Post(() =>
     {
-        _form.BeginInvoke(() =>
-        {
-            _form.BuddyText = spokenText;
-            // Keep an in-flight / held POINT fly-to; Responding mode re-anchors to the cursor.
-            var spokenMode = OverlayRespondingMode.Resolve(_form.IsPointingActive);
-            _form.Mode = spokenMode switch
-            {
-                OverlaySpokenVisualMode.Pointing => OverlayMode.Pointing,
-                OverlaySpokenVisualMode.Responding => OverlayMode.Responding,
-                _ => throw new InvalidOperationException($"Unexpected spoken visual mode: {spokenMode}"),
-            };
+        if (_mode == Mode.Listening) SetLine(text, instant: true);
+    });
 
-            _form.ShowInactive();
-        });
-    }
-
-    public void PointAt(int virtualX, int virtualY, string? label, string? spokenText = null)
+    public void ShowAnnotations(IReadOnlyList<VirtualAnnotation> marks) => Post(() =>
     {
-        _form.BeginInvoke(() =>
-        {
-            _form.BeginFlyTo(new Point(virtualX, virtualY), label);
-            if (spokenText is not null)
-            {
-                _form.BuddyText = spokenText;
-            }
+        _marks = marks.ToArray();
+        _marksStart = Now;
+        if (_marks.Count == 0) ClearMarks();
+        if (!_hidden) Show();
+    });
 
-            _form.ShowInactive();
-        });
-    }
+    public void ShowResponding(string spokenText) => Post(() =>
+    {
+        SetLine(spokenText, false);
+        // Keep an in-flight / held POINT; otherwise the companion follows the cursor while it speaks.
+        _mode = OverlayRespondingMode.Resolve(_mode == Mode.Pointing || _pointTarget is not null) switch
+        {
+            OverlaySpokenVisualMode.Pointing => Mode.Pointing,
+            OverlaySpokenVisualMode.Responding => Mode.Responding,
+            var other => throw new InvalidOperationException($"Unexpected spoken visual mode: {other}"),
+        };
+        Show();
+    });
+
+    public void PointAt(int virtualX, int virtualY, string? label, string? spokenText = null) => Post(() =>
+    {
+        _pointTarget = new Point(virtualX, virtualY);
+        _pointLabel = string.IsNullOrWhiteSpace(label) ? null : label.Length > MaxLabelChars ? label[..MaxLabelChars] + "…" : label;
+        if (spokenText is not null) SetLine(spokenText, false);
+        _mode = Mode.Pointing;
+        Show();
+    });
+
+    public void ShowIdle() => Post(() =>
+    {
+        ClearPointing();
+        SetLine(null, false);
+        _mode = Mode.Idle;
+        Show();
+    });
+
+    public void ApplyStyle(CompanionStyle style) => Post(() =>
+    {
+        _style = style;
+        _accent = ParseAccent(style.AccentHex);
+        _drawingDirty = true;
+        if (!_hidden) Show();
+    });
+
+    public void ShowMicLevel(double level) => Post(() => _micLevel = level);
 
     public Task<Rectangle?> SelectRegionAsync(CancellationToken cancellationToken = default)
     {
@@ -190,13 +216,13 @@ public sealed class BuddyOverlayController : IOverlayController
             return Task.FromException<Rectangle?>(new ObjectDisposedException(nameof(BuddyOverlayController)));
         }
 
-        if (!_form.InvokeRequired)
+        if (!_ui.InvokeRequired)
         {
             return SelectRegionOnUiThreadAsync(cancellationToken);
         }
 
         var completion = new TaskCompletionSource<Rectangle?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _form.BeginInvoke(async () =>
+        _ui.BeginInvoke(async () =>
         {
             try
             {
@@ -229,18 +255,20 @@ public sealed class BuddyOverlayController : IOverlayController
         }
     }
 
+    /// <summary>Synchronous: every overlay window is hidden when this returns (it runs before captures).</summary>
     public void Hide()
     {
         void HideNow()
         {
+            if (_disposed) return;
             _selectionCancellation?.Cancel();
-            _form.ClearPointing();
-            _form.Marks = [];
-            _form.BuddyText = null;
-            _form.Mode = OverlayMode.Hidden;
-            _form.Hide();
+            _hidden = true;
+            _timer.Stop();
+            _cursorWindow.HideWindow();
+            _drawingWindow.HideWindow();
+            _cursorShown = false;
         }
-        if (_form.InvokeRequired) _form.Invoke(HideNow);
+        if (_ui.InvokeRequired) _ui.Invoke(HideNow);
         else HideNow();
     }
 
@@ -253,535 +281,306 @@ public sealed class BuddyOverlayController : IOverlayController
 
         _disposed = true;
         _selectionCancellation?.Cancel();
-        if (_form.IsHandleCreated)
+        void DisposeNow()
         {
-            _form.BeginInvoke(() => _form.Dispose());
+            _timer.Dispose();
+            _cursorWindow.Dispose();
+            _drawingWindow.Dispose();
+            _cursorBitmap?.Dispose();
+            _drawingBitmap?.Dispose();
+            _ui.Dispose();
+        }
+        if (_ui.IsHandleCreated && _ui.InvokeRequired) _ui.BeginInvoke(DisposeNow);
+        else DisposeNow();
+    }
+
+    private void Post(Action action)
+    {
+        if (_disposed) return;
+        if (_ui.InvokeRequired) _ui.BeginInvoke(() => { if (!_disposed) action(); });
+        else action();
+    }
+
+    private T InvokeRead<T>(Func<T> read) => _ui.InvokeRequired ? (T)_ui.Invoke(read)! : read();
+
+    private double Now => _clock.Elapsed.TotalSeconds;
+
+    private bool CursorVisible =>
+        !_hidden && _style.Presence != CursorPresence.Off && (_style.Presence == CursorPresence.Following || _mode != Mode.Idle);
+
+    /// <summary>Ends any <see cref="Hide"/> and renders a frame now, so visibility changes before the call returns.</summary>
+    private void Show()
+    {
+        _hidden = false;
+        _drawingDirty = true;
+        if (!_timer.Enabled) _lastTick = Now;
+        _timer.Start();
+        Frame();
+    }
+
+    private void ClearPointing()
+    {
+        _pointTarget = null;
+        _pointLabel = null;
+    }
+
+    private void SetLine(string? text, bool instant)
+    {
+        _line = string.IsNullOrWhiteSpace(text) ? null : text;
+        _lineInstant = instant;
+        _lineStart = Now;
+        _lineLayout = null;
+    }
+
+    private void ClearMarks()
+    {
+        _marks = [];
+        _drawingWindow.HideWindow();
+        _drawingBitmap?.Dispose();
+        _drawingBitmap = null;
+    }
+
+    private void Frame()
+    {
+        if (_disposed) return;
+        var now = Now;
+        var dt = now - _lastTick;
+        _lastTick = now;
+        if (_hidden)
+        {
+            _timer.Stop();
+            return;
+        }
+
+        DrawCursorFrame(now, dt);
+        var drawingAnimating = DrawDrawingFrame(now);
+        if (!CursorVisible && !drawingAnimating) _timer.Stop();
+    }
+
+    private void DrawCursorFrame(double now, double dt)
+    {
+        if (!CursorVisible)
+        {
+            _cursorWindow.HideWindow();
+            _cursorShown = false;
+            return;
+        }
+
+        var cursor = Cursor.Position;
+        var cursorScale = DpiScale.ForPoint(cursor);
+        var follow = new Pt(cursor.X + CursorConstants.TipOffsetX * cursorScale, cursor.Y + CursorConstants.TipOffsetY * cursorScale);
+        var target = _mode == Mode.Pointing && _pointTarget is { } point ? new Pt(point.X, point.Y) : follow;
+        _spring ??= new CursorSpring(follow);
+        if (!_cursorShown) _spring.Snap(follow); // reappearing: start beside the real cursor, not where it was last seen
+        if (_style.ReducedMotion) _spring.Snap(target);
+        else _spring.Step(target, dt);
+
+        var tip = new PointF(_spring.Position.X, _spring.Position.Y);
+        var s = DpiScale.ForPoint(Point.Round(tip));
+        var still = (_spring.Position, s, _mode, _pointLabel, _accent);
+        if (_mode is not (Mode.Listening or Mode.Processing) && _line is null && _cursorShown && still == _lastStill) return;
+        _lastStill = still;
+        var triangle = CursorRenderer.Triangle(tip, s);
+        var bounds = CursorRenderer.CompanionBounds(triangle, s);
+        if (_mode == Mode.Listening)
+        {
+            for (var i = 0; i < _bars.Length; i++)
+            {
+                var goal = CursorRenderer.BarTarget(i, _micLevel);
+                _bars[i] = _style.ReducedMotion ? goal : _bars[i] + (goal - _bars[i]) * BarEase;
+            }
+            bounds = RectangleF.Union(bounds, CursorRenderer.BarsBounds(tip, s));
+        }
+        var centroid = CursorRenderer.Centroid(triangle);
+        if (_mode == Mode.Processing) bounds = RectangleF.Union(bounds, CursorRenderer.DotsBounds(centroid, s));
+
+        var workArea = Screen.FromPoint(Point.Round(tip)).WorkingArea;
+        var work = new Box(workArea.X, workArea.Y, workArea.Width, workArea.Height);
+        RectangleF? labelBox = null;
+        if (_mode == Mode.Pointing && _pointLabel is { } label)
+        {
+            var size = CursorRenderer.LabelSize(label, s);
+            labelBox = ToRect(BubbleLayout.Label(new Pt(tip.X, tip.Y), size.Width, size.Height, work));
+            bounds = RectangleF.Union(bounds, labelBox.Value);
+        }
+        RectangleF? messageBox = null;
+        var (revealed, alpha) = MessageState(now, s);
+        if (_lineLayout is { } layout && alpha > 0)
+        {
+            var anchor = new Pt(tip.X + (_mode == Mode.Listening ? ListeningBubbleShiftDip * s : 0), tip.Y);
+            var desired = ToRect(BubbleLayout.Message(anchor, layout.Size.Width, layout.Size.Height, work));
+            messageBox = ResponseBubblePlacement.Place(desired, workArea, AnnotationBounds(workArea));
+            bounds = RectangleF.Union(bounds, messageBox.Value);
+        }
+
+        var frame = Rectangle.FromLTRB((int)MathF.Floor(bounds.Left), (int)MathF.Floor(bounds.Top),
+            (int)MathF.Ceiling(bounds.Right), (int)MathF.Ceiling(bounds.Bottom));
+        var bitmap = EnsureBitmap(ref _cursorBitmap, frame.Size);
+        using (var g = Graphics.FromImage(bitmap))
+        {
+            g.Clear(Color.Transparent);
+            CursorRenderer.Prepare(g);
+            g.TranslateTransform(-frame.X, -frame.Y);
+            CursorRenderer.DrawCompanion(g, triangle, s, _accent);
+            if (_mode == Mode.Listening) CursorRenderer.DrawBars(g, tip, s, _bars, _accent);
+            if (_mode == Mode.Processing) CursorRenderer.DrawDots(g, centroid, s, now, _style.ReducedMotion, _accent);
+            if (labelBox is { } lb) CursorRenderer.DrawLabel(g, lb, _pointLabel!, s, _accent);
+            if (messageBox is { } mb) CursorRenderer.DrawMessage(g, mb, _lineLayout!, revealed, alpha);
+        }
+        _cursorWindow.Present(bitmap, frame.Location);
+        _cursorShown = true;
+    }
+
+    /// <summary>Words revealed (60 ms each; all at once with reduced motion) and the fade: 4 s after the last word, then 400 ms.</summary>
+    private (int Revealed, float Alpha) MessageState(double now, float s)
+    {
+        if (_line is null) return (0, 0);
+        if (_lineLayout is null || _lineLayout.Scale != s) _lineLayout = CursorRenderer.LayoutMessage(_line, s);
+        var words = _lineLayout.WordCount;
+        var instant = _lineInstant || _style.ReducedMotion;
+        var revealed = instant ? words : Math.Min(words, 1 + (int)((now - _lineStart) / WordSeconds));
+        var lastWord = _lineStart + (instant ? 0 : Math.Max(0, words - 1) * WordSeconds);
+        var fade = _style.ReducedMotion ? ReducedFadeSeconds : FadeSeconds;
+        var alpha = (float)Math.Clamp(1 - (now - lastWord - HoldSeconds) / fade, 0, 1);
+        if (alpha <= 0) SetLine(null, false);
+        return (revealed, alpha);
+    }
+
+    /// <summary>Repaints the marks while their pen reveal runs (350 ms each, one after another); false once they are still.</summary>
+    // ponytail: a full virtual-screen bitmap is re-sent each frame of the reveal; C6's drawing layer owns damage tracking.
+    private bool DrawDrawingFrame(double now)
+    {
+        if (_marks.Count == 0)
+        {
+            _drawingWindow.HideWindow();
+            return false;
+        }
+        if (!_drawingDirty) return false;
+
+        var screen = SystemInformation.VirtualScreen;
+        var bitmap = EnsureBitmap(ref _drawingBitmap, screen.Size);
+        var animating = false;
+        using (var g = Graphics.FromImage(bitmap))
+        {
+            g.Clear(Color.Transparent);
+            CursorRenderer.Prepare(g);
+            g.TranslateTransform(-screen.X, -screen.Y);
+            for (var index = 0; index < _marks.Count; index++)
+            {
+                var progress = _style.ReducedMotion ? 1f : (float)Math.Clamp((now - _marksStart - index * MarkSeconds) / MarkSeconds, 0, 1);
+                if (progress < 1) animating = true;
+                if (progress > 0) DrawMark(g, _marks[index], progress);
+            }
+        }
+        _drawingWindow.Present(bitmap, screen.Location);
+        _drawingDirty = animating;
+        return animating;
+    }
+
+    private void DrawMark(Graphics g, VirtualAnnotation mark, float progress)
+    {
+        var s = DpiScale.ForPoint(new Point(mark.X, mark.Y));
+        if (mark.Shape == "text")
+        {
+            if (progress >= 1) DrawMarkLabel(g, mark.X, mark.Y, mark.Label, s);
+            return;
+        }
+
+        using var path = new GraphicsPath();
+        if (mark.Shape is "polygon" or "freehand" or "curve" && mark.Points is { Count: >= 2 } points)
+        {
+            var pts = points.Select(point => new PointF(point.X, point.Y)).ToArray();
+            if (mark.Shape == "curve" && pts.Length == 4) path.AddBezier(pts[0], pts[1], pts[2], pts[3]);
+            else if (mark.Shape == "polygon") path.AddPolygon(pts);
+            else path.AddLines(pts);
+        }
+        else if (mark.Shape == "arrow")
+        {
+            path.AddLine(mark.X, mark.Y, mark.A, mark.B);
         }
         else
         {
-            _form.Dispose();
+            var rect = new Rectangle(mark.X, mark.Y, mark.A, mark.B);
+            if (mark.Shape == "circle") path.AddEllipse(rect);
+            else path.AddRectangle(rect);
         }
+
+        using var visible = PartialStroke(path, progress);
+        if (visible.PointCount > 1)
+        {
+            using var halo = new Pen(Color.FromArgb(150, CursorRenderer.MessageFill), 8 * s) { LineJoin = LineJoin.Round };
+            using var outline = new Pen(_accent, 4 * s) { LineJoin = LineJoin.Round };
+            using var head = new AdjustableArrowCap(4, 5, true);
+            if (mark.Shape == "arrow" && progress >= 1) outline.CustomEndCap = head;
+            g.DrawPath(halo, visible);
+            g.DrawPath(outline, visible);
+        }
+        if (progress >= 1 && !string.IsNullOrWhiteSpace(mark.Label)) DrawMarkLabel(g, mark.X, mark.Y - 36 * s, mark.Label, s);
     }
 
-    private enum OverlayMode
+    private static void DrawMarkLabel(Graphics g, float x, float y, string label, float s)
     {
-        Hidden,
-        Listening,
-        Processing,
-        Responding,
-        Pointing,
+        var layout = CursorRenderer.LayoutMessage(label, s);
+        var workArea = Screen.FromPoint(Point.Round(new PointF(x, y))).WorkingArea;
+        var box = ResponseBubblePlacement.Place(new RectangleF(new PointF(x, y), layout.Size), workArea, []);
+        CursorRenderer.DrawMessage(g, box, layout, int.MaxValue, 1);
     }
 
-    private sealed class OverlayForm : Form
+    /// <summary>Painted mark bounds (with halo and breathing room) on this work area, for the message bubble to avoid.</summary>
+    private IReadOnlyList<RectangleF> AnnotationBounds(Rectangle workingArea)
     {
-        private OverlayMode _mode = OverlayMode.Hidden;
-        private float _pulse;
-        private readonly System.Windows.Forms.Timer _timer;
-        private PointF? _flyFrom;
-        private PointF? _flyTo;
-        private float _flyProgress = 1f;
-        private PointF _buddyAnchor;
-        private BuddyTipForm? _buddyTip;
-        private readonly List<TrailPoint> _trail = [];
-        private PointF? _lastTrailPoint;
-
-        private const int MaxTrailPoints = 18;
-
-        public OverlayForm()
+        var bounds = new List<RectangleF>(_marks.Count);
+        foreach (var mark in _marks)
         {
-            FormBorderStyle = FormBorderStyle.None;
-            ShowInTaskbar = false;
-            // Form.Show focuses managed TopMost forms; native SetWindowPos supplies topmost without activation.
-            StartPosition = FormStartPosition.Manual;
-            // Anti-aliased edges blend with the transparency key; black keeps their fringe neutral.
-            BackColor = Color.Black;
-            TransparencyKey = Color.Black;
-            DoubleBuffered = true;
-            Bounds = SystemInformation.VirtualScreen;
-
-            _timer = new System.Windows.Forms.Timer { Interval = 33 };
-            _timer.Tick += (_, _) =>
+            RectangleF markBounds;
+            if (mark.Shape is "polygon" or "freehand" or "curve" && mark.Points is { Count: >= 2 } points)
             {
-                _pulse += 0.12f;
-                if (_flyProgress < 1f && _flyFrom is { } from && _flyTo is { } to)
-                {
-                    _flyProgress = Math.Min(1f, _flyProgress + 0.06f);
-                    // Ease-out cubic
-                    var t = 1f - MathF.Pow(1f - _flyProgress, 3f);
-                    _buddyAnchor = new PointF(
-                        from.X + (to.X - from.X) * t,
-                        from.Y + (to.Y - from.Y) * t);
-                    if (_flyProgress >= 1f)
-                    {
-                        PointTarget = new Point((int)to.X, (int)to.Y);
-                    }
-                }
-                else if (_mode != OverlayMode.Pointing)
-                {
-                    var cursor = PointToClient(Cursor.Position);
-                    _buddyAnchor = new PointF(cursor.X + 28, cursor.Y + 20);
-                }
-
-                UpdateTrail();
-
-                SyncBuddyTipHwnd();
-                Invalidate();
-            };
-        }
-
-        public IntPtr BuddyTipHandle =>
-            _buddyTip is { IsHandleCreated: true } ? _buddyTip.Handle : IntPtr.Zero;
-
-        public OverlayMode Mode
-        {
-            get => _mode;
-            set
-            {
-                _mode = value;
-                if (value == OverlayMode.Hidden) _timer.Stop();
-                Invalidate();
+                markBounds = RectangleF.FromLTRB(
+                    points.Min(point => point.X), points.Min(point => point.Y),
+                    points.Max(point => point.X), points.Max(point => point.Y));
             }
-        }
-
-        public string? BuddyText { get; set; }
-        private IReadOnlyList<VirtualAnnotation> _marks = [];
-        private long _marksStarted;
-        public IReadOnlyList<VirtualAnnotation> Marks
-        {
-            get => _marks;
-            set { _marks = value; _marksStarted = Environment.TickCount64; }
-        }
-        public Point? PointTarget { get; set; }
-        public string? PointLabel { get; set; }
-
-        /// <summary>True while flying to a target or holding at a POINT location.</summary>
-        public bool IsPointingActive =>
-            _mode == OverlayMode.Pointing
-            || _flyProgress < 1f
-            || PointTarget is not null
-            || _flyTo is not null;
-
-        public bool IsFlyComplete =>
-            _mode == OverlayMode.Pointing && _flyProgress >= 1f && _flyTo is not null;
-
-        public int TrailPointCount => _trail.Count;
-
-        public bool TryGetBuddyVirtual(out int virtualX, out int virtualY)
-        {
-            virtualX = 0;
-            virtualY = 0;
-            if (_mode != OverlayMode.Pointing && PointTarget is null && _flyTo is null)
+            else if (mark.Shape == "text")
             {
-                return false;
+                markBounds = new RectangleF(mark.X, mark.Y, 320, 60);
             }
-
-            var local = _flyProgress < 1f && _flyTo is { } to
-                ? new Point((int)Math.Round(_buddyAnchor.X), (int)Math.Round(_buddyAnchor.Y))
-                : PointTarget ?? new Point((int)Math.Round(_buddyAnchor.X), (int)Math.Round(_buddyAnchor.Y));
-            var screen = PointToScreen(local);
-            virtualX = screen.X;
-            virtualY = screen.Y;
-            return true;
-        }
-
-        public void ClearPointing()
-        {
-            PointTarget = null;
-            PointLabel = null;
-            _flyFrom = null;
-            _flyTo = null;
-            _flyProgress = 1f;
-            ClearTrail();
-            HideBuddyTip();
-        }
-
-        private void UpdateTrail()
-        {
-            for (var i = _trail.Count - 1; i >= 0; i--)
+            else if (mark.Shape == "arrow")
             {
-                var sample = _trail[i] with { Life = _trail[i].Life - 0.055f };
-                if (sample.Life <= 0f) _trail.RemoveAt(i);
-                else _trail[i] = sample;
-            }
-
-            if (_mode == OverlayMode.Hidden)
-            {
-                ClearTrail();
-                return;
-            }
-
-            if (_lastTrailPoint is not { } last)
-            {
-                _lastTrailPoint = _buddyAnchor;
-                return;
-            }
-
-            var dx = _buddyAnchor.X - last.X;
-            var dy = _buddyAnchor.Y - last.Y;
-            if (dx * dx + dy * dy < 4f)
-            {
-                return;
-            }
-
-            _trail.Add(new TrailPoint(last, 1f));
-            if (_trail.Count > MaxTrailPoints)
-            {
-                _trail.RemoveRange(0, _trail.Count - MaxTrailPoints);
-            }
-            _lastTrailPoint = _buddyAnchor;
-        }
-
-        private void ClearTrail()
-        {
-            _trail.Clear();
-            _lastTrailPoint = null;
-        }
-
-        private void SyncBuddyTipHwnd()
-        {
-            if (_mode != OverlayMode.Pointing)
-            {
-                HideBuddyTip();
-                return;
-            }
-
-            _buddyTip ??= new BuddyTipForm();
-            var screen = PointToScreen(new Point(
-                (int)Math.Round(_buddyAnchor.X),
-                (int)Math.Round(_buddyAnchor.Y)));
-            const int tip = 24;
-            if (!_buddyTip.Visible)
-            {
-                _buddyTip.ShowInactive();
-            }
-            NativeMethods.SetWindowPos(
-                _buddyTip.Handle,
-                NativeMethods.HwndTopMost,
-                screen.X,
-                screen.Y,
-                tip,
-                tip,
-                NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow);
-        }
-
-        private void HideBuddyTip()
-        {
-            if (_buddyTip is { IsHandleCreated: true, Visible: true })
-            {
-                _buddyTip.Hide();
-            }
-        }
-
-        public void BeginFlyTo(Point virtualTarget, string? label)
-        {
-            var localTarget = PointToClient(virtualTarget);
-            var cursor = PointToClient(Cursor.Position);
-            _flyFrom = _mode == OverlayMode.Pointing ? _buddyAnchor : new PointF(cursor.X + 28, cursor.Y + 20);
-            _flyTo = new PointF(localTarget.X, localTarget.Y);
-            _flyProgress = SystemInformation.UIEffectsEnabled ? 0f : 1f;
-            _buddyAnchor = _flyProgress == 1f ? _flyTo.Value : _flyFrom.Value;
-            ClearTrail();
-            _lastTrailPoint = _buddyAnchor;
-            PointTarget = localTarget;
-            PointLabel = label;
-            // Keep any spoken bubble text set by a subsequent ShowResponding invoke.
-            Mode = OverlayMode.Pointing;
-        }
-
-        protected override bool ShowWithoutActivation => true;
-
-        protected override CreateParams CreateParams
-        {
-            get
-            {
-                const int WsExLayered = 0x00080000;
-                const int WsExTransparent = 0x00000020;
-                const int WsExToolWindow = 0x00000080;
-                const int WsExNoActivate = 0x08000000;
-                var cp = base.CreateParams;
-                cp.ExStyle |= WsExLayered | WsExTransparent | WsExToolWindow | WsExNoActivate;
-                return cp;
-            }
-        }
-
-        public void ShowInactive()
-        {
-            var bounds = SystemInformation.VirtualScreen;
-            _timer.Start();
-            if (!Visible)
-            {
-                Show();
-            }
-
-            NativeMethods.SetWindowPos(
-                Handle,
-                NativeMethods.HwndTopMost,
-                bounds.Left,
-                bounds.Top,
-                bounds.Width,
-                bounds.Height,
-                NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow);
-        }
-
-        protected override void OnPaint(PaintEventArgs e)
-        {
-            base.OnPaint(e);
-            if (_mode == OverlayMode.Hidden)
-            {
-                return;
-            }
-
-            var g = e.Graphics;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            DrawMarks(g);
-
-            PointF anchor;
-            if (_mode is OverlayMode.Pointing)
-            {
-                anchor = _buddyAnchor;
+                markBounds = RectangleF.FromLTRB(
+                    Math.Min(mark.X, mark.A), Math.Min(mark.Y, mark.B),
+                    Math.Max(mark.X, mark.A), Math.Max(mark.Y, mark.B));
             }
             else
             {
-                var cursor = Cursor.Position;
-                var origin = PointToClient(cursor);
-                anchor = new PointF(origin.X + 28, origin.Y + 20);
-                _buddyAnchor = anchor;
+                markBounds = new RectangleF(mark.X, mark.Y, mark.A, mark.B);
             }
 
-            DrawTrail(g);
-
-            var size = 24 + (float)Math.Sin(_pulse) * 2f;
-            using var brush = new SolidBrush(Color.FromArgb(208, 230, 187));
-            using var pen = new Pen(Color.FromArgb(37, 102, 76), 2f);
-            g.FillEllipse(brush, anchor.X, anchor.Y, size, size);
-            g.DrawEllipse(pen, anchor.X, anchor.Y, size, size);
-            using var eye = new SolidBrush(Color.FromArgb(29, 43, 36));
-            g.FillEllipse(eye, anchor.X + size * .29f, anchor.Y + size * .34f, 3, 3);
-            g.FillEllipse(eye, anchor.X + size * .57f, anchor.Y + size * .34f, 3, 3);
-            g.DrawArc(pen, anchor.X + size * .31f, anchor.Y + size * .36f, size * .38f, size * .34f, 20, 140);
-
-            if (_mode == OverlayMode.Listening)
+            // Include the widest painted halo and leave breathing room around the annotation.
+            markBounds.Inflate(6f, 6f);
+            if (markBounds.IntersectsWith(workingArea))
             {
-                DrawWaveform(g, anchor.X + size + 10, anchor.Y, brush);
-                if (!string.IsNullOrEmpty(BuddyText)) DrawBubble(g, anchor.X + size + 45, anchor.Y - 8, BuddyText);
-            }
-            else if (_mode == OverlayMode.Processing)
-            {
-                DrawSpinner(g, anchor.X + size + 16, anchor.Y + 6, pen);
-            }
-            else if (_mode is OverlayMode.Responding or OverlayMode.Pointing)
-            {
-                var text = BuddyText;
-                if (_mode == OverlayMode.Pointing && !string.IsNullOrEmpty(PointLabel))
-                {
-                    text = string.IsNullOrEmpty(text) ? PointLabel : $"{PointLabel} — {text}";
-                }
-
-                if (!string.IsNullOrEmpty(text))
-                {
-                    DrawBubble(g, anchor.X + size + 8, anchor.Y - 8, text!, avoidAnnotations: true);
-                }
+                bounds.Add(markBounds);
             }
         }
 
-        private void DrawTrail(Graphics g)
-        {
-            foreach (var sample in _trail)
-            {
-                var diameter = 4f + 8f * sample.Life;
-                using var brush = new SolidBrush(Color.FromArgb(
-                    Math.Clamp((int)(150 * sample.Life), 0, 150), 126, 232, 169));
-                g.FillEllipse(
-                    brush,
-                    sample.Position.X + 12f - diameter / 2f,
-                    sample.Position.Y + 12f - diameter / 2f,
-                    diameter,
-                    diameter);
-            }
-        }
-
-        private void DrawMarks(Graphics g)
-        {
-            using var outline = new Pen(Color.FromArgb(126, 232, 169), 4f);
-            using var halo = new Pen(Color.FromArgb(29, 43, 36), 8f);
-            for (var index = 0; index < Marks.Count; index++)
-            {
-                var mark = Marks[index];
-                var progress = SystemInformation.IsMenuAnimationEnabled
-                    ? Math.Clamp((Environment.TickCount64 - _marksStarted - index * 350) / 350f, 0, 1) : 1;
-                if (progress <= 0) continue;
-                var start = PointToClient(new Point(mark.X, mark.Y));
-                using var path = new GraphicsPath();
-                if (mark.Shape is "polygon" or "freehand" or "curve" && mark.Points is { Count: >= 2 } points)
-                {
-                    var local = points.Select(point => PointToClient(new Point(point.X, point.Y))).ToArray();
-                    if (mark.Shape == "curve" && local.Length == 4) path.AddBezier(local[0], local[1], local[2], local[3]);
-                    else if (mark.Shape == "polygon") path.AddPolygon(local);
-                    else path.AddLines(local);
-                }
-                else if (mark.Shape == "text")
-                {
-                    if (progress >= 1) DrawBubble(g, start.X, start.Y, mark.Label);
-                    continue;
-                }
-                else if (mark.Shape == "arrow")
-                {
-                    var end = PointToClient(new Point(mark.A, mark.B));
-                    path.AddLine(start, end);
-                }
-                else
-                {
-                    var rect = new Rectangle(start.X, start.Y, mark.A, mark.B);
-                    if (mark.Shape == "circle") path.AddEllipse(rect);
-                    else path.AddRectangle(rect);
-                }
-                using var visible = PartialStroke(path, progress);
-                if (visible.PointCount > 1)
-                {
-                    using var head = new AdjustableArrowCap(4, 5, true);
-                    if (mark.Shape == "arrow" && progress >= 1) outline.CustomEndCap = head;
-                    g.DrawPath(halo, visible); g.DrawPath(outline, visible);
-                    outline.EndCap = LineCap.Flat;
-                }
-                if (progress >= 1 && !string.IsNullOrWhiteSpace(mark.Label)) DrawBubble(g, start.X, start.Y - 36, mark.Label);
-            }
-        }
-
-        private void DrawBubble(Graphics g, float x, float y, string text, bool avoidAnnotations = false)
-        {
-            var clipped = text.Length > 180 ? text[..177] + "…" : text;
-            using var font = new Font("Segoe UI", 10f, FontStyle.Regular);
-            var size = g.MeasureString(clipped, font, 320);
-            var rect = new RectangleF(x, y, size.Width + 16, size.Height + 12);
-            var bounds = RectangleToClient(Screen.FromPoint(PointToScreen(new Point((int)x, (int)y))).WorkingArea);
-            rect = ResponseBubblePlacement.Place(
-                rect,
-                bounds,
-                avoidAnnotations ? AnnotationBounds(bounds) : []);
-            using var bg = new SolidBrush(Color.FromArgb(29, 43, 36));
-            using var fg = new SolidBrush(Color.FromArgb(240, 240, 245));
-            g.FillRoundedRectangle(bg, rect, 8);
-            g.DrawString(clipped, font, fg, new RectangleF(rect.X + 8, rect.Y + 6, size.Width, size.Height));
-        }
-
-        private IReadOnlyList<RectangleF> AnnotationBounds(Rectangle workingArea)
-        {
-            var bounds = new List<RectangleF>(Marks.Count);
-            foreach (var mark in Marks)
-            {
-                var start = PointToClient(new Point(mark.X, mark.Y));
-                RectangleF markBounds;
-                if (mark.Shape is "polygon" or "freehand" or "curve" && mark.Points is { Count: >= 2 } points)
-                {
-                    var local = points.Select(point => PointToClient(new Point(point.X, point.Y))).ToArray();
-                    markBounds = RectangleF.FromLTRB(
-                        local.Min(point => point.X), local.Min(point => point.Y),
-                        local.Max(point => point.X), local.Max(point => point.Y));
-                }
-                else if (mark.Shape == "text")
-                {
-                    markBounds = new RectangleF(start.X, start.Y, 320, 60);
-                }
-                else if (mark.Shape == "arrow")
-                {
-                    var end = PointToClient(new Point(mark.A, mark.B));
-                    markBounds = RectangleF.FromLTRB(
-                        Math.Min(start.X, end.X), Math.Min(start.Y, end.Y),
-                        Math.Max(start.X, end.X), Math.Max(start.Y, end.Y));
-                }
-                else
-                {
-                    markBounds = new RectangleF(start.X, start.Y, mark.A, mark.B);
-                }
-
-                // Include the widest painted halo and leave breathing room around the annotation.
-                markBounds.Inflate(6f, 6f);
-                if (markBounds.IntersectsWith(workingArea))
-                {
-                    bounds.Add(markBounds);
-                }
-            }
-
-            return bounds;
-        }
-
-        private void DrawWaveform(Graphics g, float x, float y, Brush brush)
-        {
-            for (var i = 0; i < 4; i++)
-            {
-                var h = 6 + (float)Math.Abs(Math.Sin(_pulse + i)) * 14f;
-                g.FillRectangle(brush, x + i * 7, y + 10 - h / 2, 4, h);
-            }
-        }
-
-        private void DrawSpinner(Graphics g, float x, float y, Pen pen)
-        {
-            var rect = new RectangleF(x, y, 16, 16);
-            g.DrawArc(pen, rect, (_pulse * 40f) % 360f, 270f);
-        }
-
-        protected override void Dispose(bool disposing)
-        {
-            if (disposing)
-            {
-                _timer.Dispose();
-                _buddyTip?.Dispose();
-                _buddyTip = null;
-            }
-
-            base.Dispose(disposing);
-        }
-
-        private readonly record struct TrailPoint(PointF Position, float Life);
+        return bounds;
     }
 
-    /// <summary>
-    /// Click-through tip HWND parked at the buddy tip during POINT so callers can assert screen position.
-    /// </summary>
-    private sealed class BuddyTipForm : Form
+    private static Bitmap EnsureBitmap(ref Bitmap? bitmap, Size size)
     {
-        public BuddyTipForm()
-        {
-            Text = "OpenClicky Buddy";
-            FormBorderStyle = FormBorderStyle.None;
-            ShowInTaskbar = false;
-            StartPosition = FormStartPosition.Manual;
-            Size = new Size(24, 24);
-            BackColor = Color.FromArgb(56, 132, 255);
-            Opacity = 0.01; // nearly invisible; position is what matters for asserts
-        }
+        size = new Size(Math.Max(1, size.Width), Math.Max(1, size.Height));
+        if (bitmap is not null && bitmap.Size == size) return bitmap;
+        bitmap?.Dispose();
+        return bitmap = new Bitmap(size.Width, size.Height, PixelFormat.Format32bppPArgb);
+    }
 
-        protected override bool ShowWithoutActivation => true;
+    private static RectangleF ToRect(Box box) => new(box.X, box.Y, box.W, box.H);
 
-        protected override CreateParams CreateParams
-        {
-            get
-            {
-                const int WsExTransparent = 0x00000020;
-                const int WsExToolWindow = 0x00000080;
-                const int WsExNoActivate = 0x08000000;
-                var cp = base.CreateParams;
-                cp.ExStyle |= WsExTransparent | WsExToolWindow | WsExNoActivate;
-                return cp;
-            }
-        }
+    private static float Distance(Pt a, Point b) => MathF.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
 
-        public void ShowInactive()
-        {
-            if (!Visible)
-            {
-                Show();
-            }
-
-            NativeMethods.SetWindowPos(
-                Handle,
-                NativeMethods.HwndTopMost,
-                0,
-                0,
-                0,
-                0,
-                NativeMethods.SwpNoMove | NativeMethods.SwpNoSize | NativeMethods.SwpNoActivate);
-        }
+    private static Color ParseAccent(string hex)
+    {
+        try { return ColorTranslator.FromHtml(hex); }
+        catch (Exception ex) when (ex is ArgumentException or FormatException) { return Color.FromArgb(0x33, 0x80, 0xFF); }
     }
 
     internal static GraphicsPath PartialStroke(GraphicsPath source, float progress)
@@ -806,30 +605,12 @@ public sealed class BuddyOverlayController : IOverlayController
         return visible;
     }
 
-    private static class NativeMethods
+    private enum Mode
     {
-        public static readonly IntPtr HwndTopMost = new(-1);
-        public const uint SwpNoMove = 0x0002;
-        public const uint SwpNoSize = 0x0001;
-        public const uint SwpNoActivate = 0x0010;
-        public const uint SwpShowWindow = 0x0040;
-
-        [DllImport("user32.dll", SetLastError = true)]
-        public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);
-    }
-}
-
-internal static class GraphicsExtensions
-{
-    public static void FillRoundedRectangle(this Graphics g, Brush brush, RectangleF rect, float radius)
-    {
-        using var path = new GraphicsPath();
-        var d = radius * 2;
-        path.AddArc(rect.X, rect.Y, d, d, 180, 90);
-        path.AddArc(rect.Right - d, rect.Y, d, d, 270, 90);
-        path.AddArc(rect.Right - d, rect.Bottom - d, d, d, 0, 90);
-        path.AddArc(rect.X, rect.Bottom - d, d, d, 90, 90);
-        path.CloseFigure();
-        g.FillPath(brush, path);
+        Idle,
+        Listening,
+        Processing,
+        Responding,
+        Pointing,
     }
 }
