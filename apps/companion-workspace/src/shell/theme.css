@@ -239,6 +239,9 @@ button.oc-pill:disabled, .oc-toggle:disabled, .oc-tile:disabled, .oc-chip:disabl
 
 /* Meter */
 .oc-meter { height: 6px; overflow: hidden; background: var(--field); border-radius: 999px; }
+.oc-meter--bars { display: flex; gap: 3px; height: 24px; overflow: visible; background: transparent; }
+.oc-meter__bar { flex: 1; background: var(--field); border-radius: 3px; transition: background-color 80ms; }
+.oc-meter__bar.is-lit { background: linear-gradient(0deg, var(--accent), var(--accent-light)); }
 .oc-meter__fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-light)); border-radius: inherit; transition: width var(--dur) var(--ease); }
 
 /* Badge */

@@ -35,3 +35,31 @@
 .settings-input[aria-invalid="true"] { border-color: var(--danger); }
 .settings-input--area { width: 100%; resize: vertical; line-height: 1.4; }
 .oc-row .settings-input { width: 240px; }
+
+/* Voice / Microphone / Dictation / Shortcuts / Cursor */
+.settings-chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px; }
+.settings-tiles .oc-group__card { background: transparent; box-shadow: none; overflow: visible; }
+.settings-grid { display: grid; gap: 8px; grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.settings-grid--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); max-height: 320px; overflow-y: auto; padding: 2px; scrollbar-width: thin; scrollbar-color: var(--track-off) transparent; }
+.settings-grid--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.settings-grid .oc-tile { padding: 12px 6px 10px; min-width: 0; }
+.settings-grid .oc-tile__name, .settings-grid .oc-tile__desc { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oc-tile.is-unavailable { opacity: 0.45; cursor: default; }
+.oc-tile.is-unavailable:hover { background: var(--card); }
+.settings-meter { padding: 4px 16px 14px; }
+.settings-meter--progress { padding: 0 16px 12px; }
+.settings-search { padding: 0 0 10px; }
+.settings-words { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 16px 12px; }
+.settings-word {
+  display: inline-flex; align-items: center; gap: 4px; padding: 4px 6px 4px 12px; font-size: 13px;
+  color: var(--text); background: var(--panel-inner); border-radius: 999px; box-shadow: inset 0 0 0 1px var(--hairline);
+}
+.settings-word button { display: grid; place-items: center; width: 20px; height: 20px; padding: 0; color: var(--text-2); background: transparent; border: 0; border-radius: 50%; cursor: pointer; }
+.settings-word button:hover { color: var(--text); background: var(--card-hover); }
+.settings-add { display: flex; gap: 8px; padding: 12px 16px; }
+.settings-add .settings-input { flex: 1; }
+.settings-count { padding: 0 16px 12px; font-size: 12px; color: var(--text-3); }
+.settings-trigger { font-size: 12px; color: var(--text-3); }
+.settings-recording { font-size: 13px; color: var(--accent-light); }
+.settings-cursor-icon { display: block; }
+.settings-confirm { display: inline-flex; gap: 8px; }

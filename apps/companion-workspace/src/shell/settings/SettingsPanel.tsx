@@ -5,14 +5,24 @@ import { AccessPage } from "./AccessPage";
 import { AccountPage } from "./AccountPage";
 import { AdvancedPage } from "./AdvancedPage";
 import { Page } from "./common";
+import { CursorPage } from "./CursorPage";
+import { DictationPage } from "./DictationPage";
 import { GeneralPage } from "./GeneralPage";
+import { MicrophonePage } from "./MicrophonePage";
+import { ShortcutsPage } from "./ShortcutsPage";
 import { SECTION_TITLES, Sidebar } from "./Sidebar";
+import { VoicePage } from "./VoicePage";
 import "./settings.css";
 
 function renderPage(section: SettingsSection, state: ShellState) {
   switch (section) {
     case "account": return <AccountPage state={state} />;
     case "general": return <GeneralPage state={state} />;
+    case "voice": return <VoicePage state={state} />;
+    case "microphone": return <MicrophonePage state={state} />;
+    case "dictation": return <DictationPage state={state} />;
+    case "shortcuts": return <ShortcutsPage state={state} />;
+    case "cursor": return <CursorPage state={state} />;
     case "access": return <AccessPage state={state} />;
     case "advanced": return <AdvancedPage state={state} />;
     default: return <Page title={SECTION_TITLES[section]}><p className="settings-page__soon">Coming next</p></Page>;

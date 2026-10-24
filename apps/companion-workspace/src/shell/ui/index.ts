@@ -1,3 +1,4 @@
+export { ACCENTS } from "./accents";
 export { Badge } from "./Badge";
 export { Chip,type ChipProps } from "./Chip";
 export { Group } from "./Group";

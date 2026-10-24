@@ -38,8 +38,8 @@ it("lists the sidebar sections in order with group headers and posts settings.se
 it("follows the section the host pushes and shows Coming next for unbuilt pages", () => {
   host();
   const { rerender } = render(<SettingsPanel state={make("general")} />);
-  rerender(<SettingsPanel state={make("voice")} />);
-  expect(screen.getByRole("heading", { name: "Voice" })).toBeInTheDocument();
+  rerender(<SettingsPanel state={make("integrations")} />);
+  expect(screen.getByRole("heading", { name: "Integrations" })).toBeInTheDocument();
   expect(screen.getByText("Coming next")).toBeInTheDocument();
 });
 
