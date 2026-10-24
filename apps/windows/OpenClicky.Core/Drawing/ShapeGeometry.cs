@@ -10,7 +10,7 @@ namespace OpenClicky.Core.Drawing;
 /// </summary>
 public static class ShapeGeometry
 {
-    private const float ArrowHeadDip = 12, ArrowHeadDegrees = 28, BracketCapDip = 24, BracketFraction = 0.25f, CornerDip = 6;
+    private const float ArrowHeadDip = 12, ArrowHeadDegrees = 28, BracketCapDip = 24, BracketFraction = 0.25f, CornerDip = 6, UnderlineDropDip = 2;
     private const int EllipsePoints = 64, CurvePoints = 32, PathSegmentPoints = 16, SplinePoints = 16, ArcPoints = 6;
 
     public static IReadOnlyList<IReadOnlyList<Pt>> Outline(DrawOp op, float dip = 1, float scale = 1)
@@ -35,7 +35,10 @@ public static class ShapeGeometry
             case DrawOpKind.Highlight: return [[new(b.X, b.Y + b.H / 2), new(b.Right, b.Y + b.H / 2)]];
             case DrawOpKind.Trace when p.Count >= 3: return [ClosedSpline(p)];
             case DrawOpKind.Frame: return Brackets(b, dip);
-            case DrawOpKind.Underline or DrawOpKind.Strike when p.Count == 2: return [[p[0], p[1]]];
+            // y is the text baseline for an underline (the ink sits just below it) and the text's mid-line for a strike.
+            case DrawOpKind.Underline when p.Count == 2:
+                return [[new(p[0].X, p[0].Y + UnderlineDropDip * dip), new(p[1].X, p[1].Y + UnderlineDropDip * dip)]];
+            case DrawOpKind.Strike when p.Count == 2: return [[p[0], p[1]]];
             case DrawOpKind.Star when p.Count > 0: return [Star(p[0], size / 2)];
             case DrawOpKind.Check when p.Count > 0:
                 var c = p[0];

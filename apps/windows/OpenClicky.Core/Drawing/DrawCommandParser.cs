@@ -18,6 +18,8 @@ public static class DrawCommandParser
     public const int MaxText = 280;
     public const int MaxButtons = 3;
     public const int MaxPrompt = 300;
+    /// <summary>Largest cross / check / star <c>size</c> in screenshot pixels; a larger one drops the tag.</summary>
+    public const int MaxSize = 400;
 
     private const int MaxValue = 100_000;
     private const string Prefix = "[DRAW:";
@@ -151,7 +153,7 @@ public static class DrawCommandParser
             case DrawOpKind.Dot or DrawOpKind.Point: Anchor(); break;
             case DrawOpKind.Text: Anchor(); r.Str("text", true, MaxText); r.Int("size", false, 10, 48); break;
             case DrawOpKind.Label: Anchor(); r.Str("text", true, MaxText); break;
-            case DrawOpKind.Cross or DrawOpKind.Check or DrawOpKind.Star: Anchor(); raw.TryAdd("size", "24"); r.Int("size", false, 1); break;
+            case DrawOpKind.Cross or DrawOpKind.Check or DrawOpKind.Star: Anchor(); raw.TryAdd("size", "24"); r.Int("size", false, 1, MaxSize); break;
             case DrawOpKind.Scroll: Anchor(); r.OneOf("dir", true, "up", "down"); break;
             case DrawOpKind.Badge: Anchor(); r.Int("n", true, 1, 15); break;
             case DrawOpKind.Button: Anchor(); r.Str("text", true, MaxText); r.Str("prompt", true, MaxPrompt); break;

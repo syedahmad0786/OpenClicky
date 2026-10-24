@@ -11,6 +11,7 @@ namespace OpenClicky.Overlay;
 internal sealed class DrawingWindow : IDisposable
 {
     private const double FrameSeconds = 0.033, ReducedFadeSeconds = 0.12;
+    private const long MaxPixels = 2L * 3840 * 2160;
 
     private readonly LayeredWindow _window;
     private IReadOnlyList<DrawingRenderer.PartLayout> _layouts = [];
@@ -41,6 +42,12 @@ internal sealed class DrawingWindow : IDisposable
         }
         var live = parts.Select(p => (p.Id, p.Seq)).ToHashSet();
         foreach (var key in _reveals.Keys.Where(k => !live.Contains(k)).ToArray()) _reveals.Remove(key);
+        if (_layouts.Count == 0 && _erasing.Count == 0)
+        {
+            // Cleared, perhaps while hidden (Render does not run then): let the bitmap go now.
+            _bitmap?.Dispose();
+            _bitmap = null;
+        }
         _dirty = true;
     }
 
@@ -94,6 +101,9 @@ internal sealed class DrawingWindow : IDisposable
         var union = _layouts.Concat(_erasing.Select(e => e.Layout)).Select(l => l.Bounds).Aggregate(RectangleF.Union);
         var area = Rectangle.Intersect(Rectangle.FromLTRB((int)MathF.Floor(union.Left), (int)MathF.Floor(union.Top),
             (int)MathF.Ceiling(union.Right), (int)MathF.Ceiling(union.Bottom)), SystemInformation.VirtualScreen);
+        // ponytail: a drawing over more than MaxPixels (two 4K monitors, 64 MB) shows only on the monitor holding most of
+        // it; per-monitor ink windows if drawings spanning three big screens matter.
+        if ((long)area.Width * area.Height > MaxPixels) area = Rectangle.Intersect(area, Screen.FromRectangle(area).Bounds);
         if (area.Width <= 0 || area.Height <= 0)
         {
             _window.HideWindow();

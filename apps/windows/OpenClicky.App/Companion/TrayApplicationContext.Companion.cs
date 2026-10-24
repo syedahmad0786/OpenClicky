@@ -9,6 +9,8 @@ namespace OpenClicky.App;
 /// <summary>The on-screen companion: its look and presence follow the cursor settings, Pause and reduced motion.</summary>
 internal sealed partial class TrayApplicationContext
 {
+    private readonly OpenClicky.Core.Drawing.DrawingAnchor _drawingAnchor = new();
+
     /// <summary>UI thread: at startup, after a cursor.* patch, Pause/Resume, the classic settings form, and when a turn starts
     /// (Windows' reduced-motion setting is read fresh each time).</summary>
     private void ApplyCompanionStyle() => _overlay.ApplyStyle(CompanionStyle.From(_settings, GeneralBehaviour.ReducedMotion()));
@@ -25,22 +27,26 @@ internal sealed partial class TrayApplicationContext
     }
 
     /// <summary>
-    /// The drawing is anchored to the window the reply was about: when another window comes to the front, or that one moves or
-    /// resizes, the drawing no longer lines up and is cleared. OpenClicky's own windows (the shell, a card) never count.
+    /// The drawing is anchored to the last non-OpenClicky window in front when the turn captured the screen (or when the drawing
+    /// appeared): when a different such window comes to the front, or the anchor moves or resizes, the drawing no longer lines
+    /// up and is cleared. OpenClicky's own windows (the shell, a card) never become the anchor or count as a switch.
     /// </summary>
     private void WatchForStaleDrawing()
     {
         var timer = new System.Windows.Forms.Timer { Interval = 250 };
         timer.Tick += (_, _) =>
         {
-            if (!_overlay.HasDrawing || ForegroundWindowInfo.IsCurrentProcessForeground()) return;
-            if (ForegroundWindowInfo.IsCurrentProcessWindow(_responseWindowHandle)) return; // the reply's window was ours: no anchor
-            if (ForegroundWindowInfo.GetHandle() != _responseWindowHandle || ForegroundWindowInfo.GetBounds() != _responseWindowBounds)
+            if (_drawingAnchor.IsStale(ForegroundWindowInfo.GetHandle(), ForegroundWindowInfo.GetBounds(),
+                    ForegroundWindowInfo.IsCurrentProcessForeground(), _overlay.HasDrawing))
                 _talk.ClearDrawing();
         };
         timer.Start();
         _home.Disposed += (_, _) => timer.Dispose();
     }
+
+    /// <summary>UI thread, when a turn that needs the screen starts processing.</summary>
+    private void CaptureDrawingAnchor() =>
+        _drawingAnchor.Capture(ForegroundWindowInfo.GetHandle(), ForegroundWindowInfo.GetBounds(), ForegroundWindowInfo.IsCurrentProcessForeground());
 
     /// <summary>The surface covers the monitor it follows; the companion docks at that monitor's top centre.</summary>
     private void UpdateNotchPoint()

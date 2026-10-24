@@ -82,6 +82,7 @@ public sealed class BuddyOverlayController : IOverlayController
     /// <summary>The model's persistent drawing, in its own window (<see cref="_drawingWindow"/> keeps the click ring and legacy marks).</summary>
     private readonly DrawingWindow _drawing;
     private volatile bool _hasDrawing;
+    private int _drawingGeneration;
     private readonly ClickCatcher _catcher;
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 16 };
     private readonly Stopwatch _clock = Stopwatch.StartNew();
@@ -221,8 +222,13 @@ public sealed class BuddyOverlayController : IOverlayController
     public void ShowDrawing(IReadOnlyList<DrawPart> parts, IReadOnlyList<PartAnimation> animations)
     {
         _hasDrawing = parts.Count > 0;
+        // A call queued from another thread must not land after a newer one that ran inline (Esc on the UI thread would
+        // otherwise be undone by a pending paint). Each call carries the full drawing, so only the newest matters.
+        // ponytail: a skipped call's reveal is lost (those parts snap in); that needs two calls queued within one UI tick.
+        var generation = Interlocked.Increment(ref _drawingGeneration);
         Post(() =>
         {
+            if (generation != Volatile.Read(ref _drawingGeneration)) return;
             _drawing.Show(parts, animations, Now);
             // A part being drawn brings a docked companion out and lets it ride the pen (thinking dots give way to the ink).
             if (animations.Any(a => !a.Erase) && _mode is Mode.Idle or Mode.Processing) _mode = Mode.Responding;

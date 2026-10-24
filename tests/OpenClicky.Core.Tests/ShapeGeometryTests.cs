@@ -82,8 +82,9 @@ public class ShapeGeometryTests
         Assert.Equal(11, Assert.Single(ShapeGeometry.Outline(Op("[DRAW:star x=50 y=50]"))).Count); // 10 points, closed
         Assert.Equal(2, ShapeGeometry.Outline(Op("[DRAW:cross x=50 y=50]")).Count);
         Assert.Equal(3, Assert.Single(ShapeGeometry.Outline(Op("[DRAW:check x=50 y=50]"))).Count);
-        Assert.Equal([new Pt(10, 40), new Pt(110, 40)], Assert.Single(ShapeGeometry.Outline(Op("[DRAW:underline x=10 y=40 w=100]"))));
-        Assert.Equal([new Pt(10, 40), new Pt(110, 40)], Assert.Single(ShapeGeometry.Outline(Op("[DRAW:strike x=10 y=40 w=100]"))));
+        // Underline: y is the baseline and the ink sits 2 DIP below it. Strike: y is the mid-line, drawn on it.
+        Assert.Equal([new Pt(10, 44), new Pt(110, 44)], Assert.Single(ShapeGeometry.Outline(Op("[DRAW:underline x=10 y=40 w=100]"), dip: 2)));
+        Assert.Equal([new Pt(10, 40), new Pt(110, 40)], Assert.Single(ShapeGeometry.Outline(Op("[DRAW:strike x=10 y=40 w=100]"), dip: 2)));
         var rect = Assert.Single(ShapeGeometry.Outline(Op("[DRAW:rect x=0 y=0 w=100 h=50]")));
         Assert.Equal(rect[0], rect[^1]);
         Assert.All(rect, p => Assert.True(p.X >= 0 && p.X <= 100 && p.Y >= 0 && p.Y <= 50));

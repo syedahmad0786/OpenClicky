@@ -29,6 +29,7 @@ public class DrawCommandParserTests
     [InlineData("strike x=5 y=6 w=40", DrawOpKind.Strike)]
     [InlineData("cross x=5 y=6", DrawOpKind.Cross)]
     [InlineData("check x=5 y=6 size=30", DrawOpKind.Check)]
+    [InlineData("star x=5 y=6 size=400", DrawOpKind.Star)]
     [InlineData("star x=5 y=6", DrawOpKind.Star)]
     [InlineData("scroll x=5 y=6 dir=down", DrawOpKind.Scroll)]
     [InlineData("badge x=5 y=6 n=3", DrawOpKind.Badge)]
@@ -155,6 +156,9 @@ public class DrawCommandParserTests
     [InlineData("dot x=1y=5")]
     [InlineData("text x=1 y=5 text=\"bell\a\"")]
     [InlineData("text x=1 y=5 text=\"ok\" size=60")]
+    [InlineData("star x=100 y=100 size=99999")] // ~100k wobble points a frame
+    [InlineData("check x=100 y=100 size=401")]
+    [InlineData("cross x=100 y=100 size=0")]
     [InlineData("curve pts=1,2,3,4,5,6")]
     [InlineData("poly pts=1,2,3,4")]
     [InlineData("line pts=1,2,3")]

@@ -91,15 +91,20 @@ public class CompanionWorkflowTests
     [Fact]
     public async Task SpeechOffPacesDrawingOnLineTimers()
     {
-        var overlay = new Overlay();
+        var clock = new System.Diagnostics.Stopwatch();
+        TimeSpan? drawnAt = null;
+        var overlay = new Overlay { OnDrawing = parts => drawnAt ??= clock.Elapsed };
         const string reply = "One. [DRAW:dot id=a x=10 y=10] Two.";
         using var talk = new TalkOrchestrator(new Hotkey(), overlay, new Capture(), new Mic(), () => null,
             () => new StreamingTalk(["One.", reply, reply + " [POINT:none]"]),
             new LoggingTts(new()), () => new AppSettings { PersistConversationHistory = false, SpeakReplies = false }, log: _ => { },
             windowBounds: () => (0, 0, 200, 100));
-        var clock = System.Diagnostics.Stopwatch.StartNew();
+        clock.Start();
         await talk.SubmitTextAsync("dot", false);
-        Assert.True(clock.Elapsed >= DrawingPacing.LineDuration("One.", 1) * 2 - TimeSpan.FromMilliseconds(50), $"ended after {clock.Elapsed}");
+        var line = DrawingPacing.LineDuration("One.", 1);
+        Assert.True(clock.Elapsed >= line * 2 - TimeSpan.FromMilliseconds(50), $"ended after {clock.Elapsed}");
+        // The dot belongs to the second line, so it appears when the first line's timer runs out, not at once.
+        Assert.True(drawnAt >= line - TimeSpan.FromMilliseconds(50), $"drawn after {drawnAt}, line {line}");
         Assert.Equal("a", Assert.Single(overlay.LastDrawing).Id);
     }
 
@@ -149,6 +154,61 @@ public class CompanionWorkflowTests
         await talk.SubmitTextAsync("dot", false);
         await talk.StartWalkthroughAsync("save the file");
         Assert.Equal("new", Assert.Single(talk.Drawing.Parts).Id);
+    }
+
+    [Fact]
+    public async Task DrawTagsNeverReachMessagesSpeechOrHistory()
+    {
+        var historyPath = Path.Combine(Path.GetTempPath(), $"openclicky-draw-{Guid.NewGuid():N}.json");
+        const string first = "Look [DRAW:circle id=a x=10 y=10 r=5 label=\"the \\] bit\"] here.";
+        const string full = first + " Then [DRAW:dot x=5 y=5] that. [DRAW:star x=20 y=20]";
+        var tts = new RecordingTts();
+        var shown = new List<string>();
+        try
+        {
+            using var talk = new TalkOrchestrator(new Hotkey(), new Overlay(), new Capture(), new Mic(), () => null,
+                () => new StreamingTalk(["Look [DRA", "Look [DRAW:circle id=a x=10", first, first + " Then [DRAW:d", full, full + " [POINT:none]"]),
+                tts, () => new AppSettings { PersistConversationHistory = true, SpeakReplies = true }, log: _ => { },
+                historyPath: historyPath, windowBounds: () => (0, 0, 200, 100));
+            talk.MessageReceived += (role, text) => { if (role == "OpenClicky") shown.Add(text); };
+            talk.AssistantResponseChanged += (text, _) => shown.Add(text);
+            await talk.SubmitTextAsync("show me");
+            Assert.Equal(3, talk.Drawing.Parts.Count);
+            Assert.Equal("Look here. Then that.", Assert.Single(ConversationHistoryStore.Load(historyPath, 100)).assistant);
+            Assert.Equal("Look here. Then that.", string.Join(" ", tts.Spoken));
+            Assert.Equal("Look here. Then that.", shown[^1]);
+            Assert.All(shown.Concat(tts.Spoken), text => Assert.DoesNotContain("[", text));
+        }
+        finally { ConversationHistoryStore.Clear(historyPath); }
+    }
+
+    [Fact]
+    public async Task TagAfterTheLastSentenceShowsWithThatSentence()
+    {
+        var events = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        var overlay = new Overlay { OnDrawing = parts => events.Enqueue("draw " + string.Join(",", parts.Select(p => p.Id))) };
+        const string reply = "One. Two. [DRAW:dot id=z x=10 y=10]";
+        using var talk = new TalkOrchestrator(new Hotkey(), overlay, new Capture(), new Mic(), () => null,
+            () => new StreamingTalk(["One.", "One. Two.", reply, reply + " [POINT:none]"]),
+            new TimedTts(events), () => new AppSettings { PersistConversationHistory = false, SpeakReplies = true }, log: _ => { },
+            windowBounds: () => (0, 0, 200, 100));
+        await talk.SubmitTextAsync("dot", false);
+        // Both lines were queued while streaming, so CueRestAsync shows the trailing tag when "Two." starts, not after it.
+        var log = events.ToList();
+        var drawn = log.IndexOf("draw z");
+        Assert.True(drawn > log.IndexOf("spoke One.") && drawn < log.IndexOf("spoke Two."), string.Join(" | ", log));
+        Assert.Single(log, e => e.StartsWith("draw", StringComparison.Ordinal));
+    }
+
+    private sealed class TimedTts(System.Collections.Concurrent.ConcurrentQueue<string> events) : ITtsClient
+    {
+        public async Task SpeakAsync(string text, CancellationToken token = default)
+        {
+            events.Enqueue("speak " + text);
+            await Task.Delay(150, token);
+            events.Enqueue("spoke " + text);
+        }
+        public void Stop() { }
     }
 
     private sealed class LoggingTts(System.Collections.Concurrent.ConcurrentQueue<string> events) : ITtsClient

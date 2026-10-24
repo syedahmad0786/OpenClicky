@@ -15,8 +15,7 @@ public static class DrawingRenderer
 {
     private const float MarkerDip = 6, DotDip = 5, TextDip = 14, TextMaxWidthDip = 360, HaloDip = 3, PillGapDip = 6;
     private const int HaloAlpha = 179; // 70 %
-    private static readonly string HandFamily =
-        FontFamily.Families.Any(f => f.Name == "Segoe Print") ? "Segoe Print" : "Segoe UI";
+    private static readonly string HandFamily = Installed("Segoe Print") ? "Segoe Print" : "Segoe UI";
     private static readonly Graphics Measure = Graphics.FromImage(new Bitmap(1, 1));
     private static readonly StringFormat TextFormat = new(StringFormat.GenericTypographic) { Trimming = StringTrimming.None };
 
@@ -29,6 +28,8 @@ public static class DrawingRenderer
         public IReadOnlyList<IReadOnlyList<Pt>> Strokes { get; internal set; } = [];
         public RectangleF? TextBox { get; internal set; }
         public float FontPx { get; internal set; }
+        // ponytail: not disposed, the GDI+ finalizer frees it; layouts are replaced on every ShowDrawing, so few are alive.
+        internal GraphicsPath? TextPath { get; set; }
         public string? PillText { get; internal set; }
         public RectangleF? Pill { get; internal set; }
         internal (Box Ring, float Corner)? Ring { get; set; }
@@ -37,7 +38,8 @@ public static class DrawingRenderer
 
     /// <summary>
     /// Lays out the parts that can be drawn. A part with a non-finite coordinate, or any point or box corner outside
-    /// <paramref name="screen"/> (default: the virtual screen), is skipped: edits can move or scale a part off-screen.
+    /// <paramref name="screen"/> (default: the virtual screen), is skipped: edits can move or scale a part off-screen. So is a
+    /// shape whose strokes leave the monitor under its anchor.
     /// Label pills that would overlap move apart (<see cref="LabelLayout"/>).
     /// </summary>
     public static IReadOnlyList<PartLayout> Layout(IReadOnlyList<DrawPart> parts, Rectangle? screen = null)
@@ -68,6 +70,9 @@ public static class DrawingRenderer
                     var box = new RectangleF(anchor.X, anchor.Y, measured.Width + 2, measured.Height + 2);
                     layout.TextBox = box;
                     layout.FontPx = px;
+                    layout.TextPath = new GraphicsPath();
+                    layout.TextPath.AddString(op.Text, font.FontFamily, (int)FontStyle.Regular, px,
+                        new RectangleF(box.X, box.Y, TextMaxWidthDip * dip, box.Height + px), TextFormat);
                     paint = Inflate(box, HaloDip * dip + 2);
                     break;
                 }
@@ -93,6 +98,10 @@ public static class DrawingRenderer
                 {
                     var outline = ShapeGeometry.Outline(op, dip, part.Scale);
                     if (outline.Count == 0) continue; // drawn by a later helper (graph, card, …) or nothing to draw
+                    // The strokes must stay on the part's monitor (only their band may overhang its edge, as for a highlight
+                    // on the taskbar). Checked before the wobble, so an oversized shape costs nothing.
+                    var monitor = RectangleF.Inflate(Screen.FromPoint(at).Bounds, 1, 1);
+                    if (!monitor.Contains(Extent(outline))) continue;
                     var seed = InkStyle.Seed(part.Id);
                     layout.Strokes = outline.Select((stroke, i) =>
                     {
@@ -150,13 +159,10 @@ public static class DrawingRenderer
 
         switch (op.Kind)
         {
-            case DrawOpKind.Text or DrawOpKind.Label when layout.TextBox is { } box:
+            case DrawOpKind.Text or DrawOpKind.Label when layout.TextBox is { } box && layout.TextPath is { } path:
             {
                 var state = g.Save();
                 g.SetClip(new RectangleF(box.X - HaloDip * dip - 2, box.Y - HaloDip * dip - 2, (box.Width + 2 * HaloDip * dip + 4) * progress, box.Height + 2 * HaloDip * dip + 4));
-                using var path = new GraphicsPath();
-                using (var family = new FontFamily(HandFamily))
-                    path.AddString(op.Text!, family, (int)FontStyle.Regular, layout.FontPx, new RectangleF(box.X, box.Y, TextMaxWidthDip * dip, box.Height + layout.FontPx), TextFormat);
                 using (var halo = new Pen(Fade(Color.White, HaloAlpha / 255f), 2 * HaloDip * dip) { LineJoin = LineJoin.Round })
                     g.DrawPath(halo, path);
                 using (var fill = new SolidBrush(Fade(colour))) g.FillPath(fill, path);
@@ -200,10 +206,12 @@ public static class DrawingRenderer
         var (visible, _) = InkStyle.Reveal(layout.Strokes, progress);
         var style = op.Kind == DrawOpKind.Highlight ? "highlighter" : op.Args.GetValueOrDefault("style") ?? "pen";
 
-        if (ShapeGeometry.IsClosed(op) && layout.Strokes[0].Count > 2)
+        if (ShapeGeometry.IsClosed(op))
         {
+            // Every stroke that ends where it began: a path washes only its subpaths closed with Z.
             using var wash = new SolidBrush(Color.FromArgb((int)Math.Round(255 * InkStyle.WashAlpha * progress * alpha), colour));
-            g.FillPolygon(wash, layout.Strokes[0].Select(p => new PointF(p.X, p.Y)).ToArray());
+            foreach (var stroke in layout.Strokes.Where(s => s.Count > 2 && s[0] == s[^1]))
+                g.FillPolygon(wash, stroke.Select(p => new PointF(p.X, p.Y)).ToArray());
         }
 
         if (style is "highlighter" or "marker")
@@ -276,6 +284,12 @@ public static class DrawingRenderer
     }
 
     private static RectangleF ToRect(Box b) => new(b.X, b.Y, b.W, b.H);
+
+    private static bool Installed(string family)
+    {
+        try { using var _ = new FontFamily(family); return true; }
+        catch (ArgumentException) { return false; }
+    }
 
     private static Box ToBox(Rectangle r) => new(r.X, r.Y, r.Width, r.Height);
 }

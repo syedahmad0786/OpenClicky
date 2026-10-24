@@ -400,6 +400,22 @@ internal static class Program
         if (!bounds.Contains(new RectangleF(x, y, 120, 60))) return $"bounds {bounds} do not cover the rect";
         if (layouts[0].Pill is not { } p0 || layouts[1].Pill is not { } p1 || p0.IntersectsWith(p1)) return "label pills overlap";
         if (DrawingRenderer.PenTip(layouts[0], 0.5f) is not { } tip || !bounds.Contains(tip.X, tip.Y)) return "pen tip outside the part";
+
+        // A star whose strokes leave its monitor is dropped before its wobble is built (even past the parser's size cap);
+        // one that fits is kept, and a highlight hugging the monitor's bottom edge keeps its band.
+        var mon = Screen.PrimaryScreen!.Bounds;
+        OpenClicky.Core.Drawing.DrawPart Star(string id, float sx, float sy, string size)
+        {
+            var p = Part(id, OpenClicky.Core.Drawing.DrawOpKind.Star, new(sx, sy, 0, 0), [new(sx, sy)]);
+            return p with { Op = p.Op with { Args = new Dictionary<string, string> { ["size"] = size } } };
+        }
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var huge = DrawingRenderer.Layout([Star("huge", mon.Left + 100, mon.Top + 100, "99999")]);
+        if (huge.Count != 0 || clock.ElapsedMilliseconds > 200) return $"a size=99999 star was kept ({huge.Count}) or took {clock.ElapsedMilliseconds} ms";
+        if (DrawingRenderer.Layout([Star("edge", mon.Right - 20, mon.Top + 300, "400")]).Count != 0) return "a star crossing its monitor's edge was kept";
+        if (DrawingRenderer.Layout([Star("fits", mon.Left + 300, mon.Top + 300, "400")]).Count != 1) return "a size=400 star that fits was dropped";
+        var bar = Part("bar", OpenClicky.Core.Drawing.DrawOpKind.Highlight, new(mon.Left, mon.Bottom - 40, mon.Width, 40));
+        if (DrawingRenderer.Layout([bar]).Count != 1) return "a highlight on the monitor's bottom edge was dropped";
         return null;
     }
 
@@ -417,7 +433,10 @@ internal static class Program
             NativeMethods.GetWindowRect(hwnd, out var r) && r.Left <= p.X && p.X < r.Right && r.Top <= p.Y && p.Y < r.Bottom;
 
         var saved = Cursor.Position;
-        int x = vs.Left + vs.Width / 4, y = vs.Top + vs.Height / 2;
+        // On the primary monitor: a point a quarter across the virtual screen can sit in an L-shaped layout's dead zone,
+        // and parts whose strokes leave their monitor are dropped.
+        var mon = Screen.PrimaryScreen!.Bounds;
+        int x = mon.Left + mon.Width / 4, y = mon.Top + mon.Height / 2;
         try
         {
             Cursor.Position = new Point(vs.Left + vs.Width * 3 / 4, vs.Top + vs.Height * 3 / 4); // the companion stays clear

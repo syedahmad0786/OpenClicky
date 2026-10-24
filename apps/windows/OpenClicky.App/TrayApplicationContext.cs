@@ -181,6 +181,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             _home.SetState(state);
             _home.SetConversationActive(_talk.ConversationActive);
             _companionDock.SetState(state, _talk.ConversationActive);
+            if (state == CompanionVoiceState.Processing && _talk.CurrentTurnRequiresScreen) CaptureDrawingAnchor(); // before the shell minimizes
             if (state == CompanionVoiceState.Processing && _talk.ConversationActive && _talk.CurrentTurnRequiresScreen)
             {
                 _home.MinimizeForRequest();
@@ -241,11 +242,11 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         _home.Disposed += (_, _) => _routineTimer.Dispose();
         // Esc (never swallowed) stops OpenClicky only while it is doing something; a cancelled shortcut ends itself.
         // Speech outside a turn (announcements, previews) stops too; SpeechOutput.Stop is a no-op when nothing plays.
-        // A confirm dialog owns Esc: declining a talk action must not also stop a (paused) task.
+        // A confirm dialog owns Esc: declining a talk action must not also stop a (paused) task or clear the drawing.
         _hotkey.EscapePressed += (_, _) =>
         {
-            _talk.ClearDrawing(); // always: Esc takes the drawing off the screen
             if (_confirm.IsDialogOpen) return;
+            _talk.ClearDrawing(); // Esc takes the drawing off the screen
             CancelMicWatch(); _tts.Stop(); _shell?.ClearCaptions(); if (IsBusy) Stop();
         };
         // Only once a talk press is past the tap window: a cancelled press must leave no trace.
