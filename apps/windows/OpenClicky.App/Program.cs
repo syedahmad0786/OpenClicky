@@ -15,9 +15,11 @@ internal static class Program
         using var reopenRequest = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\OpenClicky.App.OpenWorkspace");
         // Prevent a second tray host from fighting over the same PTT hook / Credential Manager session.
         _singleInstance = new Mutex(initiallyOwned: true, @"Local\OpenClicky.App.SingleInstance", out var createdNew);
+        var background = args.Contains("--background");
         if (!createdNew)
         {
-            reopenRequest.Set();
+            // A login start (--background) must not pop the running instance open.
+            if (!background) reopenRequest.Set();
             _singleInstance.Dispose();
             _singleInstance = null;
             return;
@@ -28,7 +30,7 @@ internal static class Program
             ApplicationConfiguration.Initialize();
             Application.ApplicationExit += (_, _) => ReleaseMutex();
             // --background (launch at login): start in the tray and open nothing.
-            using var context = new TrayApplicationContext(background: args.Contains("--background"));
+            using var context = new TrayApplicationContext(background);
             var reopenWait = RegisterReopenRequest(reopenRequest, context.RequestShowHome);
             try { Application.Run(context); }
             finally { reopenWait.Unregister(null); }

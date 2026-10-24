@@ -40,6 +40,26 @@ public class ShellStateBuilderTests
         Assert.True(state.Document.Truncated);
     }
 
+    [Fact]
+    public void ChatRowsAreCappedAtEightThousandChars()
+    {
+        var state = ShellStateBuilder.Build(Inputs(chat: [new ConversationTurn(1, "q", new string('a', 20_000), Now)]));
+        var row = state.Chat.Rows.Single(r => r.Role == ChatRole.Assistant);
+        Assert.Equal(ShellStateBuilder.MaxRowText, row.Text.Length);
+        Assert.EndsWith("…", row.Text);
+    }
+
+    [Fact]
+    public void SerializedStateStaysWithinBudgetByDroppingOldestRows()
+    {
+        // 200 rows of ~8,000 chars is ~1.6M chars before the budget applies.
+        var chat = Enumerable.Range(1, 100).Select(i => new ConversationTurn(i, $"u{i} " + new string('u', 9_000), $"a{i} " + new string('a', 9_000), Now)).ToArray();
+        var state = ShellStateBuilder.Build(Inputs(chat: chat));
+        Assert.True(ShellContract.Serialize(state).Length <= ShellStateBuilder.MaxStateChars);
+        Assert.InRange(state.Chat.Rows.Count, 100, 199);
+        Assert.StartsWith("a100 ", state.Chat.Rows[^1].Text); // newest kept
+    }
+
     [Theory]
     [InlineData("running", false, JobState.Working)]
     [InlineData("completed", false, JobState.Done)]

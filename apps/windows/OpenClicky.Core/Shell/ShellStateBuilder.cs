@@ -39,6 +39,8 @@ public sealed record ShellInputs(
 public static class ShellStateBuilder
 {
     public const int MaxJobs = 80, MaxChatRows = 200, MaxCards = 6, MaxBullets = 4, MaxFiles = 6, MaxCardActions = 3, MaxDocument = 200_000;
+    /// <summary>Per chat row in state (longer text ends in "…"), and the whole serialized state (oldest chat rows dropped first).</summary>
+    public const int MaxRowText = 8_000, MaxStateChars = 1_000_000;
     public const string DefaultAccent = "#3380FF";
     private static readonly Regex Hex = new("^#[0-9a-fA-F]{6}$", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(50));
     private static readonly JobColour[] Colours = [JobColour.Red, JobColour.Blue, JobColour.Yellow, JobColour.Green];
@@ -50,9 +52,10 @@ public static class ShellStateBuilder
         var cards = inputs.Jobs.OrderByDescending(j => j.Job.LastRunAt ?? j.Job.CreatedAt).Select(MapJob).ToList();
         var jobs = cards.Take(MaxJobs).ToList();
         var featured = Featured(inputs, cards);
-        var rows = inputs.Chat.SelectMany(TurnRows).Concat(inputs.LiveRows).TakeLast(MaxChatRows).ToList();
+        var rows = inputs.Chat.SelectMany(TurnRows).Concat(inputs.LiveRows).TakeLast(MaxChatRows)
+            .Select(r => r.Text.Length <= MaxRowText ? r : r with { Text = r.Text[..(MaxRowText - 1)] + "…" }).ToList();
 
-        return new ShellState(
+        var state = new ShellState(
             ShellContract.Version,
             inputs.Theme,
             settings.AccentColor is { } accent && Hex.IsMatch(accent) ? accent.ToUpperInvariant() : DefaultAccent,
@@ -69,6 +72,7 @@ public static class ShellStateBuilder
             new ShellGeneral(settings.ShowInTaskbar, settings.ShowInScreenRecordings, settings.LaunchAtLogin, settings.Paused),
             inputs.Update ?? new ShellUpdate(Cut(inputs.CurrentVersion, 40), null, UpdateState.Idle, 0),
             inputs.Document is { } doc && doc.Content.Length > MaxDocument ? doc with { Content = doc.Content[..MaxDocument], Truncated = true } : inputs.Document);
+        return WithinBudget(state);
 
         JobCard MapJob(ShellJobInput input)
         {
@@ -95,6 +99,21 @@ public static class ShellStateBuilder
                 [],
                 Iso(job.LastRunAt ?? job.CreatedAt));
         }
+    }
+
+    /// <summary>Drops the oldest chat rows until the serialized state fits <see cref="MaxStateChars"/>.</summary>
+    private static ShellState WithinBudget(ShellState state)
+    {
+        var rows = state.Chat.Rows.ToList();
+        for (var excess = ShellContract.Serialize(state).Length - MaxStateChars; excess > 0 && rows.Count > 0;
+             excess = ShellContract.Serialize(state).Length - MaxStateChars)
+        {
+            var drop = 0;
+            for (long freed = 0; drop < rows.Count && freed < excess; drop++) freed += rows[drop].Text.Length + 100;
+            rows.RemoveRange(0, drop);
+            state = state with { Chat = new ShellChat(rows.ToList()) };
+        }
+        return state;
     }
 
     /// <summary>The job the host chose (job.open), else the most recently run job that produced files.</summary>

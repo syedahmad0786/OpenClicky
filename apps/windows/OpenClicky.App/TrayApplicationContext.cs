@@ -156,13 +156,13 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             }
             _home.UpdateTasks(_taskRuns);
         }
-        catch (Exception ex) { _home.AddMessage("OpenClicky", "Saved task history was left unchanged: " + ex.Message); }
+        catch (Exception ex) { ClassicMessage("Saved task history was left unchanged: " + ex.Message); }
         _settingsForm = new SettingsForm(_settings, _secrets, OnSettingsApplied, () =>
         {
             _talk.ClearHistory();
             _home.ClearConversation();
             ClearTasks();
-            _shell?.EndTurn();
+            ResetShellChat();
         });
         _companionDock = new CompanionDockForm(ToggleConversation, ShowHome,
             () => _ = SelectScreenAreaAsync(), ShowClipboardShelf, _talk.StopConversation,
@@ -209,7 +209,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
                 if (_dictationActive && role == "OpenClicky")
                 {
                     _home.SetDictationResult(text);
-                    ShowHome();
+                    ShowClassic();
                 }
             });
         };
@@ -274,7 +274,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
                 _talk.CancelCurrentTurn();
         };
         try { _physicalInput.Start(); }
-        catch (Exception ex) { Log("takeover_monitor_error=" + ex.GetType().Name); _home.AddMessage("OpenClicky", "Automatic pause on physical input is unavailable. Use Stop before taking over a running task."); }
+        catch (Exception ex) { Log("takeover_monitor_error=" + ex.GetType().Name); ClassicMessage("Automatic pause on physical input is unavailable. Use Stop before taking over a running task."); }
         _companionDock.Show();
         if (_settings.AwarenessEnabled) _guideTimer.Start();
         Log($"tray ready — hold {_settings.PushToTalk.DisplayName}");
@@ -346,7 +346,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             Log("workspace_start_error=" + ex.GetType().Name);
             _workspaceReady.TrySetException(ex);
             if (_visualWorkspace is not null) { _home.DetachVisualWorkspace(); _visualWorkspace = null; }
-            _home.AddMessage("OpenClicky", "The interactive workspace could not start. The native conversation remains available.");
+            ClassicMessage("The interactive workspace could not start. The native conversation remains available.");
         }
     }
 
@@ -440,7 +440,10 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
 
     internal void RequestShowHome() => OnUi(ShowHome);
 
-    /// <summary>Opens the notch peek once the shell runs; the classic window while it is in use or the shell is unavailable.</summary>
+    /// <summary>
+    /// Entry points only (tray, double-click, second instance, dock): the notch peek once the shell runs, the classic window
+    /// while it is in use or the shell is unavailable. Flows that put content into the classic window call <see cref="ShowClassic"/>.
+    /// </summary>
     private void ShowHome()
     {
         if (_shell is { IsActive: true } && !_home.Visible)
@@ -449,6 +452,19 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             return;
         }
         ShowClassic();
+    }
+
+    /// <summary>Error or status text from a classic flow: written to the classic window and mirrored as a shell toast.</summary>
+    private void ClassicMessage(string text)
+    {
+        _home.AddMessage("OpenClicky", text);
+        _shell?.AddToast(text);
+    }
+
+    private void ClassicStatus(string text)
+    {
+        _home.SetStatus(text);
+        _shell?.AddToast(text);
     }
 
     private void ShowClassic()
@@ -484,7 +500,10 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         if (_chromePipe is null && File.Exists(ChromeBridgeConfiguration.DefaultPath)) _ = ConnectChromeAsync();
     }
 
-    private async Task SubmitFromHomeAsync(string text, bool agent)
+    private Task SubmitFromHomeAsync(string text, bool agent) => SubmitRequestAsync(text, agent, fromShell: false);
+
+    /// <summary>Shared text submit path. A shell submit leaves the classic window closed when it finishes.</summary>
+    private async Task SubmitRequestAsync(string text, bool agent, bool fromShell)
     {
         StopWalkthrough();
         if (_dictationActive) CancelDictation();
@@ -511,21 +530,21 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             }
             await _talk.SubmitTextAsync(route.Request);
         }
-        catch (OperationCanceledException) { _home.AddMessage("OpenClicky", "Stopped before the request started."); }
+        catch (OperationCanceledException) { ClassicMessage("Stopped before the request started."); }
         finally
         {
             if (ReferenceEquals(_submissionCts, submission))
             {
                 _submissionCts = null;
                 _home.SetState(_talk.State);
-                if (_talk.State == CompanionVoiceState.Idle && _taskCts is null) ShowHome();
+                if (_talk.State == CompanionVoiceState.Idle && _taskCts is null && !fromShell) ShowClassic();
             }
         }
     }
 
     private async Task StartWalkthroughFromHomeAsync(string goal)
     {
-        if (goal.Length > 2000) { _home.SetStatus("Keep the walkthrough goal under 2,000 characters."); return; }
+        if (goal.Length > 2000) { ClassicStatus("Keep the walkthrough goal under 2,000 characters."); return; }
         Stop();
         using var submission = new CancellationTokenSource();
         _submissionCts = submission;
@@ -543,12 +562,12 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
                 await Task.Delay(300, submission.Token);
             }
             if (string.IsNullOrWhiteSpace(ForegroundWindowInfo.GetCompanionTitle()))
-            { _home.AddMessage("OpenClicky", "Bring the app you want help with forward, then start the walkthrough again."); ShowHome(); return; }
+            { ClassicMessage("Bring the app you want help with forward, then start the walkthrough again."); ShowClassic(); return; }
             _walkthroughWindow = ForegroundWindowInfo.GetHandle();
             await _talk.StartWalkthroughAsync(goal);
         }
         catch (OperationCanceledException) { }
-        catch (Exception ex) { _home.AddMessage("OpenClicky", "Could not start walkthrough: " + ex.Message); ShowHome(); }
+        catch (Exception ex) { ClassicMessage("Could not start walkthrough: " + ex.Message); ShowClassic(); }
         finally { if (ReferenceEquals(_submissionCts, submission)) _submissionCts = null; }
     }
 
@@ -558,11 +577,11 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         var ownUi = ForegroundWindowInfo.IsCurrentProcessWindow(foreground);
         if (WalkthroughTargetWindow.MustRestore(foreground, ownUi)
             && !ForegroundFocusRestorer.Restore(_walkthroughWindow))
-        { _home.SetStatus("Bring your target app forward before continuing the walkthrough."); return; }
+        { ClassicStatus("Bring your target app forward before continuing the walkthrough."); return; }
         _walkthroughWindow = WalkthroughTargetWindow.Track(_walkthroughWindow, foreground, ownUi);
         _walkthroughForm.Hide();
         try { await _talk.MoveWalkthroughAsync(move); }
-        catch (Exception ex) { _home.AddMessage("OpenClicky", "Could not continue walkthrough: " + ex.Message); }
+        catch (Exception ex) { ClassicMessage("Could not continue walkthrough: " + ex.Message); }
         finally
         {
             _walkthroughForm.UpdateStep(_talk.Walkthrough.View);
@@ -599,7 +618,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
     {
         _home.MinimizeForRequest();
         try { await _talk.EndListeningAsync(); }
-        finally { ShowHome(); }
+        finally { ShowClassic(); }
     }
 
     private async Task TrySandboxDemoAsync()
@@ -615,7 +634,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         _sandboxDemo = true;
         _home.SetConnection("Offline action demo · only the test window");
         try { await _talk.SubmitTextAsync("openclicky agent click the green button then type hello in the test window", remember: false); }
-        finally { _sandboxDemo = false; RefreshConnection(); ShowHome(); }
+        finally { _sandboxDemo = false; RefreshConnection(); ShowClassic(); }
     }
 
     private void MaybeShowFirstRunTip()
@@ -683,17 +702,17 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            _home.AddMessage("OpenClicky", "Could not start the job: " + ex.Message);
+            ClassicMessage("Could not start the job: " + ex.Message);
             return false;
         }
         if (_settings.AuthProvider != AuthProvider.ChatGPT || !ProviderFactory.IsChatGptSignedIn(_secrets))
         {
-            _home.AddMessage("OpenClicky", "Jobs run on the bundled OpenWork runtime. Continue with ChatGPT in Settings first.");
+            ClassicMessage("Jobs run on the bundled OpenWork runtime. Continue with ChatGPT in Settings first.");
             return false;
         }
         if (_taskCts is not null)
         {
-            _home.AddMessage("OpenClicky", "A task is already open. Let it finish or stop it before running a job.");
+            ClassicMessage("A task is already open. Let it finish or stop it before running a job.");
             return false;
         }
         _work.RecordJobRun(run.Job.Id, WorkJobStates.Running, run.Job.Summary, DateTimeOffset.UtcNow);
@@ -736,6 +755,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         {
             if (work.RoutineId is not null) KeepAwake(false);
             _home.RefreshWork();
+            _jobOutputs.Remove(work.Job.Id);
             RequestShellPush();
         });
     }
@@ -904,7 +924,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
     {
         if (!_settings.PersistConversationHistory) return true;
         try { TaskHistoryStore.Save(_taskRuns); return true; }
-        catch (Exception ex) { _home.AddMessage("OpenClicky", "Could not save task history; existing data was preserved: " + ex.Message); return false; }
+        catch (Exception ex) { ClassicMessage("Could not save task history; existing data was preserved: " + ex.Message); return false; }
     }
 
     private string MemoryContext() => CompanionContext.FromMemory(CompanionMemoryStore.Load().Memory)
@@ -949,7 +969,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         {
             await Task.Delay(3000, job.Token);
             if (destination != ForegroundWindowInfo.GetHandle() || !_taskControl.TryResume(revision))
-                _home.SetStatus("Still paused because you took over. Resume when the destination is ready.");
+                ClassicStatus("Still paused because you took over. Resume when the destination is ready.");
         }
         catch (OperationCanceledException) { }
     }
@@ -979,7 +999,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
                     _home.SetDictationResult(result.Message + (result.Verified ? " Keep speaking, or click the companion to stop." : result.InputAttempted
                         ? " Recording stopped. Check the field for partial text; copy this draft if needed, then Cancel and select the field again."
                         : " Recording stopped; review the preserved draft, then Insert or Cancel."), result.Verified || !result.InputAttempted);
-                    if (!result.Verified) ShowHome();
+                    if (!result.Verified) ShowClassic();
                 });
                 return true;
             }
@@ -987,7 +1007,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             {
                 if (token.IsCancellationRequested || !_dictationActive || !ReferenceEquals(target, _dictationTarget)) return;
                 _home.AcceptDictationTranscript(text);
-                ShowHome();
+                ShowClassic();
             });
             return true;
         }
@@ -1050,12 +1070,12 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
     {
         if (_talk.State != CompanionVoiceState.Idle || _talk.ConversationActive || _taskCts is not null)
         {
-            _home.SetStatus("Stop the current voice turn or task before dictating.");
+            ClassicStatus("Stop the current voice turn or task before dictating.");
             return;
         }
         if (!LocalWhisperModel.IsAvailable)
         {
-            _home.SetStatus("Automatic dictation requires the local Whisper model. Download it in Settings → Voice first.");
+            ClassicStatus("Automatic dictation requires the local Whisper model. Download it in Settings → Voice first.");
             return;
         }
 
@@ -1100,8 +1120,8 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             _home.SetState(_talk.State);
             if (!selected)
             {
-                ShowHome();
-                _home.SetStatus(lastError + " Click Dictate into app to try again.");
+                ShowClassic();
+                ClassicStatus(lastError + " Click Dictate into app to try again.");
             }
         }
     }
@@ -1118,15 +1138,15 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         {
             const string localError = "Automatic dictation requires the local Whisper model. Download it in Settings → Voice first.";
             _tray.ShowBalloonTip(5000, "Local dictation unavailable", localError, ToolTipIcon.Warning);
-            ShowHome();
-            _home.SetStatus(localError);
+            ShowClassic();
+            ClassicStatus(localError);
             return;
         }
         if (!DictationTarget.TryCapture(out var target, out var error, AgentDenyList.ParseExtraFragments(_settings.AgentDenyListExtra)) || target is null)
         {
             _tray.ShowBalloonTip(5000, "Dictation target unavailable", error, ToolTipIcon.Warning);
-            ShowHome();
-            _home.SetStatus(error);
+            ShowClassic();
+            ClassicStatus(error);
             return;
         }
 
@@ -1176,14 +1196,14 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             }
             _tray.ShowBalloonTip(5000, result.Verified ? "Dictation inserted and verified" : "Dictation insertion result",
                 result.Message, result.Verified ? ToolTipIcon.Info : ToolTipIcon.Warning);
-            if (!result.InputAttempted) ShowHome();
+            if (!result.InputAttempted) ShowClassic();
         }
         catch (Exception ex)
         {
             _dictationActive = false;
             _dictationTarget = null;
             _home.SetDictationResult("Insertion stopped before a verified result. Treat the destination as potentially changed and start again. " + ex.Message, canContinue: false);
-            ShowHome();
+            ShowClassic();
         }
     }
 
@@ -1211,7 +1231,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
     {
         Stop();
         try { TaskHistoryStore.Save([]); _taskRuns.Clear(); _home.UpdateTasks(_taskRuns); }
-        catch (Exception ex) { _home.AddMessage("OpenClicky", "Task history was left unchanged: " + ex.Message); }
+        catch (Exception ex) { ClassicMessage("Task history was left unchanged: " + ex.Message); }
     }
 
     private async Task SelectScreenAreaAsync()
@@ -1230,8 +1250,8 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
                 await _talk.SubmitRegionAsync(string.IsNullOrWhiteSpace(text) ? "Explain this selected area and point out the next useful control." : text, (area.X, area.Y, area.Width, area.Height));
             }
         }
-        catch (Exception ex) { _home.AddMessage("OpenClicky", "Selected area request could not finish: " + ex.Message); }
-        finally { ShowHome(); }
+        catch (Exception ex) { ClassicMessage("Selected area request could not finish: " + ex.Message); }
+        finally { ShowClassic(); }
     }
 
     private AppSettings LoadSettingsWithSecrets()
@@ -1300,7 +1320,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         _tray.Text = $"OpenClicky — hold {_settings.PushToTalk.DisplayName}";
         _home.RefreshShortcut();
         RefreshConnection();
-        RequestShellPush();
+        ResetShellChat();
         Log(
             $"settings_applied hotkey={_settings.PushToTalk.DisplayName} provider={_settings.AuthProvider} " +
             $"openrouter_key={(string.IsNullOrEmpty(_settings.OpenRouterApiKey) ? "missing" : "set")} " +

@@ -10,12 +10,14 @@ public class ShellControllerTests
     private sealed class FakeHost : IShellHost
     {
         public List<string> Calls { get; } = [];
+        public List<string> Files { get; } = [Inside];
         public ShellInputs CollectInputs() => new(new AppSettings(),
-            [new ShellJobInput(new WorkJob("j1", "openclicky", "Report", "p", DateTimeOffset.UtcNow, "completed", DateTimeOffset.UtcNow), [Inside], [])],
+            [new ShellJobInput(new WorkJob("j1", "openclicky", "Report", "p", DateTimeOffset.UtcNow, "completed", DateTimeOffset.UtcNow), Files, [])],
             [], [], ShellPhase.Idle, DateTimeOffset.UtcNow);
         public void ToggleTalk() => Calls.Add("talk");
         public void SubmitText(string text) => Calls.Add("submit:" + text);
         public void StopJob(string id) => Calls.Add("stop:" + id);
+        public void OpenJob(string id) => Calls.Add("job:" + id);
         public void SetGeneral(string key, bool value) => Calls.Add($"general:{key}={value}");
         public void OpenFile(string path) => Calls.Add("open:" + path);
         public void RevealFile(string path) => Calls.Add("reveal:" + path);
@@ -33,13 +35,15 @@ public class ShellControllerTests
         public event Action<string, string>? Message;
         public void Post(string json) => Posted.Add(json);
         public void SetNotch(ShellNotch notch) { }
-        public void Dispose() { }
+        public bool Disposed { get; private set; }
+        public void Dispose() => Disposed = true;
         public void Send(object message) { var json = JsonSerializer.Serialize(message); Message?.Invoke(JsonDocument.Parse(json).RootElement.GetProperty("kind").GetString()!, json); }
     }
 
-    private static async Task<(ShellController, FakeHost, FakeSurface)> Started()
+    private static async Task<(ShellController, FakeHost, FakeSurface)> Started(params string[] extraFiles)
     {
         var host = new FakeHost();
+        host.Files.AddRange(extraFiles);
         var surface = new FakeSurface();
         var controller = new ShellController(host, () => Task.FromResult<IShellSurface>(surface), push => push());
         Assert.True(await controller.StartAsync());
@@ -72,6 +76,66 @@ public class ShellControllerTests
 
         var asyncFailure = new ShellController(host, async () => { await Task.Yield(); throw new IOException("no webview"); }, push => push());
         Assert.False(await asyncFailure.StartAsync());
+        Assert.Equal(2, host.Calls.Count(c => c == "classic"));
+    }
+
+    [Fact]
+    public async Task QuittingWhileTheSurfaceStartsDisposesIt()
+    {
+        var host = new FakeHost();
+        var surface = new FakeSurface();
+        var pending = new TaskCompletionSource<IShellSurface>();
+        var controller = new ShellController(host, () => pending.Task, push => push());
+        var start = controller.StartAsync();
+        controller.Dispose();
+        pending.SetResult(surface);
+        Assert.False(await start);
+        Assert.True(surface.Disposed);
+        Assert.Empty(surface.Posted);
+        Assert.DoesNotContain("classic", host.Calls);
+    }
+
+    [Fact]
+    public async Task ExecutableFilesAreRevealedNotOpened()
+    {
+        string[] risky = [@"C:\jobs\j1\output\setup.EXE", @"C:\jobs\j1\output\run.ps1", @"C:\jobs\j1\output\link.lnk"];
+        var (_, host, surface) = await Started(risky);
+        foreach (var path in risky) surface.Send(new { kind = "file.open", path });
+        Assert.DoesNotContain(host.Calls, c => c.StartsWith("open:"));
+        Assert.Equal(risky.Select(p => "reveal:" + p), host.Calls.Where(c => c.StartsWith("reveal:")));
+    }
+
+    [Fact]
+    public async Task ReplyReportedAfterItsTurnWasCommittedIsNotRepeated()
+    {
+        var (controller, _, surface) = await Started();
+        int Rows() { using var d = JsonDocument.Parse(surface.Posted[^1]); return d.RootElement.GetProperty("state").GetProperty("chat").GetProperty("rows").GetArrayLength(); }
+
+        // ReportTaskResult order: CommitHistory (TurnCommitted) first, then ReportAssistantMessage (MessageReceived).
+        controller.EndTurn("The report is ready.");
+        controller.AddLiveRow(ChatRole.Assistant, "The report is ready.");
+        Assert.Equal(0, Rows());
+
+        controller.AddLiveRow(ChatRole.Assistant, "The report is ready."); // a genuinely new message is shown
+        Assert.Equal(1, Rows());
+    }
+
+    [Fact]
+    public async Task ToastsAreNewestFirstAndDismissible()
+    {
+        var (controller, _, surface) = await Started();
+        controller.AddToast("first");
+        controller.AddToast("second");
+        string[] Titles() { using var d = JsonDocument.Parse(surface.Posted[^1]); return d.RootElement.GetProperty("state").GetProperty("cards").EnumerateArray().Select(c => c.GetProperty("title").GetString()!).ToArray(); }
+        Assert.Equal(["second", "first"], Titles());
+        using (var d = JsonDocument.Parse(surface.Posted[^1]))
+        {
+            var card = d.RootElement.GetProperty("state").GetProperty("cards")[0];
+            Assert.Equal("toast", card.GetProperty("kind").GetString());
+            Assert.Equal(6000, card.GetProperty("autoDismissMs").GetInt32());
+            surface.Send(new { kind = "card.dismiss", cardId = card.GetProperty("id").GetString() });
+        }
+        Assert.Equal(["first"], Titles());
     }
 
     [Fact]
@@ -89,8 +153,9 @@ public class ShellControllerTests
         surface.Send(new { kind = "general.set", key = "paused", value = true });
         surface.Send(new { kind = "link.open", target = "bug" });
         surface.Send(new { kind = "job.stop", id = "j1" });
+        surface.Send(new { kind = "job.open", id = "j1" });
         surface.Send(new { kind = "text.submit", text = "" }); // invalid: dropped
-        Assert.Equal(["submit:hello", "talk", "general:paused=True", "url:" + ShellController.BugUrl, "stop:j1"], host.Calls.Where(c => !c.StartsWith("trace:")));
+        Assert.Equal(["submit:hello", "talk", "general:paused=True", "url:" + ShellController.BugUrl, "stop:j1", "job:j1"], host.Calls.Where(c => !c.StartsWith("trace:")));
 
         controller.OpenNotch();
         using var opened = JsonDocument.Parse(surface.Posted[^1]);

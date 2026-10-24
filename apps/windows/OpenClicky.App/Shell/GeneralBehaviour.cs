@@ -43,15 +43,20 @@ internal static class GeneralBehaviour
 
 /// <summary>
 /// The taskbar button for "Show in taskbar": a borderless, fully transparent 1×1 window parked off-screen.
-/// Activating it (clicking the button) opens the notch.
+/// Activating it (clicking the button) opens the notch, except when activation comes back from the shell surface itself
+/// (the page releasing keyboard focus restores the previous foreground, which can be this window); that would reopen
+/// the notch in a loop.
 /// </summary>
 internal sealed class TaskbarPresence : Form
 {
+    private const int WmActivate = 0x0006;
     private readonly Action _activated;
+    private readonly Func<nint, bool> _isShellWindow;
 
-    public TaskbarPresence(Action activated)
+    public TaskbarPresence(Action activated, Func<nint, bool> isShellWindow)
     {
         _activated = activated;
+        _isShellWindow = isShellWindow;
         Text = "OpenClicky";
         Icon = AppTheme.Icon;
         ShowInTaskbar = true;
@@ -61,9 +66,13 @@ internal sealed class TaskbarPresence : Form
         Opacity = 0;
     }
 
-    protected override void OnActivated(EventArgs e)
+    /// <summary>Appearing must not count as a click on the taskbar button.</summary>
+    protected override bool ShowWithoutActivation => true;
+
+    protected override void WndProc(ref Message m)
     {
-        base.OnActivated(e);
-        _activated();
+        // WM_ACTIVATE: low word of wParam is WA_INACTIVE (0) or active; lParam is the window losing activation.
+        if (m.Msg == WmActivate && (m.WParam.ToInt64() & 0xFFFF) != 0 && !_isShellWindow(m.LParam)) _activated();
+        base.WndProc(ref m);
     }
 }

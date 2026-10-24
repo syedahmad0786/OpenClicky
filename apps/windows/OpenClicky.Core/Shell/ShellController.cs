@@ -11,13 +11,20 @@ public sealed class ShellController : IDisposable
     public const string WhatsNewUrl = "https://github.com/syedahmad0786/OpenClicky/releases";
     public const string BugUrl = "https://github.com/syedahmad0786/OpenClicky/issues/new";
     public const string FeatureUrl = "https://github.com/syedahmad0786/OpenClicky/discussions/new?category=ideas";
-    private const int MaxDelta = 8_000, MaxLiveRows = 40;
+    private const int MaxDelta = 8_000, MaxLiveRows = 40, MaxCards = 12, ToastMs = 6_000;
+
+    /// <summary>Opening these runs code; file.open reveals them in Explorer instead.</summary>
+    private static readonly HashSet<string> RevealOnly = new(StringComparer.OrdinalIgnoreCase)
+        { ".exe", ".bat", ".cmd", ".com", ".ps1", ".vbs", ".js", ".msi", ".lnk", ".url", ".scr", ".hta", ".jar", ".reg" };
 
     private readonly IShellHost _host;
     private readonly Func<Task<IShellSurface>> _surfaceFactory;
     private readonly Action<Action> _schedule;
     private readonly HashSet<string> _dismissed = new(StringComparer.Ordinal);
     private readonly List<ChatRow> _liveRows = [];
+    private readonly List<(NotchCard Card, DateTimeOffset? Expires)> _cards = [];
+    private string? _lastCommittedAssistant;
+    private bool _disposed;
     private IShellSurface? _surface;
     private ShellState? _last;
     private ShellNotch _notch = new(NotchTab.Home, false);
@@ -41,10 +48,13 @@ public sealed class ShellController : IDisposable
     {
         try
         {
-            _surface = await _surfaceFactory();
+            var surface = await _surfaceFactory();
+            if (_disposed) { surface.Dispose(); return false; } // the app quit while the surface was starting
+            _surface = surface;
         }
         catch (Exception ex)
         {
+            if (_disposed) return false;
             _host.Trace("shell_start_error=" + ex.GetType().Name + ": " + ex.Message);
             _host.ShowClassic();
             return false;
@@ -80,6 +90,13 @@ public sealed class ShellController : IDisposable
     public void AddLiveRow(ChatRole role, string text)
     {
         if (string.IsNullOrWhiteSpace(text)) return;
+        if (role == ChatRole.User) _lastCommittedAssistant = null; // a new turn started
+        else if (role == ChatRole.Assistant && text == _lastCommittedAssistant)
+        {
+            // Already in history: the turn was committed before its reply was reported.
+            _lastCommittedAssistant = null;
+            return;
+        }
         _liveRows.Add(new ChatRow("live-" + Guid.NewGuid().ToString("N"), role, Cut(text, 32_000), ShellStateBuilder.Iso(DateTimeOffset.UtcNow)));
         if (_liveRows.Count > MaxLiveRows) _liveRows.RemoveAt(0);
         RequestPush();
@@ -109,16 +126,29 @@ public sealed class ShellController : IDisposable
         }
         if (text == row.Text) return;
         _liveRows[index] = row with { Text = text };
-        if (_surface is not null && !_pushPending && text.StartsWith(row.Text, StringComparison.Ordinal))
+        if (_surface is not null && !_pushPending && text.Length <= ShellStateBuilder.MaxRowText && text.StartsWith(row.Text, StringComparison.Ordinal))
             for (var at = row.Text.Length; at < text.Length; at += MaxDelta)
                 _surface.Post(JsonSerializer.Serialize(new { kind = "chat.delta", rowId = row.Id, text = text[at..Math.Min(text.Length, at + MaxDelta)] }, ShellContract.Options));
         else RequestPush();
     }
 
-    /// <summary>The turn was saved to history, which now carries its rows.</summary>
-    public void EndTurn()
+    /// <summary>The turn was saved to history, which now carries its rows. A later identical assistant message is not repeated.</summary>
+    public void EndTurn(string? committedAssistant = null)
     {
         _liveRows.Clear();
+        _lastCommittedAssistant = committedAssistant;
+        RequestPush();
+    }
+
+    /// <summary>Shows a short message as a toast card (newest first, auto-dismissed after 6 s).</summary>
+    public void AddToast(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return;
+        text = text.Trim();
+        var card = new NotchCard("toast-" + Guid.NewGuid().ToString("N"), NotchCardKind.Toast, Cut(text, 160),
+            text.Length > 160 ? Cut(text, 1_000) : null, [], ToastMs);
+        _cards.Insert(0, (card, DateTimeOffset.UtcNow.AddMilliseconds(ToastMs)));
+        if (_cards.Count > MaxCards) _cards.RemoveAt(_cards.Count - 1);
         RequestPush();
     }
 
@@ -133,6 +163,8 @@ public sealed class ShellController : IDisposable
         if (_surface is null) return;
         try
         {
+            var now = DateTimeOffset.UtcNow;
+            _cards.RemoveAll(c => c.Expires <= now);
             var inputs = _host.CollectInputs() with
             {
                 Notch = _notch,
@@ -140,6 +172,7 @@ public sealed class ShellController : IDisposable
                 DismissedJobIds = _dismissed,
                 LiveRows = _liveRows.ToList(),
                 Update = _update,
+                Cards = _cards.Select(c => c.Card).ToList(),
             };
             _last = ShellStateBuilder.Build(inputs);
             _surface.Post(JsonSerializer.Serialize(new { kind = "shell.state", state = _last }, ShellContract.Options));
@@ -178,6 +211,7 @@ public sealed class ShellController : IDisposable
             case "job.open":
                 _featuredJobId = id;
                 _dismissed.Remove(id!);
+                _host.OpenJob(id!);
                 SetNotch(new ShellNotch(NotchTab.Home, true));
                 RequestPush();
                 break;
@@ -190,7 +224,8 @@ public sealed class ShellController : IDisposable
             case "file.open" or "file.reveal":
                 var path = intent.GetString("path")!;
                 if (!InLastState(path)) { _host.Trace("shell file intent refused: path not in the current state"); break; }
-                if (intent.Kind == "file.open") _host.OpenFile(path); else _host.RevealFile(path);
+                if (intent.Kind == "file.open" && !RevealOnly.Contains(Path.GetExtension(path))) _host.OpenFile(path);
+                else _host.RevealFile(path);
                 break;
             case "update.check": _host.CheckForUpdates(); break;
             case "update.install": _host.InstallUpdate(); break;
@@ -198,7 +233,12 @@ public sealed class ShellController : IDisposable
                 _host.OpenUrl(intent.GetString("target") switch { "whatsNew" => WhatsNewUrl, "bug" => BugUrl, _ => FeatureUrl });
                 break;
             case "app.quit": _host.Quit(); break;
-            default: _host.Trace("shell intent not handled yet: " + intent.Kind); break; // card.* (no host cards yet)
+            case "card.dismiss" or "card.action":
+                // Toasts carry no actions, so an action on any card just dismisses it.
+                _cards.RemoveAll(c => c.Card.Id == intent.GetString("cardId"));
+                RequestPush();
+                break;
+            default: _host.Trace("shell intent not handled: " + intent.Kind); break;
         }
     }
 
@@ -213,6 +253,7 @@ public sealed class ShellController : IDisposable
 
     public void Dispose()
     {
+        _disposed = true;
         if (_surface is null) return;
         _surface.Message -= OnMessage;
         _surface.Dispose();

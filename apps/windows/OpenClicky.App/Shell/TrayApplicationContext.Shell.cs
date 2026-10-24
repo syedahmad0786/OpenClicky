@@ -25,6 +25,9 @@ internal sealed partial class TrayApplicationContext : IShellHost
     private Action? _pendingPush;
     private ReleaseInfo? _release;
     private readonly bool _background;
+    /// <summary>Caches so a push does not hit SQLite or the disk: history refreshes on TurnCommitted, outputs when a job finishes or is opened.</summary>
+    private IReadOnlyList<ConversationTurn>? _shellTurns;
+    private readonly Dictionary<string, IReadOnlyList<string>> _jobOutputs = new(StringComparer.Ordinal);
 
     private ContextMenuStrip BuildTrayMenu()
     {
@@ -53,6 +56,9 @@ internal sealed partial class TrayApplicationContext : IShellHost
         menu.Items.Add("Start / stop conversation", null, (_, _) => ToggleConversation());
         menu.Items.Add("Stop current task", null, (_, _) => Stop());
         menu.Items.Add("Test capture once", null, async (_, _) => await TestCaptureAsync());
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("Settings…", null, (_, _) => ShowSettings());
+        menu.Items.Add("Quit", null, (_, _) => ExitThread());
         return menu;
     }
 
@@ -67,7 +73,7 @@ internal sealed partial class TrayApplicationContext : IShellHost
         };
         _updateTimer.Tick += async (_, _) => await CheckUpdatesAsync(announce: false);
         _talk.StateChanged += _ => OnUi(RequestShellPush);
-        _talk.TurnCommitted += _ => OnUi(() => _shell?.EndTurn());
+        _talk.TurnCommitted += turn => OnUi(() => { _shellTurns = null; _shell?.EndTurn(turn.Assistant); });
         _talk.MessageReceived += (role, text) => OnUi(() =>
         {
             // Startup history replay happens before the shell is active; history reaches it through state.
@@ -81,12 +87,33 @@ internal sealed partial class TrayApplicationContext : IShellHost
 
     private void RequestShellPush() => _shell?.RequestPush();
 
+    /// <summary>History changed outside a turn (cleared, or persistence toggled): reload it and drop live rows.</summary>
+    private void ResetShellChat()
+    {
+        _shellTurns = null;
+        _shell?.EndTurn();
+    }
+
+    /// <summary>The Run value must point at this exe when enabled (it may have moved) and be gone when disabled.</summary>
+    private void ReconcileLaunchAtLogin()
+    {
+        try { GeneralBehaviour.SetLaunchAtLogin(_settings.LaunchAtLogin); }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or System.Security.SecurityException)
+        { Log("launch_at_login_error=" + ex.GetType().Name); }
+    }
+
     private async Task StartShellAsync()
     {
+        ReconcileLaunchAtLogin();
         _shell = new ShellController(this, CreateShellSurfaceAsync, push => { _pendingPush = push; _shellPushTimer.Start(); });
-        if (!await _shell.StartAsync()) return;
-        ApplyTaskbarPresence();
-        ApplyCaptureExclusion();
+        var started = await _shell.StartAsync();
+        if (_lifetime.IsCancellationRequested) return;
+        if (started)
+        {
+            ApplyTaskbarPresence();
+            ApplyCaptureExclusion();
+        }
+        // Updates are checked in classic fallback mode too; there they announce through the tray.
         _updateTimer.Start();
         await CheckUpdatesAsync(announce: false);
     }
@@ -105,16 +132,16 @@ internal sealed partial class TrayApplicationContext : IShellHost
     {
         var now = DateTimeOffset.UtcNow;
         var routines = _work.Routines();
-        // ponytail: lists every job's output folder on each push; cache per job if pushes get hot.
         var jobs = _work.Jobs().OrderByDescending(j => j.LastRunAt ?? j.CreatedAt).Take(ShellStateBuilder.MaxJobs).Select(job =>
         {
             var steps = _taskRuns.LastOrDefault(r => r.JobId == job.Id)?.Events
                 .Select(e => e.Message).Where(m => !string.IsNullOrWhiteSpace(m)).TakeLast(ShellStateBuilder.MaxBullets).ToList() ?? [];
             var output = _work.OutputFolder(job);
-            var files = _work.Outputs(job).Take(ShellStateBuilder.MaxFiles).Select(name => Path.Combine(output, name)).ToList();
+            if (!_jobOutputs.TryGetValue(job.Id, out var files))
+                _jobOutputs[job.Id] = files = _work.Outputs(job).Take(ShellStateBuilder.MaxFiles).Select(name => Path.Combine(output, name)).ToList();
             return new ShellJobInput(job, files, steps, steps.LastOrDefault(), routines.Any(r => r.JobId == job.Id && RoutineSchedule.IsDue(r, now)));
         }).ToList();
-        IReadOnlyList<ConversationTurn> chat = _settings.PersistConversationHistory ? ConversationHistoryStore.LoadTurns(maxTurns: 100) : [];
+        var chat = _shellTurns ??= _settings.PersistConversationHistory ? ConversationHistoryStore.LoadTurns(maxTurns: 100) : [];
         return new ShellInputs(_settings, jobs, chat, _connectors.List(), CurrentPhase(), now)
         {
             Theme = GeneralBehaviour.ReadTheme(),
@@ -134,7 +161,9 @@ internal sealed partial class TrayApplicationContext : IShellHost
 
     void IShellHost.ToggleTalk() => ToggleConversation();
 
-    void IShellHost.SubmitText(string text) => _ = SubmitFromHomeAsync(text, agent: false);
+    void IShellHost.SubmitText(string text) => _ = SubmitRequestAsync(text, agent: false, fromShell: true);
+
+    void IShellHost.OpenJob(string id) => _jobOutputs.Remove(id);
 
     void IShellHost.StopJob(string id)
     {
@@ -210,7 +239,8 @@ internal sealed partial class TrayApplicationContext : IShellHost
         if (_settings.ShowInTaskbar && _shell is { IsActive: true })
         {
             if (_taskbar is { IsDisposed: false }) return;
-            _taskbar = new TaskbarPresence(() => _shell?.OpenNotch());
+            _taskbar = new TaskbarPresence(() => _shell?.OpenNotch(),
+                deactivated => _shellSurface is { } surface && !surface.Window.IsDisposed && deactivated == surface.Window.Handle);
             _taskbar.Show();
         }
         else
@@ -236,12 +266,17 @@ internal sealed partial class TrayApplicationContext : IShellHost
         try { result = await new UpdateChecker(_updateHttp, CurrentVersion).CheckAsync(_lifetime.Token); }
         catch (OperationCanceledException) { return; }
         var state = result is null ? UpdateState.Error : result.Status == UpdateStatus.Available ? UpdateState.Available : UpdateState.UpToDate;
+        var previous = _release?.Version;
         _release = result?.Status == UpdateStatus.Available ? result.Release : null;
+        // Without the shell (classic fallback) a newly found release is announced through the tray.
+        if (state == UpdateState.Available && _release!.Version != previous && _shell is not { IsActive: true }) announce = true;
         _shell?.SetUpdate(new ShellUpdate(CurrentVersion, _release?.Version, state, 0));
         if (announce)
             _tray.ShowBalloonTip(5000, "OpenClicky updates", state switch
             {
-                UpdateState.Available => $"OpenClicky {_release!.Version} is available. Install it from the shell's Settings.",
+                UpdateState.Available => _shell is { IsActive: true }
+                    ? $"OpenClicky {_release!.Version} is available. Install it from the shell's Settings."
+                    : $"OpenClicky {_release!.Version} is available. Use What's new in the tray menu to download it.",
                 UpdateState.UpToDate => $"OpenClicky {CurrentVersion} is up to date.",
                 _ => "Could not reach GitHub to check for updates.",
             }, ToolTipIcon.Info);

@@ -8,6 +8,8 @@ public interface IShellHost
     void ToggleTalk();
     void SubmitText(string text);
     void StopJob(string id);
+    /// <summary>The page opened a job (it is now featured); refresh anything cached about it.</summary>
+    void OpenJob(string id);
     void SetGeneral(string key, bool value);
     /// <summary>Only called with a path the host itself put in the last pushed state.</summary>
     void OpenFile(string path);
