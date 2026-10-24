@@ -82,6 +82,43 @@ public class ShortcutMonitorTests
     }
 
     [Fact]
+    public void AltGrsSyntheticCtrlIsNotATalkPress()
+    {
+        using var monitor = new ShortcutMonitor { IsKeyDown = _ => true };
+        var pressed = 0;
+        monitor.Pressed += (_, _) => pressed++;
+        monitor.HandleKey(0xA2, true, false, 0, scanCode: 0x21D);  // AltGr's LCtrl
+        monitor.HandleKey(0xA5, true, false, 0);                   // RAlt
+        monitor.HandleKey(0xA2, true, false, 300, scanCode: 0x21D); // auto-repeat past the hold threshold
+        monitor.HandleKey(0xA5, true, false, 300);
+        monitor.HandleKey(0xA5, false, false, 600);
+        monitor.HandleKey(0xA2, false, false, 600, scanCode: 0x21D);
+        Assert.Equal(0, pressed);
+
+        monitor.HandleKey(0xA2, true, false, 2000, scanCode: 0x1D); // a real left Ctrl + Alt still talks
+        monitor.HandleKey(0xA4, true, false, 2010);
+        monitor.HandleKey(0xA4, true, false, 2300);
+        Assert.Equal(1, pressed);
+    }
+
+    [Fact]
+    public void TheHookThreadRunsQueuedCallsAndEndsARecordingOnStop()
+    {
+        // No SynchronizationContext here: events run on the hook thread itself; Stop joins it.
+        using var monitor = new ShortcutMonitor();
+        var calls = new List<HotkeyBinding?>();
+        monitor.Start();
+        var moved = ShortcutBindings.Default with { Talk = new HotkeyBinding(["Ctrl", "Shift"], HotkeyTrigger.Hold) };
+        monitor.Bindings = moved;
+        monitor.Record(ShortcutAction.Talk, calls.Add);
+        monitor.Stop();
+        Assert.Equal([null], calls);
+        Assert.Same(moved, monitor.Bindings);
+        monitor.Start(); // restartable
+        monitor.Stop();
+    }
+
+    [Fact]
     public void AMissedEscKeyUpDoesNotSwallowTheNextEsc()
     {
         var escHeld = true;
