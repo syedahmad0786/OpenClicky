@@ -53,6 +53,8 @@ public sealed class ShortcutStateMachine
     private readonly HashSet<int> _pressed = [];
     private readonly HashSet<int> _swallowed = [];
     private readonly Dictionary<int, long> _lastDown = [];
+    /// <summary>Swallowed keys released by recovery; their late real key-up is swallowed too, keeping the pair.</summary>
+    private readonly HashSet<int> _recoveredSwallowed = [];
     private readonly HashSet<string> _sessionKeys = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<ShortcutCommand> _queued = [];
     private ShortcutBindings _bindings = ShortcutBindings.Default;
@@ -117,6 +119,7 @@ public sealed class ShortcutStateMachine
         if (injected) return []; // the agent's own SendInput must never start, end or cancel anything
         var commands = new List<ShortcutCommand>();
         Advance(nowMs, commands);
+        SwallowLastKey = false; // a recovery inside Advance must not leak its swallow onto this key
         Apply(vk, down, nowMs, commands);
         return commands;
     }
@@ -167,6 +170,7 @@ public sealed class ShortcutStateMachine
         _pressed.Clear();
         _swallowed.Clear();
         _lastDown.Clear();
+        _recoveredSwallowed.Clear();
         _sessionKeys.Clear();
         _maskWin = false;
         _slots = BuildSlots(_bindings);
@@ -211,6 +215,7 @@ public sealed class ShortcutStateMachine
 
     private void Recover(int vk, long nowMs, List<ShortcutCommand> commands)
     {
+        if (_swallowed.Contains(vk)) _recoveredSwallowed.Add(vk);
         _recovering = true;
         try { Apply(vk, down: false, nowMs, commands); }
         finally { _recovering = false; }
@@ -218,13 +223,18 @@ public sealed class ShortcutStateMachine
 
     private void Apply(int vk, bool down, long nowMs, List<ShortcutCommand> commands)
     {
+        if (down) _recoveredSwallowed.Remove(vk); // a fresh down: the old key-up really was lost
         if (down && !_pressed.Add(vk))
         {
             SwallowLastKey = _swallowed.Contains(vk); // auto-repeat changes nothing
             if (SwallowLastKey) _lastDown[vk] = nowMs;
             return;
         }
-        if (!down && !_pressed.Remove(vk)) return; // never saw it go down
+        if (!down && !_pressed.Remove(vk))
+        {
+            SwallowLastKey = _recoveredSwallowed.Remove(vk); // late up of a recovered swallowed key; else never saw it down
+            return;
+        }
 
         var key = KeyName(vk);
         if (down) _sessionKeys.Add(key);

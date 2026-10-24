@@ -343,9 +343,18 @@ public class ShortcutStateMachineTests
         d.Down(Space, 1000); // first auto-repeat after the keyboard delay
         Assert.Empty(d.Wait(ShortcutStateMachine.SwallowedStaleMs));
         Assert.Equal([Cmd(K.TalkEnd, true)], d.Wait(1)); // repeats went quiet: its key-up was missed
-        Assert.Empty(d.Up(Space)); // a late real key-up is ignored
+        Assert.Empty(d.Up(Space)); // a late real key-up is ignored...
+        Assert.True(d.Machine.SwallowLastKey); // ...but still swallowed, so the app never sees an unpaired up
         d.Up(LCtrl);
         Assert.False(d.Machine.NeedsTick);
+
+        // Recovery that happens inside OnKey (no tick in between) does not swallow the unrelated key-up that follows.
+        d.Down(LCtrl, 1000); d.Down(Space);
+        Assert.Equal([Cmd(K.TalkEnd, true)], d.Up(LCtrl, ShortcutStateMachine.SwallowedStaleMs + 1));
+        Assert.False(d.Machine.SwallowLastKey);
+        Assert.True(d.Machine.OnKey(Space, down: false, injected: false, d.Now + 10).Count == 0 && d.Machine.SwallowLastKey);
+        d.Down(Space, 100); d.Up(Space); // a fresh press after recovery is an ordinary key again
+        Assert.False(d.Machine.SwallowLastKey);
     }
 
     [Fact]

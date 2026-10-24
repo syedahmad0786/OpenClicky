@@ -16,32 +16,29 @@ public sealed class ShortcutEndedEventArgs(bool cancelled) : EventArgs
 /// Hosts <see cref="ShortcutStateMachine"/> on a <c>WH_KEYBOARD_LL</c> hook (UI thread). Pressed/Released are talk;
 /// Released carries <see cref="ShortcutEndedEventArgs"/>. Events are posted to the UI SynchronizationContext captured
 /// in <see cref="Start"/> so handlers never run inside (and stall) the hook. Only a binding's non-modifier key (and
-/// non-modifier keys while recording) is swallowed; a mouse hook poisons Ctrl+click; injected input passes through.
+/// non-modifier keys while recording) is swallowed; injected input passes through.
+/// Mouse clicks arrive through <see cref="NotifyMouseButton"/> (no mouse hook: it would put every mouse move behind the UI thread).
 /// Change from <see cref="PushToTalkHotkeyMonitor"/>: <see cref="Cancelled"/> fires on Esc only while an action is active.
 /// </summary>
 public sealed class ShortcutMonitor : IPushToTalkMonitor
 {
-    private const int WhKeyboardLl = 13, WhMouseLl = 14;
+    private const int WhKeyboardLl = 13;
     private const int WmKeyDown = 0x0100, WmKeyUp = 0x0101, WmSysKeyDown = 0x0104, WmSysKeyUp = 0x0105;
-    private const int WmLButtonDown = 0x0201, WmRButtonDown = 0x0204, WmMButtonDown = 0x0207, WmXButtonDown = 0x020B;
-    private const int LlkhfInjected = 0x10, LlmhfInjected = 0x01;
+    private const int LlkhfInjected = 0x10;
     private const ushort VkUnassignedMask = 0xE8;
 
     private readonly NativeMethods.HookProc _keyboardProc;
-    private readonly NativeMethods.HookProc _mouseProc;
     private readonly ShortcutStateMachine _machine;
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 15 };
     private SynchronizationContext? _context;
     private Action<HotkeyBinding?>? _recordDone;
     private IntPtr _keyboardHook;
-    private IntPtr _mouseHook;
     private bool _disposed;
 
     public ShortcutMonitor(ShortcutBindings? bindings = null)
     {
         _machine = new ShortcutStateMachine(bindings ?? ShortcutBindings.Default);
-        _keyboardProc = KeyboardCallback; // keep the delegates alive for the native callbacks
-        _mouseProc = MouseCallback;
+        _keyboardProc = KeyboardCallback; // keep the delegate alive for the native callback
         _timer.Tick += (_, _) =>
         {
             var now = Environment.TickCount64;
@@ -77,20 +74,15 @@ public sealed class ShortcutMonitor : IPushToTalkMonitor
     {
         if (_keyboardHook != IntPtr.Zero) return;
         _context = SynchronizationContext.Current;
-        var module = ResolveModuleHandle();
-        _keyboardHook = NativeMethods.SetWindowsHookEx(WhKeyboardLl, _keyboardProc, module, 0);
+        _keyboardHook = NativeMethods.SetWindowsHookEx(WhKeyboardLl, _keyboardProc, ResolveModuleHandle(), 0);
         if (_keyboardHook == IntPtr.Zero) throw new InvalidOperationException($"SetWindowsHookEx failed: {Marshal.GetLastWin32Error()}");
-        // Only poisons Ctrl+click and the like; shortcuts still work if it cannot be installed.
-        _mouseHook = NativeMethods.SetWindowsHookEx(WhMouseLl, _mouseProc, module, 0);
-        if (_mouseHook == IntPtr.Zero) Trace.TraceWarning($"ShortcutMonitor: mouse hook failed: {Marshal.GetLastWin32Error()}");
     }
 
     /// <summary>Unhooks and ends any active action as cancelled (and any recording with null).</summary>
     public void Stop()
     {
-        foreach (var hook in new[] { _keyboardHook, _mouseHook })
-            if (hook != IntPtr.Zero) NativeMethods.UnhookWindowsHookEx(hook);
-        _keyboardHook = _mouseHook = IntPtr.Zero;
+        if (_keyboardHook != IntPtr.Zero) NativeMethods.UnhookWindowsHookEx(_keyboardHook);
+        _keyboardHook = IntPtr.Zero;
         _timer.Stop();
         Run(_machine.Reset());
     }
@@ -134,22 +126,15 @@ public sealed class ShortcutMonitor : IPushToTalkMonitor
         return NativeMethods.CallNextHookEx(_keyboardHook, nCode, wParam, lParam);
     }
 
-    private IntPtr MouseCallback(int nCode, IntPtr wParam, IntPtr lParam)
+    /// <summary>
+    /// A physical (not injected) mouse button went down. Call on the UI thread, e.g. from the raw-input
+    /// PhysicalUserActivityMonitor (an input sink that never blocks input). It poisons shortcuts that have not fired
+    /// yet (Ctrl+click is not a Ctrl tap); a running hold keeps going.
+    /// </summary>
+    public void NotifyMouseButton()
     {
-        try
-        {
-            if (nCode >= 0 && wParam.ToInt32() is WmLButtonDown or WmRButtonDown or WmMButtonDown or WmXButtonDown
-                && (Marshal.PtrToStructure<NativeMethods.MsLlHookStruct>(lParam).Flags & LlmhfInjected) == 0)
-            {
-                Run(_machine.OnMouseButton(Environment.TickCount64));
-                if (_machine.NeedsTick) _timer.Start();
-            }
-        }
-        catch (Exception ex)
-        {
-            Trace.TraceError($"ShortcutMonitor mouse hook: {ex}");
-        }
-        return NativeMethods.CallNextHookEx(_mouseHook, nCode, wParam, lParam);
+        Run(_machine.OnMouseButton(Environment.TickCount64));
+        if (_machine.NeedsTick) _timer.Start();
     }
 
     /// <summary>The hook misses key-ups on the secure desktop (UAC, Win+L, Ctrl+Alt+Del) and some focus changes;
@@ -245,16 +230,6 @@ public sealed class ShortcutMonitor : IPushToTalkMonitor
             public IntPtr DwExtraInfo;
         }
 
-        [StructLayout(LayoutKind.Sequential)]
-        public struct MsLlHookStruct
-        {
-            public int X;
-            public int Y;
-            public uint MouseData;
-            public uint Flags;
-            public uint Time;
-            public IntPtr DwExtraInfo;
-        }
 
         // INPUT is 40 bytes on x64: the union must be sized to MOUSEINPUT or SendInput fails with error 87.
         [StructLayout(LayoutKind.Sequential)]
