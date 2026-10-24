@@ -1032,6 +1032,37 @@ public class CompanionWorkflowTests
     }
 
     [Fact]
+    public async Task StreamingReply_FigureBlockJoinsTheDrawingUnspoken()
+    {
+        var tts = new RecordingTts();
+        var partials = new List<string>();
+        const string figure = "```figure\n{\"id\":\"g1\",\"box\":[10,10,60,30],\"spin\":true,\"title\":\"a gear. it turns\",\"parts\":[{\"kind\":\"gear\",\"teeth\":10,\"label\":\"drive\"}]}\n```";
+        var updates = new[]
+        {
+            "Here is a gear.",
+            "Here is a gear. ```",
+            "Here is a gear. ```fig",
+            "Here is a gear. " + figure[..60],
+            "Here is a gear. " + figure + " It meshes with the next. [POINT:none]",
+        };
+        var overlay = new Overlay();
+        using var talk = new TalkOrchestrator(new Hotkey(), overlay, new Capture(), new Mic(), () => null,
+            () => new StreamingTalk(updates), tts,
+            () => new AppSettings { PersistConversationHistory = false, SpeakReplies = true }, log: _ => { }, windowBounds: () => (0, 0, 200, 100));
+        talk.AssistantResponseChanged += (text, complete) => partials.Add(text);
+
+        await talk.SubmitTextAsync("how does a gear work", false);
+
+        Assert.Equal("Here is a gear. It meshes with the next.", string.Join(" ", tts.Spoken));
+        Assert.All(partials.Concat(tts.Spoken), text => { Assert.DoesNotContain("`", text); Assert.DoesNotContain("kind", text); });
+        var part = Assert.Single(talk.Drawing.Parts);
+        Assert.Equal((DrawOpKind.Figure, "g1", "a gear. it turns"), (part.Op.Kind, part.Id, part.Op.Text));
+        Assert.Equal(FigureKind.Gear, Assert.Single(part.Op.Figure!.Parts).Kind);
+        Assert.Equal(new Box(20, 20, 120, 60), part.Op.Box); // mapped like any part: 100×50 screenshot of a 200×100 monitor
+        Assert.Same(part, Assert.Single(overlay.LastDrawing));
+    }
+
+    [Fact]
     public async Task StreamingReply_WindowSwitchWithholdsLaterPartialsAndQueuedSpeech()
     {
         nint handle = 1;

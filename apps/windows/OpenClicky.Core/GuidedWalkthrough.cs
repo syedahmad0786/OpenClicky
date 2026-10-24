@@ -90,7 +90,7 @@ public sealed partial class GuidedWalkthrough
             }
 
             var clean = GuideTags().Replace(raw, "").Trim();
-            var plain = Limit(VisualTags().Replace(DrawCommandParser.Parse(clean).Text, "").Trim(), MaximumInstructionLength);
+            var plain = Limit(VisualTags().Replace(DrawCommandParser.Parse(FigureBlockParser.Strip(clean)).Text, "").Trim(), MaximumInstructionLength);
             if (plain.Length == 0)
             {
                 RejectResponse();

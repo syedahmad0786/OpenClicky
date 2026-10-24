@@ -40,6 +40,9 @@ internal sealed class DrawingWindow : IDisposable
 
     public bool HasParts => _layouts.Count > 0;
 
+    /// <summary>True while a button is drawn (revealed or not), whether or not its click target may be up.</summary>
+    public bool HasButtons => _layouts.Any(l => l.ButtonRect is not null);
+
     /// <summary>Called (UI thread) when a spotlight is due to start fading and the frame loop needs to run.</summary>
     public Action? Wake { get; set; }
 

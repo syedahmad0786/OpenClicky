@@ -260,7 +260,7 @@ public static class DrawCommandParser
 
     /// <summary>Bidi embedding/override/isolate controls and directional marks, which could reorder model text on screen.
     /// Other format characters (such as the emoji joiner U+200D) stay allowed.</summary>
-    private static bool IsBidiControl(char c) =>
+    internal static bool IsBidiControl(char c) =>
         c is >= '‪' and <= '‮' or >= '⁦' and <= '⁩' or '‎' or '‏' or '؜';
 
     private static Box Bounds(IReadOnlyList<Pt> points)

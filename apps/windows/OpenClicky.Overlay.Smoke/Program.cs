@@ -274,6 +274,14 @@ internal static class Program
         }
         Console.WriteLine("PASS: spotlight dims the screen outside its box, a card paints, button click targets raise ButtonClicked and follow Hide and a running task");
 
+        var figureFailure = ValidateFigure(overlay, fixture);
+        if (figureFailure is not null)
+        {
+            Console.Error.WriteLine("FAIL: figure " + figureFailure);
+            return 27;
+        }
+        Console.WriteLine("PASS: a figure opens its own click-through window over its box without taking focus, paints, follows Hide, and closes with the drawing");
+
         var dockFailure = ValidateDockAndDetach(overlay, fixture, vs, targetX, targetY);
         if (dockFailure is not null)
         {
@@ -544,6 +552,13 @@ internal static class Program
             ]);
             if (spots.Count != 2 || spots.Count(l => l.Part.Op.Kind == CoreDrawing.DrawOpKind.Spotlight) != 1 || spots.Single(l => l.Spot is not null).Part.Id != "o3")
                 return $"spotlights: {string.Join(",", spots.Select(l => l.Part.Id))}, expected the badge and the last spotlight";
+            // The newest wins even from earlier in the document (a part replaced by id keeps its place there).
+            var replaced = DrawingRenderer.Layout(
+            [
+                Tagged($"[DRAW:spotlight id=o1 x={x} y={y} w=200 h=100]", 5),
+                Tagged($"[DRAW:spotlight id=o2 x={x + 300} y={y} w=100 h=50]", 3),
+            ]);
+            if (replaced.Count != 1 || replaced[0].Part.Id != "o1") return $"spotlights by seq: {string.Join(",", replaced.Select(l => l.Part.Id))}, expected o1 (seq 5)";
             // A spotlight lasts 30 s, then fades over 600 ms (120 ms with reduced motion) and is gone.
             static bool Near(float a, float b) => Math.Abs(a - b) < 0.01f;
             if (!Near(DrawingRenderer.SpotlightAlpha(0, false), 1) || !Near(DrawingRenderer.SpotlightAlpha(30, false), 1)
@@ -746,6 +761,16 @@ internal static class Program
             overlay.DrawingButtonsSuppressed = () => false;
             if (!PumpUntil(() => Visible(catchers[0]) && Visible(catchers[1]), TimeSpan.FromSeconds(2))) return "the click targets did not return after the dialog";
 
+            // With the companion off, the frame loop stops once the drawing is still: the targets must still come back after a task.
+            overlay.ApplyStyle(CompanionStyle.From(new AppSettings { Paused = true }, reducedMotion: false));
+            Pump(500);
+            overlay.DetachSuppressed = () => true;
+            if (!PumpUntil(() => !Visible(catchers[0]) && !Visible(catchers[1]), TimeSpan.FromSeconds(2))) return "a running task left the click targets up (companion off)";
+            Pump(300);
+            overlay.DetachSuppressed = () => false;
+            if (!PumpUntil(() => Visible(catchers[0]) && Visible(catchers[1]), TimeSpan.FromSeconds(2))) return "the click targets did not return after the task while the frame loop was stopped";
+            overlay.ApplyStyle(CompanionStyle.From(new AppSettings(), reducedMotion: false));
+
             overlay.ShowDrawing([], []);
             if (!PumpUntil(() => !catchers.Any(Visible), TimeSpan.FromSeconds(2))) return "clearing the drawing left a click target up";
             return null;
@@ -755,6 +780,71 @@ internal static class Program
             overlay.ButtonClicked -= OnClick;
             overlay.DetachSuppressed = null;
             overlay.DrawingButtonsSuppressed = null;
+            overlay.ApplyStyle(CompanionStyle.From(new AppSettings(), reducedMotion: false));
+            overlay.ShowDrawing([], []);
+            overlay.Hide();
+            Cursor.Position = saved;
+        }
+    }
+
+    /// <summary>
+    /// A figure part (parsed from a real block) opens its own window exactly over its box (the window rectangle Windows
+    /// reports) with the click-through, non-activating styles, leaves the fixture in front, and paints the solid (pixels on the
+    /// real screen); Hide hides it before returning, the next Show brings it back, and clearing the drawing destroys it. Only
+    /// the cursor position is set; nothing is clicked or typed.
+    /// </summary>
+    private static string? ValidateFigure(BuddyOverlayController overlay, Form fixture)
+    {
+        const int GwlExStyle = -20;
+        const long Required = 0x00080000 | 0x00000020 | 0x00000080 | 0x08000000 | 0x00000008; // layered, transparent, tool, no-activate, topmost
+        static bool Visible(IntPtr hwnd) => NativeMethods.IsWindowVisible(hwnd);
+        static void Pump(int ms) => PumpUntil(() => false, TimeSpan.FromMilliseconds(ms));
+        var saved = Cursor.Position;
+        var mon = Screen.PrimaryScreen!.Bounds;
+        var box = new Rectangle(mon.Left + mon.Width / 4, mon.Top + mon.Height / 4, 320, 240);
+        var (text, figures) = CoreDrawing.FigureBlockParser.Parse("A gear. ```figure\n{\"id\":\"g\",\"box\":[0,0,320,240],\"spin\":true,\"parts\":["
+            + "{\"kind\":\"gear\",\"size\":[1,0.3,1],\"color\":\"#26C281\",\"label\":\"drive gear\",\"teeth\":14},{\"kind\":\"cylinder\",\"size\":[0.2,1,0.2]}]}\n```");
+        if (text != "A gear." || figures.Count != 1) return $"the block did not parse: text=\"{text}\" figures={figures.Count}";
+        // The op's box in virtual pixels, as after mapping.
+        var op = CoreDrawing.FigureBlockParser.ToOp(figures[0]) with { Box = new(box.X, box.Y, box.Width, box.Height) };
+        var part = new CoreDrawing.DrawPart("g", op, op, 1, 1);
+        var baseline = overlay.WindowHandles.Count;
+        try
+        {
+            Cursor.Position = new Point(mon.Right - 40, mon.Bottom - 40); // the companion stays clear
+            overlay.ShowIdle();
+            Pump(300);
+            overlay.ShowDrawing([part], [new(part, TimeSpan.Zero, TimeSpan.FromSeconds(0.5), false)]);
+            if (!PumpUntil(() => overlay.WindowHandles.Count == baseline + 1, TimeSpan.FromSeconds(2))) return "no figure window was added to WindowHandles";
+            var hwnd = overlay.WindowHandles[^1];
+            if (!PumpUntil(() => Visible(hwnd), TimeSpan.FromSeconds(2))) return "the figure window never appeared";
+            if (!NativeMethods.GetWindowRect(hwnd, out var r) || new Rectangle(r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top) != box)
+                return $"the figure window [{r.Left},{r.Top},{r.Right - r.Left}x{r.Bottom - r.Top}] is not at its box {box}";
+            var ex = (long)NativeMethods.GetWindowLongPtr(hwnd, GwlExStyle);
+            if ((ex & Required) != Required) return $"the figure window styles 0x{ex:X} miss click-through / no-activate / topmost";
+            if (NativeMethods.GetForegroundWindow() != fixture.Handle) return "the figure took the foreground";
+            Pump(900); // past the 0.5 s scale-in
+
+            var centre = new Rectangle(box.X + box.Width / 2 - 30, box.Y + box.Height / 2 - 30, 60, 60);
+            if (Environment.GetEnvironmentVariable("OPENCLICKY_FIGURE_SHOT") is { Length: > 0 } shot) // local eyeballing only
+                Grab(box).Save(shot, System.Drawing.Imaging.ImageFormat.Png);
+            var shown = Grab(centre);
+            overlay.Hide();
+            if (Visible(hwnd)) return "Hide left the figure visible";
+            Pump(IOverlayController.HideSettleMilliseconds + 60);
+            var changed = CountChanged(shown, Grab(centre));
+            if (changed < 600) return $"the screen shows no figure (changed pixels={changed} of 3600)";
+            Console.WriteLine($"figure_pixels_changed={changed}");
+
+            overlay.ShowIdle();
+            if (!PumpUntil(() => Visible(hwnd), TimeSpan.FromSeconds(2))) return "the figure did not come back after Hide";
+            overlay.ShowDrawing([], []);
+            if (!PumpUntil(() => overlay.WindowHandles.Count == baseline && !NativeMethods.IsWindow(hwnd), TimeSpan.FromSeconds(2)))
+                return "clearing the drawing left the figure window";
+            return null;
+        }
+        finally
+        {
             overlay.ShowDrawing([], []);
             overlay.Hide();
             Cursor.Position = saved;
@@ -1044,5 +1134,12 @@ internal static class Program
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool IsWindowVisible(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool IsWindow(IntPtr hWnd);
+
+        [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
+        public static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int index);
     }
 }

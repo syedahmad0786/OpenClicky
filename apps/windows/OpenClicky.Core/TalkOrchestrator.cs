@@ -910,7 +910,9 @@ public sealed class TalkOrchestrator : IDisposable
                 if (accepted is null) return;
                 raw = accepted;
             }
-            var requested = TalkActionParser.Parse(raw);
+            // Figure blocks first, as in StreamingReplySpeech.Clean: their JSON never reaches a tag parser.
+            var figured = FigureBlockParser.Parse(raw);
+            var requested = TalkActionParser.Parse(figured.Text);
             var replyAccess = _settings().AgentAccess;
             // DRAW goes right after the action tags, as in StreamingReplySpeech.Clean, so the final text matches what was spoken.
             var intelligent = IntelligentUiParser.Parse(DrawCommandParser.Parse(requested.Text).Text);
@@ -938,9 +940,10 @@ public sealed class TalkOrchestrator : IDisposable
                 SetState(CompanionVoiceState.Responding);
                 if (selfContainedVisual) _overlay.Hide(); else _overlay.ShowResponding(spoken);
             }
-            // MARK tags still draw: they join the drawing as their equivalent DRAW ops, with the reply's last line.
-            IReadOnlyList<DrawOp> finalOps = selfContainedVisual ? [] : DrawCommandParser.FromMarks(annotated.Marks);
-            _log($"annotations={annotated.Marks.Count}");
+            // MARK tags still draw: they join the drawing as their equivalent DRAW ops, with the reply's last line. So do figures.
+            IReadOnlyList<DrawOp> finalOps = selfContainedVisual ? []
+                : [.. DrawCommandParser.FromMarks(annotated.Marks), .. figured.Figures.Select(FigureBlockParser.ToOp)];
+            _log($"annotations={annotated.Marks.Count} figures={figured.Figures.Count}");
             cues.Update(raw); // a reply that was not streamed is cued here
             if (walkthrough is not null) ApplyDrawing([], screens, FinalCueLine, clearFirst: true); // each step starts clean
             var remainder = speech.TakeRemainder(spoken);

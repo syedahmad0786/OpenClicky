@@ -244,8 +244,13 @@ public static class DrawingRenderer
                 }
             }
             layout.Bounds = paint;
-            // Spotlights would stack their dimming (four of them black the screen): the last one drawn wins.
-            if (op.Kind == DrawOpKind.Spotlight) layouts.RemoveAll(l => l.Part.Op.Kind == DrawOpKind.Spotlight);
+            // Spotlights would stack their dimming (four of them black the screen): the newest (highest Seq) wins. A part
+            // replaced by id keeps its place in the document, so the last in order is not always the newest.
+            if (op.Kind == DrawOpKind.Spotlight)
+            {
+                if (layouts.Any(l => l.Part.Op.Kind == DrawOpKind.Spotlight && l.Part.Seq > part.Seq)) continue;
+                layouts.RemoveAll(l => l.Part.Op.Kind == DrawOpKind.Spotlight);
+            }
             layouts.Add(layout);
         }
 

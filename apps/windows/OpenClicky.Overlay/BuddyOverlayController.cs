@@ -64,8 +64,9 @@ internal static class ResponseBubblePlacement
 
 /// <summary>
 /// The companion overlay: a small per-pixel-alpha cursor window that follows the pointer on a spring (the glowing accent
-/// triangle with its listening bars, thinking dots and bubbles), and a virtual-screen drawing window for marks. Both are
-/// topmost, click-through and never activate. Public members may be called from any thread.
+/// triangle with its listening bars, thinking dots and bubbles), a virtual-screen drawing window for marks, the ink window,
+/// and one WPF window per 3D figure. All are topmost, click-through and never activate. Public members may be called from
+/// any thread.
 /// </summary>
 public sealed class BuddyOverlayController : IOverlayController
 {
@@ -74,6 +75,9 @@ public sealed class BuddyOverlayController : IOverlayController
     private const int MaxLabelChars = 120;
     private const float CatcherDip = 36;
     private const int ButtonPollMilliseconds = 100;
+    /// <summary>At most this many figures are on screen (the newest): each is a software-rendered WPF window.</summary>
+    // ponytail: older figures stay in the document (described, editable) but unshown; raise it if people stack more.
+    private const int MaxFigures = 4;
     private const string DockBubbleText = "i'll wait up here";
     private const float RingStartScale = 0.85f, RingStiffness = 300, RingDamping = 26;
 
@@ -89,11 +93,16 @@ public sealed class BuddyOverlayController : IOverlayController
     private readonly ClickCatcher[] _buttonCatchers = new ClickCatcher[DrawingRenderer.MaxButtons];
     private readonly Rectangle?[] _buttonRects = new Rectangle?[DrawingRenderer.MaxButtons];
     private readonly (string Label, string Prompt)[] _buttonActions = new (string, string)[DrawingRenderer.MaxButtons];
-    private bool _buttonsLive;
     private readonly List<(string Label, string Prompt, Rectangle Rect)> _liveButtons = new(DrawingRenderer.MaxButtons);
     private double _lastButtonSync = double.NegativeInfinity;
-    /// <summary>Polls the click targets (about 10 Hz) while one is up, so a starting task or an open dialog takes them down even when the frame loop is stopped.</summary>
+    /// <summary>
+    /// Polls the click targets (about 10 Hz) while the drawing has a button, up or held down, so a starting task or an open
+    /// dialog takes them down, and its end brings them back, even when the frame loop is stopped.
+    /// </summary>
     private readonly System.Windows.Forms.Timer _buttonTimer = new() { Interval = ButtonPollMilliseconds };
+    /// <summary>One window per figure part, by part id. A changed part (an edit, an undo) gets a new window; a gone one closes.</summary>
+    private readonly Dictionary<string, (DrawPart Part, FigureWindow Window)> _figures = [];
+    private nint[] _figureHandles = [];
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 16 };
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private CancellationTokenSource? _selectionCancellation;
@@ -204,9 +213,11 @@ public sealed class BuddyOverlayController : IOverlayController
 
     /// <summary>
     /// Every overlay window exists from construction until disposal: the cursor, the marks and ring, the detach click target,
-    /// the ink, then the three drawing-button click targets (shown only over a live button).
+    /// the ink, then the three drawing-button click targets (shown only over a live button). Then one window per figure on
+    /// screen, from when its part is drawn until it goes (read on the UI thread).
     /// </summary>
-    public IReadOnlyList<nint> WindowHandles => _disposed ? [] : [_cursorWindow.Handle, _drawingWindow.Handle, _catcher.Handle, _drawing.Handle, .. _buttonCatchers.Select(c => c.Handle)];
+    public IReadOnlyList<nint> WindowHandles => _disposed ? []
+        : [_cursorWindow.Handle, _drawingWindow.Handle, _catcher.Handle, _drawing.Handle, .. _buttonCatchers.Select(c => c.Handle), .. _figureHandles];
 
     /// <summary>The model's drawing window. Smoke / diagnostics only.</summary>
     public IntPtr DrawingHandle => _drawing.Handle;
@@ -272,6 +283,7 @@ public sealed class BuddyOverlayController : IOverlayController
         {
             if (generation != Volatile.Read(ref _drawingGeneration)) return;
             _drawing.Show(parts, animations, Now);
+            SyncFigures(parts, animations);
             // A part being drawn brings a docked companion out and lets it ride the pen (thinking dots give way to the ink).
             if (animations.Any(a => !a.Erase) && _mode is Mode.Idle or Mode.Processing) _mode = Mode.Responding;
             if (!_hidden) Show();
@@ -281,6 +293,7 @@ public sealed class BuddyOverlayController : IOverlayController
     public void FinishDrawing() => Post(() =>
     {
         _drawing.Finish();
+        foreach (var (_, window) in _figures.Values) window.Finish();
         if (!_hidden) Show();
     });
 
@@ -331,10 +344,18 @@ public sealed class BuddyOverlayController : IOverlayController
     {
         // A visible companion that is told to dock says so before it goes; one that was never shown just stays away.
         _dock.PresenceChanged(_style.Presence, style.Presence, _cursorShown);
+        var figuresChange = style.ReducedMotion != _style.ReducedMotion || ParseAccent(style.AccentHex) != _accent;
         _style = style;
         _accent = ParseAccent(style.AccentHex);
         _drawingDirty = true;
         _drawing.Invalidate();
+        if (figuresChange && _figures.Count > 0)
+        {
+            // Figures take the accent and motion setting when built: build them again, whole (no second reveal).
+            var parts = _figures.Values.Select(f => f.Part).ToArray();
+            CloseFigures();
+            SyncFigures(parts, []);
+        }
         if (!_hidden) Show();
     });
 
@@ -398,6 +419,7 @@ public sealed class BuddyOverlayController : IOverlayController
             _cursorWindow.HideWindow();
             _drawingWindow.HideWindow(); // marks and the click ring
             _drawing.HideWindow(); // kept: the next Show* brings it back
+            foreach (var (_, window) in _figures.Values) window.Hide(); // so are the figures
             // A POINT that is still held flies in again, and its ring is drawn again, when the overlay next appears.
             _flight = null;
             _returning = false;
@@ -429,6 +451,7 @@ public sealed class BuddyOverlayController : IOverlayController
             _cursorWindow.Dispose();
             _drawingWindow.Dispose();
             _drawing.Dispose();
+            CloseFigures();
             _catcher.Dispose();
             foreach (var button in _buttonCatchers) button.Dispose();
             _cursorBitmap?.Dispose();
@@ -465,6 +488,7 @@ public sealed class BuddyOverlayController : IOverlayController
         _hidden = false;
         _drawingDirty = true;
         _drawing.Invalidate();
+        foreach (var (_, window) in _figures.Values) if (!window.IsVisible) window.ShowAt();
         if (!_timer.Enabled) _lastTick = Now;
         _timer.Start();
         Frame();
@@ -560,8 +584,9 @@ public sealed class BuddyOverlayController : IOverlayController
         var live = _liveButtons;
         if (_hidden || ButtonsSuppressed) live.Clear();
         else _drawing.LiveButtons(live);
-        _buttonsLive = live.Count > 0;
-        if (_buttonTimer.Enabled != _buttonsLive) _buttonTimer.Enabled = _buttonsLive;
+        // Polled while any button is drawn, even one held down, so it comes back when the task or dialog ends.
+        var poll = !_hidden && _drawing.HasButtons;
+        if (_buttonTimer.Enabled != poll) _buttonTimer.Enabled = poll;
         for (var i = 0; i < _buttonCatchers.Length; i++)
         {
             if (i >= live.Count)
@@ -585,7 +610,6 @@ public sealed class BuddyOverlayController : IOverlayController
     private void HideButtons()
     {
         for (var i = 0; i < _buttonCatchers.Length; i++) HideButton(i);
-        _buttonsLive = false;
         _buttonTimer.Stop();
         _lastButtonSync = double.NegativeInfinity; // the next frame syncs at once
     }
@@ -595,6 +619,38 @@ public sealed class BuddyOverlayController : IOverlayController
         if (_disposed || _hidden || ButtonsSuppressed || _buttonRects[index] is null) return;
         var (label, prompt) = _buttonActions[index];
         ButtonClicked?.Invoke(label, prompt);
+    }
+
+    /// <summary>
+    /// Keeps one window per figure part (the newest <see cref="MaxFigures"/>): a gone or changed part's window closes, a new one
+    /// opens (shown at once unless the overlay is hidden), revealing with its part's animation or whole when it has none.
+    /// </summary>
+    private void SyncFigures(IReadOnlyList<DrawPart> parts, IReadOnlyList<PartAnimation> animations)
+    {
+        var wanted = parts.Where(p => p.Op is { Kind: DrawOpKind.Figure, Figure: not null })
+            .OrderByDescending(p => p.Seq).Take(MaxFigures).ToDictionary(p => p.Id);
+        foreach (var (id, (part, window)) in _figures.ToArray())
+        {
+            if (wanted.TryGetValue(id, out var keep) && Equals(keep, part)) continue;
+            window.Close();
+            _figures.Remove(id);
+        }
+        foreach (var part in wanted.Values)
+        {
+            if (_figures.ContainsKey(part.Id) || FigureWindow.BoundsOf(part.Op) is not { } bounds) continue;
+            var reveal = animations.FirstOrDefault(a => !a.Erase && a.Part.Id == part.Id && a.Part.Seq == part.Seq);
+            var window = new FigureWindow(part.Op.Figure!, bounds, _accent, _style.ReducedMotion, reveal?.Start);
+            _figures[part.Id] = (part, window);
+            if (!_hidden) window.ShowAt();
+        }
+        _figureHandles = _figures.Values.Select(f => f.Window.Handle).ToArray();
+    }
+
+    private void CloseFigures()
+    {
+        foreach (var (_, window) in _figures.Values) window.Close();
+        _figures.Clear();
+        _figureHandles = [];
     }
 
     private void DrawCursorFrame(double now, double dt)
