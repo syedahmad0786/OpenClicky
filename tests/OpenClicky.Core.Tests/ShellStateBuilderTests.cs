@@ -13,6 +13,19 @@ public class ShellStateBuilderTests
         new(new AppSettings(), jobs ?? [], chat ?? [], [], ShellPhase.Idle, Now);
 
     [Fact]
+    public void CarriesDefaultSettingsAndSection()
+    {
+        var state = ShellStateBuilder.Build(Inputs());
+        Assert.Equal("general", state.Notch.Section);
+        Assert.Contains(state.Notch.Section, ShellContract.Sections);
+        Assert.Same(SettingsView.Default, state.Settings);
+        Assert.Equal(1, state.Settings.Voice.Speed);
+        Assert.Equal("#3380FF", state.Settings.Cursor.Colour);
+        Assert.Equal(HotkeyTrigger.DoubleTap, state.Settings.Shortcuts.HandsFree.Trigger);
+        Assert.Empty(state.Settings.Dictation.Dictionary);
+    }
+
+    [Fact]
     public void CapsListsAndContent()
     {
         var files = Enumerable.Range(0, 10).Select(i => $@"C:\out\f{i}.md").ToArray();

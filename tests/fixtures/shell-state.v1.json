@@ -11,7 +11,7 @@
     "handsFree": ["Ctrl", "Alt", "H"]
   },
   "status": { "phase": "working", "jobsWorking": 2, "jobsNeedYou": 1 },
-  "notch": { "tab": "home", "open": true },
+  "notch": { "tab": "home", "open": true, "section": "general" },
   "featured": {
     "id": "job-working",
     "title": "Summarise the quarterly report",
@@ -105,5 +105,54 @@
   "apps": { "connected": [{ "id": "notion", "name": "Notion" }, { "id": "slack", "name": "Slack" }] },
   "general": { "showInTaskbar": true, "showInRecordings": false, "launchAtLogin": true, "paused": false },
   "update": { "current": "1.4.0", "available": "1.5.0", "state": "available", "progress": 0 },
-  "document": { "path": "C:\\Users\\demo\\Documents\\notes.md", "name": "notes.md", "kind": "markdown", "content": "# Notes\n\nHello.", "truncated": false }
+  "document": { "path": "C:\\Users\\demo\\Documents\\notes.md", "name": "notes.md", "kind": "markdown", "content": "# Notes\n\nHello.", "truncated": false },
+  "settings": {
+    "account": {
+      "provider": "chatgpt", "signedInAs": "ahmad@example.com", "model": "gpt-5", "quickModel": "gpt-5-mini",
+      "models": ["gpt-5", "gpt-5-mini"], "openRouterKeySet": false, "openRouterModel": "anthropic/claude-sonnet-4.5"
+    },
+    "voice": {
+      "voice": "windows-default",
+      "voices": [
+        { "id": "windows-default", "name": "Windows default", "detail": "Installed voice", "available": true },
+        { "id": "alloy", "name": "Alloy", "detail": "Needs your OpenAI key", "available": false }
+      ],
+      "speed": 1, "captions": true, "readReplies": true, "outputDeviceId": null,
+      "outputDevices": [{ "id": "spk-1", "name": "Speakers", "state": "active" }]
+    },
+    "microphone": {
+      "deviceId": "mic-1",
+      "devices": [{ "id": "mic-1", "name": "Headset", "state": "active" }, { "id": "mic-2", "name": "USB mic", "state": "unavailable" }],
+      "whisper": "downloading", "whisperProgress": 0.4
+    },
+    "dictation": {
+      "autoDetect": true, "language": "en",
+      "languages": [{ "code": "en", "name": "English", "native": "English" }, { "code": "ur", "name": "Urdu", "native": "اردو" }],
+      "dictionary": ["OpenClicky", "Ahmad"]
+    },
+    "shortcuts": {
+      "talk": { "keys": ["Ctrl", "Alt"], "trigger": "hold" },
+      "text": { "keys": ["Ctrl"], "trigger": "doubleTap" },
+      "dictate": { "keys": ["Ctrl", "Win"], "trigger": "hold" },
+      "handsFree": { "keys": ["Ctrl", "Win"], "trigger": "doubleTap" }
+    },
+    "cursor": { "colour": "#3380FF", "hidden": false, "screenHighlight": true, "shakeToDetach": true },
+    "integrations": {
+      "chrome": "waiting",
+      "connectors": [
+        { "key": "notion", "name": "Notion", "host": "mcp.notion.com", "status": "connected", "toolCount": 12 },
+        { "key": "slack", "name": "Slack", "host": "mcp.slack.com", "status": "needsSignIn", "toolCount": null }
+      ]
+    },
+    "agents": {
+      "folder": "C:\\Users\\demo\\OpenClicky\\Agents", "folderIsDefault": true, "speakAnnouncements": true, "cursorUpdates": true,
+      "reach": [{ "id": "files", "label": "Files and folders", "state": "allowed" }, { "id": "camera", "label": "Camera", "state": "unknown" }]
+    },
+    "routines": [
+      { "id": "r1", "title": "Morning summary", "schedule": "Every day at 8:00", "next": "2026-10-25T08:00:00Z", "last": null, "status": "scheduled" },
+      { "id": "r2", "title": "Weekly backup", "schedule": "Every Friday at 18:00", "next": null, "last": "2026-10-23T18:00:00Z", "status": "paused" }
+    ],
+    "access": { "mode": "confirmEach", "denyList": "C:\\Windows\\System32", "rememberHistory": true },
+    "advanced": { "useLocalProxy": false, "proxyUrl": "", "forceGdiCapture": false }
+  }
 }

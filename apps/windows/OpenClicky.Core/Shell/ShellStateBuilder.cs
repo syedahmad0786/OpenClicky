@@ -23,7 +23,7 @@ public sealed record ShellInputs(
     /// <summary>The Windows account's display name (may be several words or empty); its first word is the greeting name.</summary>
     public string AccountDisplayName { get; init; } = "";
     public string CurrentVersion { get; init; } = "0.0.0";
-    public ShellNotch Notch { get; init; } = new(NotchTab.Home, false);
+    public ShellNotch Notch { get; init; } = new(NotchTab.Home, false, ShellContract.DefaultSection);
     public string? FeaturedJobId { get; init; }
     public IReadOnlySet<string> DismissedJobIds { get; init; } = new HashSet<string>();
     /// <summary>Rows not yet in the persisted history (the turn in progress), appended after it.</summary>
@@ -32,6 +32,8 @@ public sealed record ShellInputs(
     public IReadOnlyList<NotchCard> Cards { get; init; } = [];
     public ShellUpdate? Update { get; init; }
     public DocumentView? Document { get; init; }
+    /// <summary>What the settings page shows. Defaults until the settings builder (S2) supplies it.</summary>
+    public SettingsView SettingsPage { get; init; } = SettingsView.Default;
 }
 
 /// <summary>
@@ -74,7 +76,8 @@ public static class ShellStateBuilder
             new ShellApps(inputs.Connectors.Take(64).Select(c => new ConnectedApp(Cut(c.Key, 160), Cut(c.DisplayName, 80))).ToList()),
             new ShellGeneral(settings.ShowInTaskbar, settings.ShowInScreenRecordings, settings.LaunchAtLogin, settings.Paused),
             inputs.Update ?? new ShellUpdate(Cut(inputs.CurrentVersion, 40), null, UpdateState.Idle, 0),
-            inputs.Document is { } doc && doc.Content.Length > MaxDocument ? doc with { Content = doc.Content[..MaxDocument], Truncated = true } : inputs.Document);
+            inputs.Document is { } doc && doc.Content.Length > MaxDocument ? doc with { Content = doc.Content[..MaxDocument], Truncated = true } : inputs.Document,
+            inputs.SettingsPage);
         return WithinBudget(state);
 
         JobCard MapJob(ShellJobInput input)

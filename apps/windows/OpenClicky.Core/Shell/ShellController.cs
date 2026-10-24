@@ -27,7 +27,7 @@ public sealed class ShellController : IDisposable
     private bool _disposed;
     private IShellSurface? _surface;
     private ShellState? _last;
-    private ShellNotch _notch = new(NotchTab.Home, false);
+    private ShellNotch _notch = new(NotchTab.Home, false, ShellContract.DefaultSection);
     private string? _featuredJobId;
     private ShellUpdate? _update;
     private bool _pushPending;
@@ -68,7 +68,7 @@ public sealed class ShellController : IDisposable
     /// <summary>Opens the notch peek (tray, second instance, taskbar button).</summary>
     public void OpenNotch(NotchTab? tab = null)
     {
-        SetNotch(new ShellNotch(tab ?? _notch.Tab, true));
+        SetNotch(_notch with { Tab = tab ?? _notch.Tab, Open = true });
         RequestPush();
     }
 
@@ -212,7 +212,7 @@ public sealed class ShellController : IDisposable
                 _featuredJobId = id;
                 _dismissed.Remove(id!);
                 _host.OpenJob(id!);
-                SetNotch(new ShellNotch(NotchTab.Home, true));
+                SetNotch(_notch with { Tab = NotchTab.Home, Open = true });
                 RequestPush();
                 break;
             case "job.stop": _host.StopJob(id!); break;

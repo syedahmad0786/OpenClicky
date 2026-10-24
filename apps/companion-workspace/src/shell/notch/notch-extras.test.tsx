@@ -6,7 +6,7 @@ import type { ShellState } from "../contract";
 import { Notch } from "./Notch";
 
 const fixture = JSON.parse(readFileSync(resolve(__dirname, "../../../../../tests/fixtures/shell-state.v1.json"), "utf8")) as ShellState;
-const open = (tab: ShellState["notch"]["tab"]): ShellState => ({ ...fixture, notch: { tab, open: true } });
+const open = (tab: ShellState["notch"]["tab"]): ShellState => ({ ...fixture, notch: { ...fixture.notch, tab, open: true } });
 
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); delete window.chrome; });
 
@@ -30,7 +30,7 @@ it("the deck appears beside the open Home panel only, without the featured job",
 
 it("cards show under the notch even while it is collapsed", () => {
   mockHost();
-  const { container } = render(<Notch state={{ ...fixture, notch: { tab: "home", open: false } }} />);
+  const { container } = render(<Notch state={{ ...fixture, notch: { ...fixture.notch, tab: "home", open: false } }} />);
   expect(container.querySelectorAll(".notch-card[data-region]")).toHaveLength(3);
 });
 
@@ -64,7 +64,7 @@ it("hovering a card keeps the open panel and deck up; leaving the cards closes a
 it("hovering a card never opens a collapsed panel", () => {
   vi.useFakeTimers();
   const host = mockHost();
-  const { container } = render(<Notch state={{ ...fixture, notch: { tab: "home", open: false } }} />);
+  const { container } = render(<Notch state={{ ...fixture, notch: { ...fixture.notch, tab: "home", open: false } }} />);
   fireEvent.pointerEnter(container.querySelector(".notch-cards")!);
   act(() => { vi.advanceTimersByTime(1000); });
   expect(rootEl()).toHaveClass("notch--collapsed");
@@ -73,7 +73,7 @@ it("hovering a card never opens a collapsed panel", () => {
 
 it("cards are newest first: index 0 is the top card", () => {
   mockHost();
-  const { container } = render(<Notch state={{ ...fixture, notch: { tab: "home", open: false } }} />);
+  const { container } = render(<Notch state={{ ...fixture, notch: { ...fixture.notch, tab: "home", open: false } }} />);
   const titles = [...container.querySelectorAll(".notch-card__title")].map((n) => n.textContent);
   expect(titles).toEqual(fixture.cards.slice(0, 3).map((c) => c.title));
 });

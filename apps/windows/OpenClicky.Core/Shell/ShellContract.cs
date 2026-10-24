@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Text.Json.Serialization;
 
 namespace OpenClicky.Core.Shell;
@@ -17,11 +18,21 @@ public enum NotchCardKind { Activity, TextResponse, JobUpdate, NeedsYou, MutedSp
 public enum CardActionStyle { Primary, Secondary, Danger }
 public enum DocumentKind { Markdown, Text, Csv, Pdf }
 public enum UpdateState { Idle, Checking, Available, Downloading, Ready, UpToDate, Error }
+public enum AccountProvider { Chatgpt, Openrouter }
+public enum DeviceState { Active, Unavailable }
+public enum WhisperState { Missing, Downloading, Ready }
+public enum HotkeyTrigger { Hold, DoubleTap }
+public enum ChromeState { NotInstalled, Waiting, Connected }
+public enum ConnectorStatus { Connected, Checking, Error, NeedsSignIn }
+public enum ReachState { Allowed, Denied, Unknown }
+public enum RoutineStatus { Scheduled, Running, Failed, Paused }
+/// <summary>Wire form of the agent access mode: preview, confirmEach, auto, full.</summary>
+public enum AccessModeView { Preview, ConfirmEach, Auto, Full }
 
 public sealed record ShellUser(string DisplayName);
 public sealed record ShellHotkeys(IReadOnlyList<string> Talk, IReadOnlyList<string> Text, IReadOnlyList<string> Dictate, IReadOnlyList<string> HandsFree);
 public sealed record ShellStatus(ShellPhase Phase, int JobsWorking, int JobsNeedYou);
-public sealed record ShellNotch(NotchTab Tab, bool Open);
+public sealed record ShellNotch(NotchTab Tab, bool Open, string Section);
 public sealed record JobStat(string Value, string Label);
 public sealed record JobFile(string Name, string Path, JobFileKind Kind);
 public sealed record PlanStep(string Text, bool Done);
@@ -79,11 +90,83 @@ public sealed record ShellState(
     ShellApps Apps,
     ShellGeneral General,
     ShellUpdate Update,
-    DocumentView? Document);
+    DocumentView? Document,
+    SettingsView Settings);
+
+public sealed record Device(string Id, string Name, DeviceState State);
+public sealed record Hotkey(IReadOnlyList<string> Keys, HotkeyTrigger Trigger);
+public sealed record VoiceOption(string Id, string Name, string Detail, bool Available);
+public sealed record DictationLanguage(string Code, string Name, string Native);
+public sealed record ConnectorView(string Key, string Name, string Host, ConnectorStatus Status, int? ToolCount);
+public sealed record ReachItem(string Id, string Label, ReachState State);
+public sealed record RoutineView(string Id, string Title, string Schedule, string? Next, string? Last, RoutineStatus Status);
+
+public sealed record SettingsAccount(
+    AccountProvider Provider, string? SignedInAs, string Model, string QuickModel, IReadOnlyList<string> Models,
+    bool OpenRouterKeySet, string OpenRouterModel);
+
+public sealed record SettingsVoice(
+    string Voice, IReadOnlyList<VoiceOption> Voices, double Speed, bool Captions, bool ReadReplies,
+    string? OutputDeviceId, IReadOnlyList<Device> OutputDevices);
+
+public sealed record SettingsMicrophone(string? DeviceId, IReadOnlyList<Device> Devices, WhisperState Whisper, double WhisperProgress);
+
+public sealed record SettingsDictation(
+    bool AutoDetect, string Language, IReadOnlyList<DictationLanguage> Languages, IReadOnlyList<string> Dictionary);
+
+public sealed record SettingsShortcuts(Hotkey Talk, Hotkey Text, Hotkey Dictate, Hotkey HandsFree);
+public sealed record SettingsCursor(string Colour, bool Hidden, bool ScreenHighlight, bool ShakeToDetach);
+public sealed record SettingsIntegrations(ChromeState Chrome, IReadOnlyList<ConnectorView> Connectors);
+
+public sealed record SettingsAgents(
+    string Folder, bool FolderIsDefault, bool SpeakAnnouncements, bool CursorUpdates, IReadOnlyList<ReachItem> Reach);
+
+public sealed record SettingsAccess(AccessModeView Mode, string DenyList, bool RememberHistory);
+public sealed record SettingsAdvanced(bool UseLocalProxy, string ProxyUrl, bool ForceGdiCapture);
+
+public sealed record SettingsView(
+    SettingsAccount Account,
+    SettingsVoice Voice,
+    SettingsMicrophone Microphone,
+    SettingsDictation Dictation,
+    SettingsShortcuts Shortcuts,
+    SettingsCursor Cursor,
+    SettingsIntegrations Integrations,
+    SettingsAgents Agents,
+    IReadOnlyList<RoutineView> Routines,
+    SettingsAccess Access,
+    SettingsAdvanced Advanced)
+{
+    /// <summary>First-run values; the real builder (ShellSettingsBuilder) fills in what the machine knows.</summary>
+    public static SettingsView Default { get; } = new(
+        new SettingsAccount(AccountProvider.Chatgpt, null, "", "", [], false, ""),
+        new SettingsVoice("windows-default", [new VoiceOption("windows-default", "Windows default", "Installed voice", true)], 1, true, true, null, []),
+        new SettingsMicrophone(null, [], WhisperState.Missing, 0),
+        new SettingsDictation(true, "en", [new DictationLanguage("en", "English", "English")], []),
+        new SettingsShortcuts(
+            new Hotkey(["Ctrl", "Alt"], HotkeyTrigger.Hold),
+            new Hotkey(["Ctrl"], HotkeyTrigger.DoubleTap),
+            new Hotkey(["Ctrl", "Win"], HotkeyTrigger.Hold),
+            new Hotkey(["Ctrl", "Win"], HotkeyTrigger.DoubleTap)),
+        new SettingsCursor("#3380FF", false, true, true),
+        new SettingsIntegrations(ChromeState.NotInstalled, []),
+        new SettingsAgents("", true, true, true, []),
+        [],
+        new SettingsAccess(AccessModeView.ConfirmEach, "", true),
+        new SettingsAdvanced(false, "", false));
+}
 
 public static class ShellContract
 {
     public const int Version = 1;
+    public const string DefaultSection = "general";
+
+    /// <summary>The settings sidebar, in order. Also the valid values of notch.section and settings.section.</summary>
+    public static readonly IReadOnlyList<string> Sections =
+    [
+        "account", "general", "voice", "microphone", "dictation", "shortcuts", "cursor", "integrations",
+        "agents", "routines", "access", "memory", "notes", "clipboard", "tasks", "advanced",
+    ];
 
     public static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)
     {
@@ -113,6 +196,17 @@ public static class ShellIntentParser
     private static readonly string[] Tabs = ["home", "chat", "settings", "document"];
     private static readonly string[] GeneralKeys = ["showInTaskbar", "showInRecordings", "launchAtLogin", "paused"];
     private static readonly string[] LinkTargets = ["whatsNew", "bug", "feature"];
+    private static readonly Regex PatchKey = new(@"^[a-z]+(\.[a-zA-Z]+)+\z", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(50));
+    private const int MaxPatchKeyLength = 60, MaxPatchValueChars = 4_000, MaxPatchValueDepth = 4, MaxActionArgLength = 512;
+
+    /// <summary>settings.action allow-list.</summary>
+    public static readonly IReadOnlyList<string> SettingsActions =
+    [
+        "signIn", "signOut", "refreshModels", "manageUsage", "secret.edit", "testMic", "downloadWhisper", "playTestSound",
+        "previewVoice", "clearHistory", "exportMemory", "openNotes", "openClipboard", "openTasks", "chooseAgentFolder",
+        "resetAgentFolder", "openPrivacySetting", "routine.run", "routine.pause", "routine.resume", "routine.delete",
+        "connector.add", "connector.test", "connector.remove", "chrome.setup", "recordHotkey", "resetHotkeys", "openLogs",
+    ];
 
     public static bool TryParse(string? json, out ShellIntent intent)
     {
@@ -159,6 +253,9 @@ public static class ShellIntentParser
         "card.action" => Str(m, "cardId", MaxIdLength) && Str(m, "actionId", MaxIdLength),
         "card.dismiss" => Str(m, "cardId", MaxIdLength),
         "link.open" => OneOf(m, "target", LinkTargets),
+        "settings.section" => OneOf(m, "section", ShellContract.Sections),
+        "settings.patch" => Patch(m),
+        "settings.action" => OneOf(m, "action", SettingsActions) && OptionalStr(m, "arg", MaxActionArgLength),
         _ => false,
     };
 
@@ -168,8 +265,33 @@ public static class ShellIntentParser
     private static bool Bool(JsonElement m, string name) =>
         m.TryGetProperty(name, out var v) && (v.ValueKind is JsonValueKind.True or JsonValueKind.False);
 
-    private static bool OneOf(JsonElement m, string name, string[] allowed) =>
-        m.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String && Array.IndexOf(allowed, ReadString(v)) >= 0;
+    /// <summary>Absent is fine; present must be a string (empty allowed) of at most <paramref name="max"/> chars.</summary>
+    private static bool OptionalStr(JsonElement m, string name, int max) =>
+        !m.TryGetProperty(name, out var v) || (v.ValueKind == JsonValueKind.String && ReadString(v) is { } s && s.Length <= max);
+
+    private static bool OneOf(JsonElement m, string name, IReadOnlyList<string> allowed) =>
+        m.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String && ReadString(v) is { } s && allowed.Contains(s);
+
+    /// <summary>Shape only: the key must look like a path and the value must be small JSON. S2's SettingsPatch decides what is allowed.</summary>
+    private static bool Patch(JsonElement m) =>
+        m.TryGetProperty("key", out var key) && key.ValueKind == JsonValueKind.String
+        && ReadString(key) is { } k && k.Length <= MaxPatchKeyLength && PatchKey.IsMatch(k)
+        && m.TryGetProperty("value", out var value) && value.GetRawText().Length <= MaxPatchValueChars
+        && SmallJson(value, MaxPatchValueDepth);
+
+    /// <summary>At most <paramref name="levels"/> nested arrays/objects; every string and property name must be valid UTF-16 (a lone surrogate throws, TryParse rejects).</summary>
+    private static bool SmallJson(JsonElement e, int levels)
+    {
+        switch (e.ValueKind)
+        {
+            case JsonValueKind.String: return ReadString(e) is not null;
+            case JsonValueKind.Array:
+                return levels > 0 && e.EnumerateArray().All(item => SmallJson(item, levels - 1));
+            case JsonValueKind.Object:
+                return levels > 0 && e.EnumerateObject().All(p => p.Name.Length >= 0 && SmallJson(p.Value, levels - 1));
+            default: return true;
+        }
+    }
 
     private static bool Rects(JsonElement m)
     {

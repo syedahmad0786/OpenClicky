@@ -8,8 +8,8 @@ import { Notch } from "./Notch";
 import { greetingFor } from "./HomeTab";
 
 const fixture = JSON.parse(readFileSync(resolve(__dirname, "../../../../../tests/fixtures/shell-state.v1.json"), "utf8")) as ShellState;
-const closed = (patch: Partial<ShellState> = {}): ShellState => ({ ...fixture, notch: { tab: "home", open: false }, ...patch });
-const open = (tab: ShellState["notch"]["tab"] = "home", patch: Partial<ShellState> = {}): ShellState => ({ ...fixture, notch: { tab, open: true }, ...patch });
+const closed = (patch: Partial<ShellState> = {}): ShellState => ({ ...fixture, notch: { ...fixture.notch, tab: "home", open: false }, ...patch });
+const open = (tab: ShellState["notch"]["tab"] = "home", patch: Partial<ShellState> = {}): ShellState => ({ ...fixture, notch: { ...fixture.notch, tab, open: true }, ...patch });
 
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); delete window.chrome; });
 
@@ -270,7 +270,7 @@ it("the host closing the notch while the composer is focused releases the focus 
   const host = mockHost();
   const view = render(<Notch state={open("chat")} />);
   screen.getByPlaceholderText("Ask OpenClicky…").focus();
-  view.rerender(<Notch state={closed({ notch: { tab: "chat", open: false } })} />);
+  view.rerender(<Notch state={closed({ notch: { ...fixture.notch, tab: "chat", open: false } })} />);
   expect(root()).toHaveClass("notch--closing");
   expect(host.posts("surface.focus").at(-1)).toEqual({ kind: "surface.focus", wanted: false });
   act(() => { vi.advanceTimersByTime(300); });

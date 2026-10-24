@@ -20,7 +20,7 @@ internal sealed class ShellSurfaceAdapter : IShellSurface
     ];
 
     private readonly System.Windows.Forms.Timer _follow = new() { Interval = 500 };
-    private ShellNotch _notch = new(NotchTab.Home, false);
+    private ShellNotch _notch = new(NotchTab.Home, false, ShellContract.DefaultSection);
 
     private ShellSurfaceAdapter(ShellSurfaceWindow window)
     {

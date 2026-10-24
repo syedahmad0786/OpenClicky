@@ -59,6 +59,15 @@ public class ShellContractTests
     [InlineData("""{"kind":"update.install"}""")]
     [InlineData("""{"kind":"link.open","target":"bug"}""")]
     [InlineData("""{"kind":"app.quit"}""")]
+    [InlineData("""{"kind":"settings.section","section":"voice"}""")]
+    [InlineData("""{"kind":"settings.patch","key":"voice.speed","value":1.25}""")]
+    [InlineData("""{"kind":"settings.patch","key":"cursor.screenHighlight","value":false}""")]
+    [InlineData("""{"kind":"settings.patch","key":"dictation.dictionary","value":["a","b"]}""")]
+    [InlineData("""{"kind":"settings.patch","key":"voice.outputDeviceId","value":null}""")]
+    [InlineData("""{"kind":"settings.patch","key":"shortcuts.talk","value":{"keys":["Ctrl","Alt"],"trigger":"hold"}}""")]
+    [InlineData("""{"kind":"settings.action","action":"signIn"}""")]
+    [InlineData("""{"kind":"settings.action","action":"secret.edit","arg":"openRouter"}""")]
+    [InlineData("""{"kind":"settings.action","action":"routine.pause","arg":"r1"}""")]
     public void ValidIntentsParse(string json)
     {
         Assert.True(ShellIntentParser.TryParse(json, out var intent));
@@ -97,6 +106,25 @@ public class ShellContractTests
     [InlineData("""{"kind":"job.stop"}""")]
     [InlineData("""{"kind":"file.open"}""")]
     [InlineData("""{"kind":"card.action","cardId":"c"}""")]
+    [InlineData("""{"kind":"settings.section"}""")]
+    [InlineData("""{"kind":"settings.section","section":"billing"}""")]
+    [InlineData("""{"kind":"settings.section","section":5}""")]
+    [InlineData("""{"kind":"settings.patch","key":"voice.speed"}""")]
+    [InlineData("""{"kind":"settings.patch","value":1}""")]
+    [InlineData("""{"kind":"settings.patch","key":"speed","value":1}""")]
+    [InlineData("""{"kind":"settings.patch","key":"Voice.speed","value":1}""")]
+    [InlineData("""{"kind":"settings.patch","key":"voice.speed.","value":1}""")]
+    [InlineData("""{"kind":"settings.patch","key":"voice..speed","value":1}""")]
+    [InlineData("""{"kind":"settings.patch","key":"voice.speed\n","value":1}""")]
+    [InlineData("""{"kind":"settings.patch","key":"voice.sp eed","value":1}""")]
+    [InlineData("""{"kind":"settings.patch","key":7,"value":1}""")]
+    [InlineData("""{"kind":"settings.patch","key":"voice.speed","value":"\ud800"}""")]
+    [InlineData("""{"kind":"settings.patch","key":"voice.speed","value":[[[[[1]]]]]}""")]
+    [InlineData("""{"kind":"settings.action"}""")]
+    [InlineData("""{"kind":"settings.action","action":"formatDisk"}""")]
+    [InlineData("""{"kind":"settings.action","action":"signIn","arg":5}""")]
+    [InlineData("""{"kind":"settings.action","action":"signIn","arg":"\ud800"}""")]
+    [InlineData("""{"kind":"mic.level","level":0.5}""")]
     public void InvalidPayloadsAreRejected(string json) => Assert.False(ShellIntentParser.TryParse(json, out _));
 
     [Fact]
@@ -126,6 +154,62 @@ public class ShellContractTests
         using var doc = System.Text.Json.JsonDocument.Parse("""{"kind":"ready","name":"\ud800"}""");
         var intent = new ShellIntent("ready", doc.RootElement.Clone());
         Assert.Null(intent.GetString("name"));
+    }
+
+    [Fact]
+    public void FixtureCoversEverySettingsSection()
+    {
+        var state = ShellContract.Deserialize(FixtureJson())!;
+        var s = state.Settings;
+        Assert.Equal("general", state.Notch.Section);
+        Assert.Equal(AccountProvider.Chatgpt, s.Account.Provider);
+        Assert.Equal("ahmad@example.com", s.Account.SignedInAs);
+        Assert.Null(s.Voice.OutputDeviceId);
+        Assert.False(s.Voice.Voices[1].Available);
+        Assert.Equal(DeviceState.Unavailable, s.Microphone.Devices[1].State);
+        Assert.Equal(WhisperState.Downloading, s.Microphone.Whisper);
+        Assert.Equal(["OpenClicky", "Ahmad"], s.Dictation.Dictionary);
+        Assert.Equal(HotkeyTrigger.DoubleTap, s.Shortcuts.HandsFree.Trigger);
+        Assert.Equal(ChromeState.Waiting, s.Integrations.Chrome);
+        Assert.Equal([ConnectorStatus.Connected, ConnectorStatus.NeedsSignIn], s.Integrations.Connectors.Select(c => c.Status));
+        Assert.Null(s.Integrations.Connectors[1].ToolCount);
+        Assert.Equal([ReachState.Allowed, ReachState.Unknown], s.Agents.Reach.Select(r => r.State));
+        Assert.Equal([RoutineStatus.Scheduled, RoutineStatus.Paused], s.Routines.Select(r => r.Status));
+        Assert.Null(s.Routines[0].Last);
+        Assert.Equal(AccessModeView.ConfirmEach, s.Access.Mode);
+        Assert.False(s.Advanced.UseLocalProxy);
+    }
+
+    [Fact]
+    public void EverySidebarSectionAndActionIsAccepted()
+    {
+        Assert.Equal(16, ShellContract.Sections.Count);
+        Assert.Equal(28, ShellIntentParser.SettingsActions.Count);
+        foreach (var section in ShellContract.Sections)
+            Assert.True(ShellIntentParser.TryParse($$"""{"kind":"settings.section","section":"{{section}}"}""", out _), section);
+        foreach (var action in ShellIntentParser.SettingsActions)
+            Assert.True(ShellIntentParser.TryParse($$"""{"kind":"settings.action","action":"{{action}}"}""", out _), action);
+    }
+
+    [Fact]
+    public void SettingsPatchAndActionLimitsAreEnforced()
+    {
+        static string Patch(string key, string value) => "{\"kind\":\"settings.patch\",\"key\":\"" + key + "\",\"value\":" + value + "}";
+        static string Action(string arg) => "{\"kind\":\"settings.action\",\"action\":\"signIn\",\"arg\":\"" + arg + "\"}";
+        // key: at most 60 chars
+        var k60 = "a." + new string('b', 58);
+        Assert.Equal(60, k60.Length);
+        Assert.True(ShellIntentParser.TryParse(Patch(k60, "1"), out _));
+        Assert.False(ShellIntentParser.TryParse(Patch(k60 + "b", "1"), out _));
+        // value: at most 4,000 chars serialized, at most 4 levels deep
+        Assert.True(ShellIntentParser.TryParse(Patch("a.b", "\"" + new string('x', 3_998) + "\""), out _));
+        Assert.False(ShellIntentParser.TryParse(Patch("a.b", "\"" + new string('x', 3_999) + "\""), out _));
+        Assert.True(ShellIntentParser.TryParse(Patch("a.b", "[[[[1]]]]"), out _));
+        Assert.False(ShellIntentParser.TryParse(Patch("a.b", "[[[[[1]]]]]"), out _));
+        Assert.False(ShellIntentParser.TryParse(Patch("a.b", "{\"x\":{\"x\":{\"x\":{\"x\":{\"x\":1}}}}}"), out _));
+        // arg: at most 512 chars
+        Assert.True(ShellIntentParser.TryParse(Action(new string('a', 512)), out _));
+        Assert.False(ShellIntentParser.TryParse(Action(new string('a', 513)), out _));
     }
 
     [Fact]

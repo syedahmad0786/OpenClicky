@@ -16,6 +16,18 @@ export const cardKinds = [
 export const notchTabs = ["home", "chat", "settings", "document"] as const;
 export const generalKeys = ["showInTaskbar", "showInRecordings", "launchAtLogin", "paused"] as const;
 export const linkTargets = ["whatsNew", "bug", "feature"] as const;
+export const settingsSections = [
+  "account", "general", "voice", "microphone", "dictation", "shortcuts", "cursor", "integrations",
+  "agents", "routines", "access", "memory", "notes", "clipboard", "tasks", "advanced",
+] as const;
+export const settingsActions = [
+  "signIn", "signOut", "refreshModels", "manageUsage", "secret.edit", "testMic", "downloadWhisper", "playTestSound",
+  "previewVoice", "clearHistory", "exportMemory", "openNotes", "openClipboard", "openTasks", "chooseAgentFolder",
+  "resetAgentFolder", "openPrivacySetting", "routine.run", "routine.pause", "routine.resume", "routine.delete",
+  "connector.add", "connector.test", "connector.remove", "chrome.setup", "recordHotkey", "resetHotkeys", "openLogs",
+] as const;
+/** settings.patch key: dotted camelCase path, at most 60 chars (the host allow-list decides which keys exist). */
+export const settingsPatchKeySchema = z.string().max(60).regex(/^[a-z]+(\.[a-zA-Z]+)+$/);
 
 const jobCardSchema = z.object({
   id,
@@ -60,10 +72,80 @@ const documentViewSchema = z.object({
   truncated: z.boolean(),
 }).strict();
 
+const device = z.object({ id, name: text(160), state: z.enum(["active", "unavailable"]) }).strict();
+const hotkey = z.object({ keys: z.array(text(24)).min(1).max(6), trigger: z.enum(["hold", "doubleTap"]) }).strict();
+const hex = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+
+const settingsViewSchema = z.object({
+  account: z.object({
+    provider: z.enum(["chatgpt", "openrouter"]),
+    signedInAs: text(160).nullable(),
+    model: text(80),
+    quickModel: text(80),
+    models: z.array(text(80)).max(64),
+    openRouterKeySet: z.boolean(),
+    openRouterModel: text(120),
+  }).strict(),
+  voice: z.object({
+    voice: text(80),
+    voices: z.array(z.object({ id, name: text(80), detail: text(160), available: z.boolean() }).strict()).max(64),
+    speed: z.number().min(0.5).max(1.5),
+    captions: z.boolean(),
+    readReplies: z.boolean(),
+    outputDeviceId: text(160).nullable(),
+    outputDevices: z.array(device).max(32),
+  }).strict(),
+  microphone: z.object({
+    deviceId: text(160).nullable(),
+    devices: z.array(device).max(32),
+    whisper: z.enum(["missing", "downloading", "ready"]),
+    whisperProgress: z.number().min(0).max(1),
+  }).strict(),
+  dictation: z.object({
+    autoDetect: z.boolean(),
+    language: text(16),
+    languages: z.array(z.object({ code: text(16), name: text(80), native: text(80) }).strict()).max(128),
+    dictionary: z.array(text(40)).max(50),
+  }).strict(),
+  shortcuts: z.object({ talk: hotkey, text: hotkey, dictate: hotkey, handsFree: hotkey }).strict(),
+  cursor: z.object({ colour: hex, hidden: z.boolean(), screenHighlight: z.boolean(), shakeToDetach: z.boolean() }).strict(),
+  integrations: z.object({
+    chrome: z.enum(["notInstalled", "waiting", "connected"]),
+    connectors: z.array(z.object({
+      key: id,
+      name: text(80),
+      host: text(255),
+      status: z.enum(["connected", "checking", "error", "needsSignIn"]),
+      toolCount: z.number().int().min(0).nullable(),
+    }).strict()).max(64),
+  }).strict(),
+  agents: z.object({
+    folder: text(4_096),
+    folderIsDefault: z.boolean(),
+    speakAnnouncements: z.boolean(),
+    cursorUpdates: z.boolean(),
+    reach: z.array(z.object({ id, label: text(160), state: z.enum(["allowed", "denied", "unknown"]) }).strict()).max(16),
+  }).strict(),
+  routines: z.array(z.object({
+    id,
+    title: text(160),
+    schedule: text(160),
+    next: iso.nullable(),
+    last: iso.nullable(),
+    status: z.enum(["scheduled", "running", "failed", "paused"]),
+  }).strict()).max(100),
+  access: z.object({
+    mode: z.enum(["preview", "confirmEach", "auto", "full"]),
+    denyList: text(20_000),
+    rememberHistory: z.boolean(),
+  }).strict(),
+  advanced: z.object({ useLocalProxy: z.boolean(), proxyUrl: text(2_048), forceGdiCapture: z.boolean() }).strict(),
+}).strict();
+
 export const shellStateSchema = z.object({
   version: z.literal(1),
   theme: z.enum(["dark", "light"]),
-  accent: z.string().regex(/^#[0-9a-fA-F]{6}$/),
+  accent: hex,
   reducedMotion: z.boolean(),
   user: z.object({ displayName: text(80) }).strict(),
   hotkeys: z.object({
@@ -77,7 +159,7 @@ export const shellStateSchema = z.object({
     jobsWorking: z.number().int().min(0),
     jobsNeedYou: z.number().int().min(0),
   }).strict(),
-  notch: z.object({ tab: z.enum(notchTabs), open: z.boolean() }).strict(),
+  notch: z.object({ tab: z.enum(notchTabs), open: z.boolean(), section: z.enum(settingsSections) }).strict(),
   featured: jobCardSchema.nullable(),
   jobs: z.array(jobCardSchema).max(80),
   chat: z.object({ rows: z.array(chatRowSchema).max(200) }).strict(),
@@ -97,6 +179,7 @@ export const shellStateSchema = z.object({
     progress: z.number().min(0).max(1),
   }).strict(),
   document: documentViewSchema.nullable(),
+  settings: settingsViewSchema,
 }).strict();
 
 export type ShellState = z.infer<typeof shellStateSchema>;
@@ -104,6 +187,9 @@ export type JobCard = z.infer<typeof jobCardSchema>;
 export type ChatRow = z.infer<typeof chatRowSchema>;
 export type NotchCard = z.infer<typeof notchCardSchema>;
 export type DocumentView = z.infer<typeof documentViewSchema>;
+export type SettingsView = z.infer<typeof settingsViewSchema>;
+export type SettingsSection = (typeof settingsSections)[number];
+export type SettingsAction = (typeof settingsActions)[number];
 export type NotchTab = (typeof notchTabs)[number];
 export type GeneralKey = (typeof generalKeys)[number];
 
@@ -112,6 +198,7 @@ export const hostMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("shell.state"), state: shellStateSchema }).strict(),
   z.object({ kind: z.literal("chat.delta"), rowId: id, text: text(8_000) }).strict(),
   z.object({ kind: z.literal("caption.word"), text: text(200) }).strict(),
+  z.object({ kind: z.literal("mic.level"), level: z.number().min(0).max(1) }).strict(),
 ]);
 
 export type HostMessage = z.infer<typeof hostMessageSchema>;
@@ -134,6 +221,9 @@ export type PageMessage =
   | { kind: "update.check" }
   | { kind: "update.install" }
   | { kind: "link.open"; target: (typeof linkTargets)[number] }
+  | { kind: "settings.section"; section: SettingsSection }
+  | { kind: "settings.patch"; key: string; value: unknown }
+  | { kind: "settings.action"; action: SettingsAction; arg?: string }
   | { kind: "app.quit" };
 
 export function parseShellState(value: unknown): ShellState | null {
