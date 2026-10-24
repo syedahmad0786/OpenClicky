@@ -60,6 +60,45 @@ public static class SurfaceRegions
         return result;
     }
 
+    /// <summary>Share of the client area the page may claim as hit region unless the host allows large regions.</summary>
+    public const double MaxAreaFraction = 0.45;
+
+    /// <summary>
+    /// Keeps a page from turning the whole monitor into an input sink: unless <paramref name="allowLarge"/>,
+    /// rects are dropped from the end until their union covers at most <see cref="MaxAreaFraction"/> of the client area.
+    /// </summary>
+    public static IReadOnlyList<DeviceRegionRect> ApplyAreaCap(IReadOnlyList<DeviceRegionRect> rects, int clientWidth, int clientHeight, bool allowLarge)
+    {
+        if (allowLarge) return rects;
+        var limit = MaxAreaFraction * Math.Max(0, clientWidth) * (double)Math.Max(0, clientHeight);
+        var count = rects.Count;
+        while (count > 0 && UnionArea(rects.Take(count).ToList()) > limit) count--;
+        return count == rects.Count ? rects : rects.Take(count).ToList();
+    }
+
+    /// <summary>Exact area of the union of rects (sweep over distinct x edges, merging y intervals per strip).</summary>
+    public static double UnionArea(IReadOnlyList<DeviceRegionRect> rects)
+    {
+        var xs = rects.SelectMany(r => new[] { r.X, r.X + r.Width }).Distinct().Order().ToArray();
+        double area = 0;
+        for (var i = 0; i + 1 < xs.Length; i++)
+        {
+            int left = xs[i], right = xs[i + 1];
+            var spans = rects.Where(r => r.X <= left && r.X + r.Width >= right)
+                .Select(r => (Top: r.Y, Bottom: r.Y + r.Height)).OrderBy(s => s.Top);
+            long covered = 0;
+            int runTop = 0, runBottom = int.MinValue;
+            foreach (var (top, bottom) in spans)
+            {
+                if (top > runBottom) { if (runBottom > runTop) covered += runBottom - runTop; runTop = top; runBottom = bottom; }
+                else runBottom = Math.Max(runBottom, bottom);
+            }
+            if (runBottom > runTop) covered += runBottom - runTop;
+            area += (double)covered * (right - left);
+        }
+        return area;
+    }
+
     private static bool TryRead(JsonElement item, string name, out double value)
     {
         value = 0;

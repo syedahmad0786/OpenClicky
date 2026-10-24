@@ -13,10 +13,17 @@ namespace OpenClicky.App.Surfaces;
 /// everywhere else the window does not exist for hit-testing, so input reaches whatever is underneath.
 /// Security mirrors <see cref="VisualWorkspacePanel"/>: loopback origin only, pinned navigation, bootstrap token
 /// over PostWebMessageAsJson, allow-listed bounded JSON messages, no devtools/context menus/host objects/new windows.
+/// <para>
+/// Page contract: the window region clips drawing as well as hit-testing, so each <c>surface.regions</c> report must
+/// cover the page's full visual envelope (shadows, glows, every animation frame); anything outside is not drawn.
+/// Unless <see cref="AllowLargeRegions"/> is set, the union of regions is capped at 45% of the monitor.
+/// </para>
 /// </summary>
 internal sealed class ShellSurfaceWindow : Form
 {
-    private const int MaxMessageLength = 64_000;
+    private const int MaxMessageLength = 128_000;
+    private const int MaxMessageDepth = 20;
+    private const long FocusGestureWindowMs = 500;
     private const int MaxPendingMessages = 256;
     private static readonly JsonSerializerOptions MessageJson = new() { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull };
     private static readonly string[] BuiltInKinds = ["bootstrap.request", "ready", "surface.regions", "surface.focus"];
@@ -36,6 +43,9 @@ internal sealed class ShellSurfaceWindow : Form
     private bool _trackingLeave;
     private bool _excludeFromCapture;
     private IntPtr _previousForeground;
+    private long _lastHitButtonDownTick = long.MinValue / 2;
+    private bool _allowLargeRegions;
+    private Task? _initTask;
 
     /// <param name="origin">HTTP loopback origin without a path; the only origin the surface may navigate to or accept messages from.</param>
     /// <param name="sessionToken">Bootstrap token posted to the page after each trusted navigation (min 32 chars).</param>
@@ -79,6 +89,13 @@ internal sealed class ShellSurfaceWindow : Form
         set { _excludeFromCapture = value; ApplyDisplayAffinity(); }
     }
 
+    /// <summary>Host-only: lifts the 45%-of-monitor cap on the page's hit regions. Default false.</summary>
+    public bool AllowLargeRegions
+    {
+        get => _allowLargeRegions;
+        set { _allowLargeRegions = value; ApplyRegions(); }
+    }
+
     protected override bool ShowWithoutActivation => true;
 
     protected override CreateParams CreateParams
@@ -92,11 +109,15 @@ internal sealed class ShellSurfaceWindow : Form
         }
     }
 
-    public async Task InitializeAsync(string? userDataFolder = null)
+    /// <summary>Creates the WebView2 and navigates to the origin. Overlapping calls share one initialization.</summary>
+    public Task InitializeAsync(string? userDataFolder = null) => _initTask ??= InitializeCoreAsync(userDataFolder);
+
+    private async Task InitializeCoreAsync(string? userDataFolder)
     {
-        if (_controller is not null) return;
         var environment = await CoreWebView2Environment.CreateAsync(userDataFolder: userDataFolder);
+        if (IsDisposed) return;
         var controller = await environment.CreateCoreWebView2CompositionControllerAsync(Handle);
+        if (IsDisposed) { controller.Close(); return; }
         _controller = controller;
         controller.DefaultBackgroundColor = Color.Transparent;
         controller.Bounds = new Rectangle(Point.Empty, ClientSize);
@@ -131,6 +152,17 @@ internal sealed class ShellSurfaceWindow : Form
     public void Post(object message)
     {
         var json = JsonSerializer.Serialize(message, MessageJson);
+        if (IsHandleCreated && InvokeRequired)
+        {
+            BeginInvoke(() => PostJson(json));
+            return;
+        }
+        PostJson(json);
+    }
+
+    private void PostJson(string json)
+    {
+        if (IsDisposed) return;
         if (!IsReady || _controller is null)
         {
             while (_pendingMessages.Count >= MaxPendingMessages) _pendingMessages.Dequeue();
@@ -199,6 +231,11 @@ internal sealed class ShellSurfaceWindow : Form
             case WM_DISPLAYCHANGE:
                 FitToScreen();
                 break;
+            case WM_CAPTURECHANGED when _controller is not null && m.LParam != Handle:
+                // Capture was taken away mid-drag: tell WebView2 no button is held any more.
+                if (GetCursorPos(out var cursor) && ScreenToClient(Handle, ref cursor))
+                    _controller.SendMouseInput(CoreWebView2MouseEventKind.Move, CoreWebView2MouseEventVirtualKeys.None, 0, new Point(cursor.X, cursor.Y));
+                break;
             case >= WM_MOUSEMOVE and <= WM_MOUSEHWHEEL or WM_MOUSELEAVE when _controller is not null:
                 ForwardMouse(ref m);
                 return;
@@ -232,7 +269,13 @@ internal sealed class ShellSurfaceWindow : Form
                 break;
         }
         // Keep receiving moves/ups while a button is held, even outside the hit region.
-        if (m.Msg is WM_LBUTTONDOWN or WM_RBUTTONDOWN or WM_MBUTTONDOWN or WM_XBUTTONDOWN) SetCapture(Handle);
+        if (m.Msg is WM_LBUTTONDOWN or WM_RBUTTONDOWN or WM_MBUTTONDOWN or WM_XBUTTONDOWN)
+        {
+            var x = point.X; var y = point.Y;
+            if (HitRegions.Any(r => x >= r.X && x < r.X + r.Width && y >= r.Y && y < r.Y + r.Height))
+                _lastHitButtonDownTick = Environment.TickCount64;
+            SetCapture(Handle);
+        }
         else if (m.Msg is WM_LBUTTONUP or WM_RBUTTONUP or WM_MBUTTONUP or WM_XBUTTONDOWN + 1
                  && (keys & (CoreWebView2MouseEventVirtualKeys.LeftButton | CoreWebView2MouseEventVirtualKeys.RightButton
                      | CoreWebView2MouseEventVirtualKeys.MiddleButton | CoreWebView2MouseEventVirtualKeys.XButton1
@@ -260,10 +303,14 @@ internal sealed class ShellSurfaceWindow : Form
     {
         if (!_ready || !Uri.TryCreate(e.Source, UriKind.Absolute, out var source) || !SameOrigin(source, _origin)) return;
         var json = e.WebMessageAsJson;
-        if (json.Length > MaxMessageLength) return;
+        if (json.Length > MaxMessageLength)
+        {
+            Trace($"dropped page message: {json.Length} chars exceeds {MaxMessageLength}");
+            return;
+        }
         try
         {
-            using var document = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 8 });
+            using var document = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = MaxMessageDepth });
             var root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object
                 || !root.TryGetProperty("kind", out var kindValue)
@@ -279,7 +326,12 @@ internal sealed class ShellSurfaceWindow : Form
                     SetRegions(SurfaceRegions.Parse(root));
                     return;
                 case "surface.focus":
-                    if (root.TryGetProperty("active", out var active) && active.ValueKind == JsonValueKind.True) ActivateForInput();
+                    // A page may only take focus right after the user pressed a button inside its own hit region.
+                    if (root.TryGetProperty("wanted", out var wanted) && wanted.ValueKind == JsonValueKind.True)
+                    {
+                        if (Environment.TickCount64 - _lastHitButtonDownTick <= FocusGestureWindowMs) ActivateForInput();
+                        else Trace("ignored surface.focus wanted:true without a recent click in a hit region");
+                    }
                     else ReleaseInput();
                     return;
                 case "ready":
@@ -291,7 +343,7 @@ internal sealed class ShellSurfaceWindow : Form
             }
             PageMessage?.Invoke(this, new ShellSurfaceMessageEventArgs(kind, json));
         }
-        catch (JsonException) { }
+        catch (JsonException ex) { Trace($"dropped page message: invalid or too deep JSON ({ex.Message})"); }
     }
 
     private void SetRegions(IReadOnlyList<CssRegionRect> regions)
@@ -304,7 +356,9 @@ internal sealed class ShellSurfaceWindow : Form
     {
         if (!IsHandleCreated) return;
         var scale = _controller?.RasterizationScale ?? DeviceDpi / 96.0;
-        var rects = SurfaceRegions.ToDevice(_cssRegions, scale, ClientSize.Width, ClientSize.Height);
+        var all = SurfaceRegions.ToDevice(_cssRegions, scale, ClientSize.Width, ClientSize.Height);
+        var rects = SurfaceRegions.ApplyAreaCap(all, ClientSize.Width, ClientSize.Height, _allowLargeRegions);
+        if (rects.Count != all.Count) Trace($"region area cap: kept {rects.Count} of {all.Count} rects");
         var region = CreateRectRgn(0, 0, 0, 0);
         foreach (var rect in rects)
         {
@@ -321,7 +375,9 @@ internal sealed class ShellSurfaceWindow : Form
 
     private void ApplyDisplayAffinity()
     {
-        if (IsHandleCreated) SetWindowDisplayAffinity(Handle, _excludeFromCapture ? WDA_EXCLUDEFROMCAPTURE : WDA_NONE);
+        if (!IsHandleCreated || SetWindowDisplayAffinity(Handle, _excludeFromCapture ? WDA_EXCLUDEFROMCAPTURE : WDA_NONE)) return;
+        Trace($"SetWindowDisplayAffinity failed (error {System.Runtime.InteropServices.Marshal.GetLastWin32Error()}); capture exclusion off");
+        _excludeFromCapture = false;
     }
 
     private Screen CurrentScreen() =>
@@ -341,6 +397,7 @@ internal sealed class ShellSurfaceWindow : Form
     private void PostNow(string json) => _controller?.CoreWebView2?.PostWebMessageAsJson(json);
     private bool IsTrustedUri(string raw) => Uri.TryCreate(raw, UriKind.Absolute, out var uri) && SameOrigin(uri, _origin);
     private static bool SameOrigin(Uri left, Uri right) => left.Scheme == right.Scheme && left.Host == right.Host && left.Port == right.Port;
+    private static void Trace(string message) => DebugLog.Append($"shell_surface: {message}");
     private static void Check(int hresult) => System.Runtime.InteropServices.Marshal.ThrowExceptionForHR(hresult);
 
     protected override void Dispose(bool disposing)

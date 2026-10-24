@@ -133,9 +133,9 @@ internal static class Program
             post({ kind: 'demo.click', count: clicks });
           });
           const input = document.getElementById('text');
-          input.addEventListener('pointerdown', () => post({ kind: 'surface.focus', active: true }));
+          input.addEventListener('pointerdown', () => post({ kind: 'surface.focus', wanted: true }));
           input.addEventListener('input', () => post({ kind: 'demo.input', value: input.value }));
-          input.addEventListener('keydown', (e) => { if (e.key === 'Escape') { input.blur(); post({ kind: 'surface.focus', active: false }); } });
+          input.addEventListener('keydown', (e) => { if (e.key === 'Escape') { input.blur(); post({ kind: 'surface.focus', wanted: false }); } });
         </script>
         </body></html>
         """;

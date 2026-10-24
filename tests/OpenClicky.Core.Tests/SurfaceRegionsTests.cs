@@ -61,6 +61,58 @@ public class SurfaceRegionsTests
         Assert.Equal([new DeviceRegionRect(0, 0, 20, 20, 0), new DeviceRegionRect(90, 90, 10, 10, 4)], device);
     }
 
+    [Fact]
+    public void ToDeviceScalesClampsAndCaps()
+    {
+        // Grow-outward rule: left/top floor, right/bottom ceil. (10,10,100,20) at 1.5 lands exactly on (15,15,150,30).
+        var device = SurfaceRegions.ToDevice(
+            [new CssRegionRect(10, 10, 100, 20, 0), new CssRegionRect(950, 0, 100, 10, 0)], 1.5, 1500, 1000);
+        Assert.Equal([new DeviceRegionRect(15, 15, 150, 30, 0), new DeviceRegionRect(1425, 0, 75, 15, 0)], device);
+
+        var items = string.Join(",", Enumerable.Repeat("""{"x":0,"y":0,"w":1,"h":1}""", 70));
+        Assert.Equal(64, Parse($$"""{"rects":[{{items}}]}""").Count);
+    }
+
+    [Fact]
+    public void ClampsToMonitorAfterDpiChange()
+    {
+        CssRegionRect[] css = [new(1200, 10, 300, 60, 18), new(-40, 700, 200, 200, 0), new(10, 10, 100, 20, 4)];
+        const int width = 1920, height = 1080;
+        foreach (var scale in new[] { 1.0, 2.0 })
+        {
+            var device = SurfaceRegions.ToDevice(css, scale, width, height);
+            Assert.NotEmpty(device);
+            Assert.All(device, r =>
+            {
+                Assert.InRange(r.X, 0, width - 1);
+                Assert.InRange(r.Y, 0, height - 1);
+                Assert.InRange(r.X + r.Width, 1, width);
+                Assert.InRange(r.Y + r.Height, 1, height);
+                Assert.InRange(r.Radius, 0, Math.Min(r.Width, r.Height) / 2);
+            });
+        }
+    }
+
+    [Fact]
+    public void UnionArea_CountsOverlapOnce()
+    {
+        Assert.Equal(100 + 100 - 25, SurfaceRegions.UnionArea([new(0, 0, 10, 10, 0), new(5, 5, 10, 10, 0)]));
+        Assert.Equal(100, SurfaceRegions.UnionArea([new(0, 0, 10, 10, 0), new(0, 0, 10, 10, 0)]));
+        Assert.Equal(0, SurfaceRegions.UnionArea([]));
+    }
+
+    [Fact]
+    public void ApplyAreaCap_DropsFromEndUntilUnder45Percent()
+    {
+        // Client 100x100 = 10,000 px; cap 4,500.
+        DeviceRegionRect[] rects = [new(0, 0, 50, 50, 0), new(50, 0, 50, 30, 0), new(0, 50, 100, 50, 0)];
+        Assert.Equal(rects[..2], SurfaceRegions.ApplyAreaCap(rects, 100, 100, allowLarge: false)); // 2,500 + 1,500 = 4,000
+        Assert.Same(rects, SurfaceRegions.ApplyAreaCap(rects, 100, 100, allowLarge: true));
+        Assert.Empty(SurfaceRegions.ApplyAreaCap([new(0, 0, 100, 100, 0)], 100, 100, allowLarge: false));
+        // Overlap counts once: two identical 40x100 rects are 4,000, under the cap.
+        Assert.Equal(2, SurfaceRegions.ApplyAreaCap([new(0, 0, 40, 100, 0), new(0, 0, 40, 100, 0)], 100, 100, false).Count);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]

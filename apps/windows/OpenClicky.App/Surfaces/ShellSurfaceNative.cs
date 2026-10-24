@@ -28,6 +28,7 @@ internal static class ShellSurfaceNative
     public const int WM_MOUSEHWHEEL = 0x020E;
     public const int WM_MOUSELEAVE = 0x02A3;
     public const int WM_DPICHANGED = 0x02E0;
+    public const int WM_CAPTURECHANGED = 0x0215;
     public const int HTCLIENT = 1;
     public const int MA_NOACTIVATE = 3;
     public const uint TME_LEAVE = 0x00000002;
