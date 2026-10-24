@@ -1,9 +1,9 @@
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import type { ComponentPropsWithRef, ReactNode } from "react";
 import { cx } from "./cx";
 
 export type PillVariant = "primary" | "secondary" | "outline" | "danger";
 
-export interface PillButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
+export interface PillButtonProps extends ComponentPropsWithRef<"button"> {
   variant?: PillVariant;
   size?: "sm" | "md";
   icon?: ReactNode;

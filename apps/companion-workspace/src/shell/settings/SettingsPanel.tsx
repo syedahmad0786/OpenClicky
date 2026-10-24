@@ -17,6 +17,9 @@ import { Sidebar } from "./Sidebar";
 import { VoicePage } from "./VoicePage";
 import "./settings.css";
 
+/** Compile-time exhaustive: a new section that is not handled above fails to build; an unknown runtime one renders nothing. */
+const unknownSection = (section: never): null => (void section, null);
+
 function renderPage(section: SettingsSection, state: ShellState) {
   switch (section) {
     case "account": return <AccountPage state={state} />;
@@ -35,6 +38,7 @@ function renderPage(section: SettingsSection, state: ShellState) {
     case "notes": return <NotesPage />;
     case "clipboard": return <ClipboardPage />;
     case "tasks": return <TasksPage />;
+    default: return unknownSection(section);
   }
 }
 

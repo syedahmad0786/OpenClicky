@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { ShellState } from "../contract";
@@ -252,4 +252,124 @@ it("Memory exports; Notes, Clipboard shelf and Tasks open their native panels", 
     { kind: "settings.action", action: "openClipboard" },
     { kind: "settings.action", action: "openTasks" },
   ]);
+});
+
+// ---- Fix round: strict connector URLs
+it.each([
+  "https://user@evil.com/mcp", "https://user:pass@host/mcp", "https://@/x", "https://:443/x", "https://good.com\@evil.com/x",
+  "javascript:alert(1)", "file:///c:/x", "http://example.com/mcp", "http://localhost.evil.com/mcp", "https://exa mple.com/", "http://user@localhost/x",
+])("Integrations: refuses %s", (bad) => {
+  const posts = host();
+  render(<SettingsPanel state={make("integrations")} />);
+  const f = addForm();
+  fireEvent.click(screen.getByRole("radio", { name: "None" }));
+  fireEvent.change(f.name, { target: { value: "X" } });
+  fireEvent.change(f.url, { target: { value: bad } });
+  expect(f.add).toBeDisabled();
+  expect(screen.getByRole("alert")).toBeInTheDocument();
+  fireEvent.click(f.add);
+  expect(posts("settings.action")).toEqual([]);
+});
+
+it.each(["https://mcp.linear.app/mcp", "https://example.com:8443/a?b=c", "http://localhost:3000/mcp", "http://127.0.0.1/mcp"])("Integrations: accepts %s", (good) => {
+  host();
+  render(<SettingsPanel state={make("integrations")} />);
+  const f = addForm();
+  fireEvent.click(screen.getByRole("radio", { name: "None" }));
+  fireEvent.change(f.name, { target: { value: "X" } });
+  fireEvent.change(f.url, { target: { value: good } });
+  expect(f.add).toBeEnabled();
+});
+
+// ---- Fix round: focus in confirms
+it("Remove confirm: focus goes to Keep, the row is an alert, and Keep returns focus to the Remove button", () => {
+  host();
+  render(<SettingsPanel state={make("integrations")} />);
+  const remove = screen.getByRole("button", { name: "Remove Notion" });
+  fireEvent.click(remove);
+  expect(screen.getByRole("alert")).toHaveTextContent("Remove Notion?");
+  expect(screen.getByRole("button", { name: "Keep" })).toHaveFocus();
+  fireEvent.click(screen.getByRole("button", { name: "Keep" }));
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(remove).toHaveFocus();
+});
+
+it("Delete routine confirm: focus goes to Keep, the row is an alert, and Keep returns focus to Delete", () => {
+  host();
+  render(<SettingsPanel state={make("routines")} />);
+  const del = screen.getByRole("button", { name: "Delete Morning summary" });
+  fireEvent.click(del);
+  expect(screen.getByRole("alert")).toHaveTextContent("Delete this routine?");
+  expect(screen.getByRole("button", { name: "Keep" })).toHaveFocus();
+  fireEvent.click(screen.getByRole("button", { name: "Keep" }));
+  expect(del).toHaveFocus();
+});
+
+// ---- Fix round: routine dates and running state
+it("Routines: invalid dates show no Next/Last line and Run now is disabled while running", () => {
+  host();
+  render(<SettingsPanel state={make("routines", (s) => {
+    s.settings.routines[0].next = "not-a-date"; s.settings.routines[0].status = "running";
+    s.settings.routines[1].last = "also-bad";
+  })} />);
+  expect(screen.queryByText(/^Next /)).toBeNull();
+  expect(screen.queryByText(/^Last /)).toBeNull();
+  expect(screen.queryByText(/Invalid/)).toBeNull();
+  expect(screen.getByRole("button", { name: "Run Morning summary now" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Run Weekly backup now" })).toBeEnabled();
+});
+
+// ---- Fix round: unknown section
+it("An unknown section from the host renders no page instead of crashing", () => {
+  host();
+  const { container } = render(<SettingsPanel state={make("nonsense" as ShellState["notch"]["section"])} />);
+  expect(container.querySelector(".settings-page")).toBeNull();
+  expect(container.querySelector(".settings-sidebar")).not.toBeNull();
+});
+
+// ---- Fix round: Access keyboard safety
+it("Access: arrow keys never commit Auto or Full, click/Enter/Space do, and safe modes commit on arrow", () => {
+  const posts = host();
+  render(<SettingsPanel state={make("access")} />);
+  const group = screen.getByRole("radiogroup", { name: "Access mode" });
+  const full = within(group).getByRole("radio", { name: /Full access/ });
+  const auto = within(group).getByRole("radio", { name: /Auto/ });
+  fireEvent.keyDown(auto, { key: "ArrowDown" });
+  fireEvent.click(full); // what the browser does when an arrow key checks the next radio
+  fireEvent.keyUp(full, { key: "ArrowDown" });
+  expect(posts("settings.patch")).toEqual([]);
+
+  fireEvent.keyDown(full, { key: "Enter" });
+  expect(posts("settings.patch")).toEqual([{ kind: "settings.patch", key: "access.mode", value: "full" }]);
+  postMessage.mockClear();
+  fireEvent.keyDown(auto, { key: " " });
+  fireEvent.click(auto);
+  expect(posts("settings.patch")).toEqual([{ kind: "settings.patch", key: "access.mode", value: "auto" }]);
+  postMessage.mockClear();
+  fireEvent.keyDown(full, { key: "ArrowUp" });
+  fireEvent.click(within(group).getByRole("radio", { name: /Preview only/ }));
+  expect(posts("settings.patch")).toEqual([{ kind: "settings.patch", key: "access.mode", value: "preview" }]);
+});
+
+// ---- Fix round: Dictation quick adds
+it("Dictation: two quick adds before the host answers keep both words", () => {
+  const posts = host();
+  render(<SettingsPanel state={make("dictation", (s) => { s.settings.dictation.dictionary = ["OpenClicky"]; })} />);
+  const input = screen.getByRole("textbox", { name: "Add a word" });
+  fireEvent.change(input, { target: { value: "Ahmad" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  fireEvent.change(input, { target: { value: "Bukhari" } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  expect(posts("settings.patch").map((m) => m.value)).toEqual([["OpenClicky", "Ahmad"], ["OpenClicky", "Ahmad", "Bukhari"]]);
+});
+
+// ---- Fix round: Microphone meter
+it("Microphone: any non-zero level lights at least one bar", () => {
+  let listener: ((event: MessageEvent) => void) | null = null;
+  window.chrome = { webview: { postMessage, addEventListener: (_t, l) => { listener = l; }, removeEventListener: () => {} } };
+  render(<SettingsPanel state={make("microphone")} />);
+  const meter = screen.getByRole("meter", { name: "Microphone level" });
+  act(() => listener?.({ data: { kind: "mic.level", level: 0.01 } } as MessageEvent));
+  expect(meter).toHaveAttribute("aria-valuenow", "1"); // 1 of 16 bars
+  expect(meter.querySelectorAll(".is-lit")).toHaveLength(1);
 });

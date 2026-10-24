@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { ShellState } from "../contract";
 import { Badge, Group, PillButton, Row, SearchField, Segmented } from "../ui";
-import { act, Page } from "./common";
+import { act, ConfirmRow, Page } from "./common";
 
 type Connector = ShellState["settings"]["integrations"]["connectors"][number];
 type Auth = "browser" | "apiKey" | "none";
@@ -19,10 +19,17 @@ const AUTH_OPTIONS = [
   { value: "none", label: "None" },
 ] as const;
 
-const HTTPS_URL = /^https:\/\/[^\s/?#]+(\/\S*)?$/i;
-const LOCAL_HTTP_URL = /^http:\/\/(127\.0\.0\.1|localhost)(:\d{1,5})?(\/\S*)?$/i;
 const MAX_ARG = 512; // the host rejects a connector.add arg longer than this
-const validUrl = (url: string) => HTTPS_URL.test(url) || LOCAL_HTTP_URL.test(url);
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1"]);
+/** https:// anywhere, http:// only for this PC; no whitespace, backslashes or user:password@ tricks. */
+function validUrl(raw: string) {
+  if (!raw || /[\s\\]/.test(raw)) return false;
+  try {
+    const u = new URL(raw);
+    if (!u.hostname || u.username || u.password) return false;
+    return u.protocol === "https:" || (u.protocol === "http:" && LOCAL_HOSTS.has(u.hostname));
+  } catch { return false; }
+}
 
 function BrowserCard({ chrome }: { chrome: ShellState["settings"]["integrations"]["chrome"] }) {
   return (
@@ -43,6 +50,7 @@ function BrowserCard({ chrome }: { chrome: ShellState["settings"]["integrations"
 
 function ConnectorRow({ c, removing, onRemoving }: { c: Connector; removing: boolean; onRemoving: (on: boolean) => void }) {
   const status = STATUS[c.status];
+  const trigger = useRef<HTMLButtonElement>(null);
   return (
     <>
       <Row title={c.name}
@@ -54,13 +62,12 @@ function ConnectorRow({ c, removing, onRemoving }: { c: Connector; removing: boo
         )}>
         <Badge tone={status.tone}>{status.text}</Badge>
         <PillButton size="sm" aria-label={`Test ${c.name}`} onClick={() => act("connector.test", c.key)}>Test</PillButton>
-        <PillButton size="sm" variant="danger" aria-label={`Remove ${c.name}`} onClick={() => onRemoving(true)}>Remove</PillButton>
+        <PillButton size="sm" variant="danger" ref={trigger} aria-label={`Remove ${c.name}`} onClick={() => onRemoving(true)}>Remove</PillButton>
       </Row>
       {removing ? (
-        <Row title={`Remove ${c.name}? Agents will lose access to it.`} tone="danger">
-          <PillButton size="sm" onClick={() => onRemoving(false)}>Keep</PillButton>
-          <PillButton size="sm" variant="danger" onClick={() => { onRemoving(false); act("connector.remove", c.key); }}>Remove connector</PillButton>
-        </Row>
+        <ConfirmRow title={`Remove ${c.name}? Agents will lose access to it.`} confirmLabel="Remove connector"
+          onKeep={() => { onRemoving(false); trigger.current?.focus(); }}
+          onConfirm={() => { onRemoving(false); act("connector.remove", c.key); }} />
       ) : null}
     </>
   );

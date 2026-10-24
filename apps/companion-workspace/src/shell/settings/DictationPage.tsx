@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ShellState } from "../contract";
 import { CloseIcon, Group, PillButton, Row, SearchField, Tile, Toggle } from "../ui";
 import { Page, patch } from "./common";
@@ -6,7 +6,12 @@ import { Page, patch } from "./common";
 const MAX_WORDS = 50;
 const MAX_WORD_LENGTH = 40;
 
-function Dictionary({ words }: { words: readonly string[] }) {
+function Dictionary({ words: hostWords }: { words: readonly string[] }) {
+  // Optimistic copy so two quick adds build on each other; it follows the host whenever the host's list changes.
+  const [words, setWords] = useState(hostWords);
+  const signature = hostWords.join("\u0000");
+  useEffect(() => setWords(hostWords), [signature]); // eslint-disable-line react-hooks/exhaustive-deps
+  const post = (next: string[]) => { setWords(next); patch("dictation.dictionary", next); };
   const [draft, setDraft] = useState("");
   const [note, setNote] = useState("");
   const full = words.length >= MAX_WORDS;
@@ -14,7 +19,7 @@ function Dictionary({ words }: { words: readonly string[] }) {
     const word = draft.trim().slice(0, MAX_WORD_LENGTH);
     if (!word || full) return;
     if (words.some((w) => w.toLowerCase() === word.toLowerCase())) { setNote("Already in your dictionary."); return; }
-    patch("dictation.dictionary", [...words, word]);
+    post([...words, word]);
     setDraft(""); setNote("");
   };
   return (
@@ -30,7 +35,7 @@ function Dictionary({ words }: { words: readonly string[] }) {
         <div className="settings-words">
           {words.map((word) => (
             <span key={word} className="settings-word">{word}
-              <button type="button" aria-label={`Remove ${word}`} onClick={() => patch("dictation.dictionary", words.filter((w) => w !== word))}><CloseIcon width={12} height={12} /></button>
+              <button type="button" aria-label={`Remove ${word}`} onClick={() => post(words.filter((w) => w !== word))}><CloseIcon width={12} height={12} /></button>
             </span>
           ))}
         </div>

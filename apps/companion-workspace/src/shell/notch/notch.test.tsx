@@ -340,6 +340,20 @@ it("a host-opened panel the pointer never enters closes itself after 6 s and tel
   expect(host.posts("notch.open")).toEqual([{ kind: "notch.open", open: false }]);
 });
 
+it("a host-opened Settings panel is deliberate: it does not idle-close, while a Home one does", () => {
+  vi.useFakeTimers();
+  mockHost();
+  const settings = render(<Notch state={closed()} />);
+  settings.rerender(<Notch state={open("settings")} />);
+  act(() => { vi.advanceTimersByTime(7_000); });
+  expect(root()).toHaveClass("notch--open");
+  settings.unmount();
+  const home = render(<Notch state={closed()} />);
+  home.rerender(<Notch state={open("home")} />);
+  act(() => { vi.advanceTimersByTime(6_000); });
+  expect(root()).toHaveClass("notch--closing");
+});
+
 it("a host-opened panel stays open once the pointer enters it", () => {
   vi.useFakeTimers();
   mockHost();

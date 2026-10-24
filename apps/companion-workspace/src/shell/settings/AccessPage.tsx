@@ -19,7 +19,8 @@ export function AccessPage({ state }: { state: ShellState }) {
     <Page title="Access & privacy" subtitle="What OpenClicky may do without asking, and what it remembers.">
       <Group title="How much it may do">
         {/* Stays on the host's value: the host may show a warning and refuse. */}
-        <RadioList name="access-mode" label="Access mode" options={MODES} value={a.mode} onChange={(m) => patch("access.mode", m)} />
+        <RadioList name="access-mode" label="Access mode" options={MODES} value={a.mode} onChange={(m) => patch("access.mode", m)}
+          commitOnArrow={(m) => m === "preview" || m === "confirmEach"} />
       </Group>
       <Group title="Protected windows">
         <div className="settings-field">

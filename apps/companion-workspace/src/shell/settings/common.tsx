@@ -1,6 +1,7 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { postPage } from "../bridge";
 import type { SettingsAction } from "../contract";
+import { PillButton, Row } from "../ui";
 
 export const patch = (key: string, value: unknown) => postPage({ kind: "settings.patch", key, value });
 export const act = (action: SettingsAction, arg?: string) => postPage({ kind: "settings.action", action, ...(arg === undefined ? {} : { arg }) });
@@ -20,4 +21,18 @@ export function useDraft(value: string) {
   const [draft, setDraft] = useState(value);
   useEffect(() => setDraft(value), [value]);
   return [draft, setDraft] as const;
+}
+
+/** In-page confirm: announced as an alert, focus lands on the safe button; the caller puts focus back on its trigger. */
+export function ConfirmRow({ title, keepLabel = "Keep", confirmLabel, onKeep, onConfirm }: {
+  title: string; keepLabel?: string; confirmLabel: string; onKeep: () => void; onConfirm: () => void;
+}) {
+  const keep = useRef<HTMLButtonElement>(null);
+  useEffect(() => keep.current?.focus(), []);
+  return (
+    <Row title={title} tone="danger" role="alert">
+      <PillButton size="sm" ref={keep} onClick={onKeep}>{keepLabel}</PillButton>
+      <PillButton size="sm" variant="danger" onClick={onConfirm}>{confirmLabel}</PillButton>
+    </Row>
+  );
 }

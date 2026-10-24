@@ -25,7 +25,7 @@ function useMicLevel() {
 
 export function MicrophonePage({ state }: { state: ShellState }) {
   const m = state.settings.microphone;
-  const lit = Math.round(useMicLevel() * BARS);
+  const lit = Math.min(BARS, Math.ceil(useMicLevel() * BARS)); // any sound lights at least one bar
   return (
     <Page title="Microphone" subtitle="Which microphone OpenClicky listens to.">
       <Group title="Input device">

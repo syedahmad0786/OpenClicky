@@ -151,7 +151,7 @@ it("Dictation: dictionary adds on Enter, dedupes case-insensitively and removes"
   fireEvent.click(screen.getByRole("button", { name: "Add" }));
   expect(postMessage).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Remove OpenClicky" }));
-  expect(posts("settings.patch")).toEqual([{ kind: "settings.patch", key: "dictation.dictionary", value: [] }]);
+  expect(posts("settings.patch")).toEqual([{ kind: "settings.patch", key: "dictation.dictionary", value: ["Ahmad"] }]); // builds on the optimistic list
   expect(input).toHaveAttribute("maxlength", "40");
 });
 

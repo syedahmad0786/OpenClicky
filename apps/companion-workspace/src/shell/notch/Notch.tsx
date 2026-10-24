@@ -26,6 +26,8 @@ export function Notch({ state }: { state: ShellState }) {
   const [draft, setDraft] = useState(""); // lives here so it survives tab switches and collapsing
   const root = useRef<HTMLDivElement>(null);
   const phaseRef = useRef(phase);
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
   const grace = useRef<number>(undefined);
   const finish = useRef<number>(undefined);
   const idle = useRef<number>(undefined);
@@ -72,7 +74,8 @@ export function Notch({ state }: { state: ShellState }) {
     // Nobody is pointing at it: do not leave an open panel (and its click-eating region) up forever.
     idle.current = window.setTimeout(() => {
       idle.current = undefined;
-      if (!inside.current && !composerFocused()) hostHandlers.current.closePanel(true);
+      // Settings is opened deliberately (tray), so it is not an idle peek.
+      if (!inside.current && tabRef.current !== "settings" && !composerFocused()) hostHandlers.current.closePanel(true);
     }, HOST_OPEN_IDLE_MS);
   }, [hostOpen]);
   useEffect(() => setTab(state.notch.tab), [state.notch.tab]);

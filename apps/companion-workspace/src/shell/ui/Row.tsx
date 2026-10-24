@@ -8,11 +8,12 @@ export interface RowProps {
   /** Trailing control (toggle, button, badge...). */
   children?: ReactNode;
   tone?: "default" | "danger";
+  role?: "alert";
 }
 
-export function Row({ title, description, leading, children, tone = "default" }: RowProps) {
+export function Row({ title, description, leading, children, tone = "default", role }: RowProps) {
   return (
-    <div className={cx("oc-row", tone === "danger" && "oc-row--danger")}>
+    <div role={role} className={cx("oc-row", tone === "danger" && "oc-row--danger")}>
       {leading ? <span className="oc-row__leading">{leading}</span> : null}
       <span className="oc-row__text">
         <span className="oc-row__title">{title}</span>
