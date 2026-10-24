@@ -14,14 +14,16 @@ internal static class PrivacyConsent
 
     private static ReachState State(string key)
     {
-        try
-        {
-            using var consent = Registry.CurrentUser.OpenSubKey(ConsentStore + key);
-            return SettingsActionArgs.ConsentState(consent?.GetValue("Value") as string);
-        }
+        try { return PrivacyConsentMapping.Resolve(key, ReadValue); }
         catch (Exception e) when (e is System.Security.SecurityException or UnauthorizedAccessException or IOException)
         {
             return ReachState.Unknown;
         }
+    }
+
+    private static string? ReadValue(string subKey)
+    {
+        using var consent = Registry.CurrentUser.OpenSubKey(ConsentStore + subKey);
+        return consent?.GetValue("Value") as string;
     }
 }

@@ -3,7 +3,12 @@ import type { ShellState } from "../contract";
 import { Group, PillButton, Row, Toggle } from "../ui";
 import { act, Page, patch, useDraft } from "./common";
 
-const LOCAL_PROXY = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d{1,5})?(\/\S*)?$/i;
+// The host (SettingsCatalog.LoopbackUrl) accepts http(s) on localhost, 127.0.0.1 or [::1], no credentials, at most 200 characters.
+const LOCAL_PROXY = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d{1,5})?(\/\S*)?$/i;
+const validProxy = (value: string) => {
+  if (value.length > 200 || !LOCAL_PROXY.test(value)) return false;
+  try { new URL(value); return true; } catch { return false; } // rejects ports above 65535
+};
 
 export function AdvancedPage({ state }: { state: ShellState }) {
   const a = state.settings.advanced;
@@ -11,7 +16,8 @@ export function AdvancedPage({ state }: { state: ShellState }) {
   const [error, setError] = useState(false);
   const commit = () => {
     const value = url.trim();
-    if (value && !LOCAL_PROXY.test(value)) { setError(true); return; }
+    // The host rejects an empty address, so nothing is posted for it.
+    if (!validProxy(value)) { setError(true); return; }
     setError(false);
     if (value !== a.proxyUrl) patch("advanced.proxyUrl", value);
   };
@@ -23,9 +29,9 @@ export function AdvancedPage({ state }: { state: ShellState }) {
         </Row>
         <div className="settings-field">
           <label className="settings-field__label" htmlFor="settings-proxy">Proxy URL</label>
-          <input id="settings-proxy" className="settings-input" maxLength={2048} spellCheck={false} placeholder="http://127.0.0.1:8080"
+          <input id="settings-proxy" className="settings-input" maxLength={200} spellCheck={false} placeholder="http://127.0.0.1:8080"
             value={url} aria-invalid={error} onChange={(e) => { setUrl(e.target.value); setError(false); }} onBlur={commit} />
-          {error ? <span role="alert" className="settings-field__error">Use an address on this PC: http(s)://127.0.0.1 or localhost, optionally with a port.</span> : null}
+          {error ? <span role="alert" className="settings-field__error">Enter a local address on this PC: http(s)://127.0.0.1, localhost or [::1], optionally with a port.</span> : null}
         </div>
       </Group>
       <Group title="Compatibility">

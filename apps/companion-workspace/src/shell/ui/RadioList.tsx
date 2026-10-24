@@ -33,7 +33,9 @@ export function RadioList<T extends string>({ name, label, options, value, onCha
     }
   };
   return (
-    <div role="radiogroup" aria-label={label} className="oc-radio-list" onKeyDown={onKeyDown} onKeyUp={() => { arrowing.current = false; }}>
+    <div role="radiogroup" aria-label={label} className="oc-radio-list" onKeyDown={onKeyDown} onKeyUp={() => { arrowing.current = false; }}
+      // A keyup lost to a focus change must not leave a later click treated as an arrow press.
+      onPointerDown={() => { arrowing.current = false; }}>
       {options.map((option) => (
         <label key={option.value} className={cx("oc-radio", option.disabled && "is-disabled")}>
           <input type="radio" name={name} value={option.value} checked={option.value === value} disabled={option.disabled}

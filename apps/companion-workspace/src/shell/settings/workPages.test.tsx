@@ -34,7 +34,7 @@ it("Integrations: browser card follows the Chrome state and posts chrome.setup",
   const posts = host();
   const chrome = (c: ShellState["settings"]["integrations"]["chrome"]) => make("integrations", (s) => { s.settings.integrations.chrome = c; });
   const { rerender } = render(<SettingsPanel state={chrome("notInstalled")} />);
-  expect(screen.getByText("Works with Chrome, Brave, Edge and Arc.")).toBeInTheDocument();
+  expect(screen.getByText("Works with Chrome.")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Set up Chrome" }));
   rerender(<SettingsPanel state={chrome("waiting")} />);
   expect(screen.getByText("Waiting for the extension…")).toBeInTheDocument();
@@ -103,7 +103,61 @@ it("Integrations: the add form needs a name and an https (or local http) URL, th
   expect(posts("settings.action")).toEqual([
     { kind: "settings.action", action: "connector.add", arg: JSON.stringify({ name: "Linear", url: "https://mcp.linear.app/mcp", auth: "none" }) },
   ]);
-  expect(screen.queryByRole("textbox", { name: "Name" })).toBeNull(); // form closed
+  // The form stays open with its values until the host reports the connector (or a toast says why not).
+  expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue(" Linear ");
+  expect(screen.getByRole("button", { name: "Adding…" })).toBeDisabled();
+});
+
+const withToast = (id: string) => make("integrations", (s) => { s.cards.push({ id, kind: "toast", title: "Use the connector's https:// MCP address", actions: [] }); });
+
+it("Integrations: the add form closes once a connector with that name arrives in the state", () => {
+  const posts = host();
+  const { rerender } = render(<SettingsPanel state={make("integrations")} />);
+  const f = addForm();
+  fireEvent.click(screen.getByRole("radio", { name: "None" }));
+  fireEvent.change(f.name, { target: { value: "Linear" } });
+  fireEvent.change(f.url, { target: { value: "https://mcp.linear.app/mcp" } });
+  fireEvent.click(f.add);
+  fireEvent.click(screen.getByRole("button", { name: "Adding…" })); // disabled: no second add
+  expect(posts("settings.action")).toHaveLength(1);
+  rerender(<SettingsPanel state={make("integrations")} />); // a push without the connector changes nothing
+  expect(screen.getByRole("textbox", { name: "Name" })).toBeInTheDocument();
+  rerender(<SettingsPanel state={make("integrations", (s) => { s.settings.integrations.connectors.push({ key: "linear", name: "Linear", host: "mcp.linear.app", status: "connected", toolCount: null }); })} />);
+  expect(screen.queryByRole("textbox", { name: "Name" })).toBeNull();
+  expect(screen.getByText("mcp.linear.app")).toBeInTheDocument();
+});
+
+it("Integrations: a toast after Add keeps the typed values and lets the user try again", () => {
+  const posts = host();
+  const { rerender } = render(<SettingsPanel state={make("integrations")} />);
+  const f = addForm();
+  fireEvent.click(screen.getByRole("radio", { name: "None" }));
+  fireEvent.change(f.name, { target: { value: "Linear" } });
+  fireEvent.change(f.url, { target: { value: "https://mcp.linear.app/mcp" } });
+  fireEvent.click(f.add);
+  rerender(<SettingsPanel state={withToast("toast-1")} />);
+  expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Linear");
+  expect(screen.getByRole("textbox", { name: "Server URL" })).toHaveValue("https://mcp.linear.app/mcp");
+  expect(screen.getByRole("button", { name: "Add connector" })).toBeEnabled();
+  fireEvent.click(screen.getByRole("button", { name: "Add connector" }));
+  expect(posts("settings.action")).toHaveLength(2);
+});
+
+it("Integrations: a toast that was already showing does not unlock the form, a cancelled prompt does after a pause", () => {
+  vi.useFakeTimers();
+  try {
+    host();
+    render(<SettingsPanel state={withToast("old")} />);
+    const f = addForm();
+    fireEvent.click(screen.getByRole("radio", { name: "None" }));
+    fireEvent.change(f.name, { target: { value: "Linear" } });
+    fireEvent.change(f.url, { target: { value: "https://mcp.linear.app/mcp" } });
+    fireEvent.click(f.add);
+    expect(screen.getByRole("button", { name: "Adding…" })).toBeDisabled();
+    act(() => { vi.advanceTimersByTime(8_100); });
+    expect(screen.getByRole("button", { name: "Add connector" })).toBeEnabled();
+    expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Linear");
+  } finally { vi.useRealTimers(); }
 });
 
 it("Integrations: local http addresses are accepted, API key auth is sent, browser sign-in is disabled with a note", () => {
@@ -164,12 +218,12 @@ it("Agents: long folder paths are shortened in the middle but keep the full path
   expect(shown.textContent!.endsWith("Agents")).toBe(true);
 });
 
-it("Agents: toggles patch, the quiet note shows and reach rows post openPrivacySetting with their id", () => {
+it("Agents: toggles patch, no quiet-during-calls promise is shown and reach rows post openPrivacySetting with their id", () => {
   const posts = host();
   render(<SettingsPanel state={make("agents", (s) => { s.settings.agents.reach.push({ id: "mic", label: "Microphone", state: "denied" }); })} />);
   fireEvent.click(screen.getByRole("switch", { name: "Speak when a job starts or finishes" }));
   fireEvent.click(screen.getByRole("switch", { name: "Show updates beside the cursor" }));
-  expect(screen.getByText("OpenClicky stays quiet while you're on a call, sharing your screen, or in Do Not Disturb.")).toBeInTheDocument();
+  expect(screen.queryByText(/stays quiet/)).toBeNull();
   expect(posts("settings.patch")).toEqual([
     { kind: "settings.patch", key: "agents.speakAnnouncements", value: false },
     { kind: "settings.patch", key: "agents.cursorUpdates", value: false },
@@ -271,7 +325,18 @@ it.each([
   expect(posts("settings.action")).toEqual([]);
 });
 
-it.each(["https://mcp.linear.app/mcp", "https://example.com:8443/a?b=c", "http://localhost:3000/mcp", "http://127.0.0.1/mcp"])("Integrations: accepts %s", (good) => {
+it.each(["https://example.com/mcp#token", "https://example.com/mcp#", "http://[::1]/mcp#x"])("Integrations: refuses %s (the host rejects fragments)", (bad) => {
+  host();
+  render(<SettingsPanel state={make("integrations")} />);
+  const f = addForm();
+  fireEvent.click(screen.getByRole("radio", { name: "None" }));
+  fireEvent.change(f.name, { target: { value: "X" } });
+  fireEvent.change(f.url, { target: { value: bad } });
+  expect(f.add).toBeDisabled();
+  expect(screen.getByRole("alert")).toBeInTheDocument();
+});
+
+it.each(["https://mcp.linear.app/mcp", "https://example.com:8443/a?b=c", "http://localhost:3000/mcp", "http://127.0.0.1/mcp", "http://[::1]:3000/mcp"])("Integrations: accepts %s", (good) => {
   host();
   render(<SettingsPanel state={make("integrations")} />);
   const f = addForm();

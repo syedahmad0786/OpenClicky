@@ -90,6 +90,20 @@ it("RadioList renders native radios, honours disabled, and reports the choice", 
   expect(onChange).toHaveBeenCalledWith("usb");
 });
 
+it("RadioList: a pointer press after a missed key release still commits a risky option", () => {
+  const onChange = vi.fn();
+  render(<RadioList name="mode" label="Mode" value="safe" onChange={onChange} commitOnArrow={(v) => v === "safe"}
+    options={[{ value: "safe", label: "Safe" }, { value: "risky", label: "Risky" }]} />);
+  const group = screen.getByRole("radiogroup", { name: "Mode" });
+  const risky = screen.getByRole("radio", { name: "Risky" });
+  fireEvent.keyDown(group, { key: "ArrowDown" }); // no keyup: focus moved away mid-press
+  fireEvent.click(risky);
+  expect(onChange).not.toHaveBeenCalled(); // still arrowing: a risky option is not committed by arrows
+  fireEvent.pointerDown(risky);
+  fireEvent.click(risky);
+  expect(onChange).toHaveBeenCalledWith("risky");
+});
+
 it("PaperCard applies stock and tilt, and shows a handle and title", () => {
   const { container } = render(<PaperCard stock="mint" tilt={-2.5} title="Weekly recap">body</PaperCard>);
   const card = container.firstElementChild as HTMLElement;

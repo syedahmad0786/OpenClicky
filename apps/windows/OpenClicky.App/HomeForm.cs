@@ -42,6 +42,8 @@ internal sealed class HomeForm : Form
     private string? _completedStreamText;
     private VisualWorkspacePanel? _visualWorkspace;
     private bool _syncingAccess;
+    /// <summary>Raised after the classic access picker saved a new mode, so the notch shows it too.</summary>
+    public event Action? AccessChanged;
     private readonly TabPage _notesPage;
     private (SizeType Type, float Height)[]? _nativeComposerRows;
     private float _nativeComposerHeight;
@@ -283,7 +285,7 @@ internal sealed class HomeForm : Form
                 if (MessageBox.Show(this, OpenClicky.App.Settings.NativeSettings.AccessWarning(mode), OpenClicky.App.Settings.NativeSettings.AccessWarningTitle, MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes) { _access.SelectedIndex = 1; return; }
             }
             _settings.AgentAccess = mode;
-            try { SettingsStore.Save(_settings); }
+            try { SettingsStore.Save(_settings); AccessChanged?.Invoke(); }
             catch (Exception ex) { AddMessage("OpenClicky", "Could not save task access: " + ex.Message); }
         };
         modes.Controls.Add(_access);

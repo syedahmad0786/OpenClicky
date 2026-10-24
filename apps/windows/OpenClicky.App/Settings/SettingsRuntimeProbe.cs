@@ -94,18 +94,33 @@ internal sealed class SettingsRuntimeProbe : IDisposable
         }
         _ = Task.Run(() =>
         {
-            while (true)
+            var finished = false;
+            try
             {
-                var (runtime, voices) = Probe();
-                lock (_gate)
+                while (true)
                 {
-                    _cached = runtime;
-                    _voiceNames = voices;
-                    if (!_dirty || _disposed) { _busy = false; break; }
-                    _dirty = false;
+                    var (runtime, voices) = Probe();
+                    lock (_gate)
+                    {
+                        _cached = runtime;
+                        _voiceNames = voices;
+                        if (!_dirty || _disposed) { _busy = false; finished = true; break; }
+                        _dirty = false;
+                    }
                 }
             }
-            _changed();
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                DebugLog.Append("settings_probe_error=" + ex.GetType().Name);
+            }
+            finally
+            {
+                // A probe that threw must not leave the flag set: every later Refresh would only queue.
+                if (!finished) lock (_gate) { _busy = false; _dirty = false; }
+            }
+            bool disposed;
+            lock (_gate) disposed = _disposed;
+            if (finished && !disposed) _changed();
         });
     }
 

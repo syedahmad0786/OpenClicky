@@ -31,7 +31,6 @@ export function AgentsPage({ state }: { state: ShellState }) {
           <Toggle label="Show updates beside the cursor" checked={a.cursorUpdates} onChange={(v) => patch("agents.cursorUpdates", v)} />
         </Row>
       </Group>
-      <p className="settings-note">OpenClicky stays quiet while you're on a call, sharing your screen, or in Do Not Disturb.</p>
       <Group title="What agents can reach">
         <div role="group" aria-label="What agents can reach">
           {a.reach.map((r) => (

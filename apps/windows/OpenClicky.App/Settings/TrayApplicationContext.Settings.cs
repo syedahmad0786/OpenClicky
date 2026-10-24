@@ -109,6 +109,24 @@ internal sealed partial class TrayApplicationContext
         }
     }
 
+    /// <summary>The classic window pauses a running task when it comes forward (input must not reach the wrong window); say so, since the notch gave no hint.</summary>
+    private void ShowClassicFromNotch()
+    {
+        var wasRunning = _taskCts is not null && !_taskControl.IsPaused;
+        ShowClassic();
+        if (wasRunning) _shell?.AddToast("Your task is paused while the classic window is open. Resume it from Tasks.");
+    }
+
+    /// <summary>As <see cref="ShowChromeSetup"/>, but owned by a top-most window so it never opens behind the notch.</summary>
+    private void ShowChromeSetupFromNotch()
+    {
+        PauseTask();
+        using var owner = NativeSettings.TopMostOwner();
+        using var setup = new ChromeBridgeSetupForm(Application.ExecutablePath, RuntimePath("chrome-extension"));
+        setup.ShowDialog(owner);
+        if (_chromePipe is null && File.Exists(ChromeBridgeConfiguration.DefaultPath)) _ = ConnectChromeAsync();
+    }
+
     private void RunSettingsAction(string action, string? arg)
     {
         switch (action)
@@ -124,8 +142,8 @@ internal sealed partial class TrayApplicationContext
             case "previewVoice": PreviewVoice(arg); break;
             case "clearHistory": ClearHistory(); _shell?.AddToast("Conversation and task history cleared."); break;
             case "exportMemory": ExportMemory(); break;
-            case "openNotes": ShowClassic(); _home.ShowNotes(); break;
-            case "openTasks": ShowClassic(); _home.ShowTasks(); break;
+            case "openNotes": ShowClassicFromNotch(); _home.ShowNotes(); break;
+            case "openTasks": ShowClassicFromNotch(); _home.ShowTasks(); break;
             case "openClipboard": ShowClipboardShelf(); break;
             case "chooseAgentFolder": ChooseAgentFolder(); break;
             case "resetAgentFolder": if (NotchSettings.Change(s => s.AgentFolder = null)) _shell?.AddToast("Agents use the default folder again."); break;
@@ -139,7 +157,7 @@ internal sealed partial class TrayApplicationContext
             case "connector.remove": RemoveConnector(arg); break;
             case "chrome.setup":
                 if (arg == "disconnect") _shell?.AddToast("Remove the extension from Chrome to disconnect.");
-                else if (Modal(() => { ShowChromeSetup(); return true; }, false)) SettingsProbe.Refresh();
+                else if (Modal(() => { ShowChromeSetupFromNotch(); return true; }, false)) SettingsProbe.Refresh();
                 break;
             case "recordHotkey": RecordHotkey(arg); break;
             case "resetHotkeys":

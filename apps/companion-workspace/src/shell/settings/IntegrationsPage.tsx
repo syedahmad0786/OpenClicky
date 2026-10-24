@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ShellState } from "../contract";
 import { Badge, Group, PillButton, Row, SearchField, Segmented } from "../ui";
 import { act, ConfirmRow, Page } from "./common";
@@ -20,10 +20,10 @@ const AUTH_OPTIONS = [
 ] as const;
 
 const MAX_ARG = 512; // the host rejects a connector.add arg longer than this
-const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1"]);
-/** https:// anywhere, http:// only for this PC; no whitespace, backslashes or user:password@ tricks. */
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+/** https:// anywhere, http:// only for this PC; no whitespace, backslashes, #fragments or user:password@ tricks (as ConnectorRegistry.ValidateUrl). */
 function validUrl(raw: string) {
-  if (!raw || /[\s\\]/.test(raw)) return false;
+  if (!raw || /[\s\\#]/.test(raw)) return false;
   try {
     const u = new URL(raw);
     if (!u.hostname || u.username || u.password) return false;
@@ -34,7 +34,7 @@ function validUrl(raw: string) {
 function BrowserCard({ chrome }: { chrome: ShellState["settings"]["integrations"]["chrome"] }) {
   return (
     <Group title="Browser">
-      <Row title="Chrome" description="Works with Chrome, Brave, Edge and Arc.">
+      <Row title="Chrome" description="Works with Chrome.">
         {chrome === "notInstalled" ? <PillButton variant="primary" onClick={() => act("chrome.setup")}>Set up Chrome</PillButton> : null}
         {chrome === "waiting" ? <Badge tone="warn">Waiting for the extension…</Badge> : null}
         {chrome === "connected" ? <Badge>Connected</Badge> : null}
@@ -73,16 +73,37 @@ function ConnectorRow({ c, removing, onRemoving }: { c: Connector; removing: boo
   );
 }
 
-function AddConnector({ onClose }: { onClose: () => void }) {
+const PENDING_MS = 8_000; // a cancelled key prompt sends no toast and adds nothing: let the user try again
+
+/**
+ * Stays open after Add (typed values kept) until the host's next state holds a connector with that name; a toast
+ * means the host refused or needs something, so the form unlocks for another try.
+ */
+function AddConnector({ connectors, toasts, onClose }: { connectors: Connector[]; toasts: string[]; onClose: () => void }) {
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [auth, setAuth] = useState<Auth>("browser");
+  const [pending, setPending] = useState<{ keys: Set<string>; toasts: Set<string>; name: string } | null>(null);
+  useEffect(() => {
+    if (!pending) return;
+    if (connectors.some((c) => !pending.keys.has(c.key) && c.name.trim().toLowerCase() === pending.name.toLowerCase())) onClose();
+    else if (toasts.some((id) => !pending.toasts.has(id))) setPending(null);
+  }, [pending, connectors, toasts, onClose]);
+  useEffect(() => {
+    if (!pending) return;
+    const t = setTimeout(() => setPending(null), PENDING_MS);
+    return () => clearTimeout(t);
+  }, [pending]);
   const cleanName = name.trim();
   const cleanUrl = url.trim();
   const arg = JSON.stringify({ name: cleanName, url: cleanUrl, auth });
   const urlOk = validUrl(cleanUrl);
   const tooLong = arg.length > MAX_ARG;
-  const canAdd = auth !== "browser" && cleanName.length > 0 && cleanName.length <= 60 && urlOk && !tooLong;
+  const canAdd = auth !== "browser" && cleanName.length > 0 && cleanName.length <= 60 && urlOk && !tooLong && !pending;
+  const add = () => {
+    setPending({ keys: new Set(connectors.map((c) => c.key)), toasts: new Set(toasts), name: cleanName });
+    act("connector.add", arg);
+  };
   return (
     <Group title="New connector">
       <div className="settings-field">
@@ -105,7 +126,7 @@ function AddConnector({ onClose }: { onClose: () => void }) {
       </div>
       <div className="settings-actions">
         <PillButton size="sm" variant="outline" onClick={onClose}>Cancel</PillButton>
-        <PillButton size="sm" variant="primary" disabled={!canAdd} onClick={() => { act("connector.add", arg); onClose(); }}>Add connector</PillButton>
+        <PillButton size="sm" variant="primary" disabled={!canAdd} onClick={add}>{pending ? "Adding…" : "Add connector"}</PillButton>
       </div>
     </Group>
   );
@@ -116,6 +137,8 @@ export function IntegrationsPage({ state }: { state: ShellState }) {
   const [query, setQuery] = useState("");
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
+  const closeAdd = useCallback(() => setAdding(false), []);
+  const toasts = state.cards.filter((c) => c.kind === "toast").map((c) => c.id);
   const q = query.trim().toLowerCase();
   const shown = q ? connectors.filter((c) => c.name.toLowerCase().includes(q) || c.host.toLowerCase().includes(q)) : connectors;
   return (
@@ -125,7 +148,7 @@ export function IntegrationsPage({ state }: { state: ShellState }) {
         <div className="settings-toolbar__search"><SearchField label="Search connectors" value={query} onChange={setQuery} /></div>
         {adding ? null : <PillButton onClick={() => setAdding(true)}>Add custom connector</PillButton>}
       </div>
-      {adding ? <AddConnector onClose={() => setAdding(false)} /> : null}
+      {adding ? <AddConnector connectors={connectors} toasts={toasts} onClose={closeAdd} /> : null}
       <Group title="Connected">
         {shown.length === 0
           ? <Row title={connectors.length === 0 ? "No connectors yet" : "No connectors match your search"} />

@@ -74,6 +74,23 @@ it("General toggles post general.set and the update row follows the update state
   expect(posts("link.open").map((m) => m.target)).toEqual(["whatsNew", "bug", "feature"]);
 });
 
+it("General: the update button is disabled and labelled while checking and while downloading", () => {
+  const posts = host();
+  const withUpdate = (u: Partial<ShellState["update"]>) => make("general", (s) => { s.update = { ...s.update, ...u }; });
+  const { rerender } = render(<SettingsPanel state={withUpdate({ state: "checking", available: null })} />);
+  const checking = screen.getByRole("button", { name: "Checking…" });
+  expect(checking).toBeDisabled();
+  fireEvent.click(checking);
+  rerender(<SettingsPanel state={withUpdate({ state: "downloading", available: "1.5.0", progress: 0 })} />);
+  expect(screen.getByRole("button", { name: "Downloading 0%" })).toBeDisabled();
+  rerender(<SettingsPanel state={withUpdate({ state: "downloading", available: "1.5.0", progress: 0.999 })} />);
+  const downloading = screen.getByRole("button", { name: "Downloading 100%" });
+  expect(downloading).toBeDisabled();
+  fireEvent.click(downloading);
+  expect(posts("update.check")).toEqual([]);
+  expect(posts("update.install")).toEqual([]);
+});
+
 it("Account (ChatGPT): sign in / out, model pickers patch, refresh, usage, quit", () => {
   const posts = host();
   const { rerender } = render(<SettingsPanel state={make("account")} />);
@@ -141,8 +158,11 @@ it("Access: deny list posts on blur only when changed; remember toggle patches; 
   fireEvent.click(screen.getByRole("button", { name: "Clear history" }));
   expect(posts("settings.action")).toEqual([]);
   expect(screen.getByText("Clear everything OpenClicky remembers from your conversations?")).toBeInTheDocument();
+  expect(screen.getByRole("alert")).toHaveTextContent("Clear everything OpenClicky remembers");
+  expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus(); // the safe button
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   expect(posts("settings.action")).toEqual([]);
+  expect(screen.getByRole("button", { name: "Clear history" })).toHaveFocus(); // back on the trigger
   fireEvent.click(screen.getByRole("button", { name: "Clear history" }));
   fireEvent.click(screen.getByRole("button", { name: "Clear" }));
   expect(posts("settings.action")).toEqual([{ kind: "settings.action", action: "clearHistory" }]);
@@ -160,8 +180,19 @@ it("Advanced: toggles patch, proxy URL validates and posts on blur, Open logs", 
   const url = screen.getByRole("textbox", { name: "Proxy URL" });
   fireEvent.change(url, { target: { value: "http://evil.example.com:8080" } });
   fireEvent.blur(url);
-  expect(screen.getByRole("alert")).toHaveTextContent(/127\.0\.0\.1 or localhost/);
+  expect(screen.getByRole("alert")).toHaveTextContent(/127\.0\.0\.1, localhost or \[::1\]/);
   expect(posts("settings.patch")).toHaveLength(2);
+  // The host rejects "" and ports above 65535, so neither is posted.
+  for (const bad of ["", "  ", "http://localhost:99999"]) {
+    fireEvent.change(url, { target: { value: bad } });
+    fireEvent.blur(url);
+    expect(screen.getByRole("alert")).toHaveTextContent(/Enter a local address/);
+  }
+  expect(posts("settings.patch")).toHaveLength(2);
+  fireEvent.change(url, { target: { value: "http://[::1]:9000" } });
+  fireEvent.blur(url);
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(posts("settings.patch").at(-1)).toEqual({ kind: "settings.patch", key: "advanced.proxyUrl", value: "http://[::1]:9000" });
   fireEvent.change(url, { target: { value: "http://127.0.0.1:8080" } });
   fireEvent.blur(url);
   expect(screen.queryByRole("alert")).toBeNull();

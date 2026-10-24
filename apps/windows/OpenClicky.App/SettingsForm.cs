@@ -515,7 +515,8 @@ internal sealed class SettingsForm : Form
         _settings.SpeakReplies = _speakReplies.Checked;
         _settings.TranscriptionModel = string.IsNullOrWhiteSpace(_transcriptionModelBox.Text) ? "openai/whisper-1" : _transcriptionModelBox.Text.Trim();
         _settings.UseLocalProxy = _useProxy.Checked;
-        _settings.LocalProxyBaseUrl = _proxyBox.Text.Trim();
+        // The notch applies the same rule (SettingsPatch): an address that is not loopback keeps the saved one and the hint under the box.
+        if (SettingsCatalog.LoopbackUrl(_proxyBox.Text) is { } proxy) _settings.LocalProxyBaseUrl = proxy;
         _settings.DebugTranscriptOverride = string.IsNullOrWhiteSpace(_debugTranscriptBox.Text)
             ? null
             : _debugTranscriptBox.Text.Trim();

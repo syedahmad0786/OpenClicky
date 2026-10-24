@@ -80,6 +80,7 @@ internal sealed partial class TrayApplicationContext : IShellHost
         // GetUserNameExW can block on a domain lookup: read it off the UI thread, then push the name.
         GeneralBehaviour.WarmAccountDisplayName(() => OnUi(RequestShellPush));
         _talk.StateChanged += _ => OnUi(RequestShellPush);
+        _home.AccessChanged += RequestShellPush;
         _talk.TurnCommitted += turn => OnUi(() => { _shellTurns = null; _shell?.EndTurn(turn.Assistant); });
         _talk.MessageReceived += (role, text) => OnUi(() =>
         {

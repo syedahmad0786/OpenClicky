@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ShellState } from "../contract";
 import { Group, PillButton, RadioList, Row, Toggle } from "../ui";
-import { act, Page, patch, useDraft } from "./common";
+import { act, ConfirmRow, Page, patch, useDraft } from "./common";
 
 type Mode = ShellState["settings"]["access"]["mode"];
 const MODES = [
@@ -15,6 +15,9 @@ export function AccessPage({ state }: { state: ShellState }) {
   const a = state.settings.access;
   const [deny, setDeny] = useDraft(a.denyList);
   const [confirming, setConfirming] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const refocus = useRef(false); // Cancel puts focus back on the button that opened the confirm
+  useEffect(() => { if (!confirming && refocus.current) { refocus.current = false; trigger.current?.focus(); } }, [confirming]);
   return (
     <Page title="Access & privacy" subtitle="What OpenClicky may do without asking, and what it remembers.">
       <Group title="How much it may do">
@@ -36,13 +39,12 @@ export function AccessPage({ state }: { state: ShellState }) {
           <Toggle label="Remember conversations" checked={a.rememberHistory} onChange={(v) => patch("access.rememberHistory", v)} />
         </Row>
         {confirming ? (
-          <Row title="Clear everything OpenClicky remembers from your conversations?" tone="danger">
-            <PillButton variant="outline" onClick={() => setConfirming(false)}>Cancel</PillButton>
-            <PillButton variant="danger" onClick={() => { setConfirming(false); act("clearHistory"); }}>Clear</PillButton>
-          </Row>
+          <ConfirmRow title="Clear everything OpenClicky remembers from your conversations?" keepLabel="Cancel" confirmLabel="Clear"
+            onKeep={() => { refocus.current = true; setConfirming(false); }}
+            onConfirm={() => { setConfirming(false); act("clearHistory"); }} />
         ) : (
           <Row title="Clear conversation history" description="This cannot be undone." tone="danger">
-            <PillButton variant="danger" onClick={() => setConfirming(true)}>Clear history</PillButton>
+            <PillButton variant="danger" ref={trigger} onClick={() => setConfirming(true)}>Clear history</PillButton>
           </Row>
         )}
       </Group>
