@@ -2,6 +2,8 @@
 
 Research date: 11 October 2026. Sources: [official homepage](https://www.heyclicky.com/), [changelog](https://www.heyclicky.com/changelog), and the [public MIT source](https://github.com/farzaa/clicky). The changelog showed version 1.0.53 dated 2 October 2026 at inspection time. OpenClicky is independent of that product.
 
+Shipped-binary evidence for 1.1.1 and the phase-two gap list are in [heyclicky-behavior-spec-2026-10-24.md](heyclicky-behavior-spec-2026-10-24.md).
+
 ## Actual video inspection
 
 The five video files embedded by the official homepage were downloaded to the ignored local research folder. Frames were extracted every three seconds across each full timeline, timestamped, and inspected in contact sheets. This covers the actual videos, rather than relying only on descriptions. It is sampled visual inspection; it does not claim that every frame or every spoken word was reviewed. Marketing demonstrations also do not establish reliability on this machine.
