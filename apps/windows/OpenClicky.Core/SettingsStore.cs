@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using OpenClicky.Core.Settings;
 
 namespace OpenClicky.Core;
 
@@ -38,6 +39,7 @@ public static class SettingsStore
             var json = File.ReadAllText(path);
             var settings = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions) ?? new AppSettings();
             settings.PushToTalk = HotkeyChord.NormalizeOrDefault(settings.PushToTalk);
+            SettingsPatch.Normalize(settings); // repair a hand-edited settings.json
             return settings;
         }
         catch
@@ -61,31 +63,15 @@ public static class SettingsStore
         File.Move(temporary, path, overwrite: true);
     }
 
-    public static AppSettings CloneWithoutSecrets(AppSettings settings) =>
-        new()
-        {
-            PushToTalk = settings.PushToTalk,
-            LocalProxyBaseUrl = settings.LocalProxyBaseUrl,
-            UseLocalProxy = settings.UseLocalProxy,
-            AuthProvider = settings.AuthProvider,
-            OpenRouterApiKey = null,
-            OpenRouterModel = settings.OpenRouterModel,
-            TranscriptionModel = settings.TranscriptionModel,
-            UseWindowsSpeech = settings.UseWindowsSpeech,
-            MicrophoneDeviceId = settings.MicrophoneDeviceId,
-            SpeakReplies = settings.SpeakReplies,
-            AwarenessEnabled = settings.AwarenessEnabled,
-            AgentAccess = settings.AgentAccess,
-            ChatGptHostId = settings.ChatGptHostId,
-            ChatGptIssuedClientId = settings.ChatGptIssuedClientId,
-            ChatGptAccountEmail = settings.ChatGptAccountEmail,
-            ChatGptModel = settings.ChatGptModel,
-            ChatGptQuickModel = settings.ChatGptQuickModel,
-            ChatGptPlanWelcomeShown = settings.ChatGptPlanWelcomeShown,
-            DebugTranscriptOverride = settings.DebugTranscriptOverride,
-            PersistConversationHistory = settings.PersistConversationHistory,
-            ForceGdiCapture = settings.ForceGdiCapture,
-            AgentDenyListExtra = settings.AgentDenyListExtra,
-            FirstRunCompleted = settings.FirstRunCompleted,
-        };
+    /// <summary>Settings properties that hold secrets and must never reach settings.json.</summary>
+    public static readonly IReadOnlyList<string> SecretProperties = [nameof(AppSettings.OpenRouterApiKey)];
+
+    /// <summary>Copies every property (JSON round-trip), then clears the secrets in <see cref="SecretProperties"/>.</summary>
+    public static AppSettings CloneWithoutSecrets(AppSettings settings)
+    {
+        var clone = JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(settings, JsonOptions), JsonOptions)
+            ?? new AppSettings();
+        clone.OpenRouterApiKey = null;
+        return clone;
+    }
 }
