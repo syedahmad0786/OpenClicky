@@ -32,6 +32,7 @@ function VoiceGlyph({ id }: { id: string }) {
 export function VoicePage({ state }: { state: ShellState }) {
   const v = state.settings.voice;
   const choose = (id: string) => { act("previewVoice", id); patch("voice.voice", id); };
+  const needsKey = v.voices.some((voice) => !voice.available);
   return (
     <Page title="Voice" subtitle="How OpenClicky sounds when it talks back.">
       <Group title="Speech speed">
@@ -43,10 +44,13 @@ export function VoicePage({ state }: { state: ShellState }) {
         <div role="group" aria-label="Voice" className="settings-grid">
           {v.voices.map((voice) => (
             <Tile key={voice.id} icon={<VoiceGlyph id={voice.id} />} name={voice.name} descriptor={voice.available ? voice.detail : "Needs your OpenAI key"}
-              selected={voice.id === v.voice} aria-disabled={!voice.available} className={voice.available ? undefined : "is-unavailable"}
-              onClick={() => { if (voice.available) choose(voice.id); }} />
+              selected={voice.id === v.voice} className={voice.available ? undefined : "is-unavailable"}
+              onClick={() => (voice.available ? choose(voice.id) : act("secret.edit", "openai"))} />
           ))}
         </div>
+        <Row title="OpenAI key" description="Used only for OpenAI voices. Windows keeps it in Credential Manager.">
+          <PillButton onClick={() => act("secret.edit", "openai")}>{needsKey ? "Add key" : "Change"}</PillButton>
+        </Row>
       </Group>
       <Group title="Captions">
         <Row title="Captions" description="Show the words on screen as OpenClicky speaks.">

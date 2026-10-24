@@ -18,6 +18,9 @@ public static class SecretNames
 {
     public const string OpenRouterApiKey = "openrouter-api-key";
 
+    /// <summary>The user's OpenAI API key, used only for OpenAI voices (text to speech).</summary>
+    public const string OpenAiApiKey = "openai-api-key";
+
     /// <summary>JSON <see cref="ChatGptCredential"/> blob (access/refresh/id tokens).</summary>
     public const string ChatGptOAuth = "chatgpt-oauth";
 }

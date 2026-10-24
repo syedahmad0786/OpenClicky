@@ -462,7 +462,8 @@ static async Task<int> CheckSpeechAsync()
         var transcript = await new LocalSpeechSttClient().TranscribeAsync(wav.ToArray(), timeout.Token);
         if (!transcript.Contains("window", StringComparison.OrdinalIgnoreCase)) Fail("Windows recognition did not recognize the fixture sentence: " + transcript);
         Console.WriteLine("PASS local Windows recognition from synthesized WAV: " + transcript);
-        var tts = new LocalSpeechTtsClient { Enabled = false };
+        var speechLog = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        var tts = new OpenClicky.App.Speech.SpeechOutput(() => new AppSettings(), new WindowsCredentialSecretStore(), _ => { }, speechLog.Enqueue) { Enabled = false };
         await tts.SpeakAsync("This should remain silent.");
         tts.Enabled = true;
         using var cancel = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
@@ -475,6 +476,27 @@ static async Task<int> CheckSpeechAsync()
         catch (OperationCanceledException) { }
         if (clock.Elapsed > TimeSpan.FromSeconds(5)) Fail("Speech cancellation took too long.");
         Console.WriteLine("PASS real Windows TTS cancellation in " + clock.ElapsedMilliseconds + "ms");
+
+        // Real playback on the default device: words arrive in order, sentences are played one after another, the end is raised.
+        var words = new System.Collections.Concurrent.ConcurrentQueue<string>();
+        var ended = 0;
+        tts.WordSpoken += words.Enqueue;
+        tts.SpeechEnded += () => Interlocked.Increment(ref ended);
+        speechLog.Clear();
+        await tts.SpeakAsync("Hello there. Two short sentences.").WaitAsync(TimeSpan.FromSeconds(20));
+        if (string.Join(" ", words) != "Hello there Two short sentences") Fail("Words were not raised in order: " + string.Join("|", words));
+        if (speechLog.Count(l => l.StartsWith("speech_play_start voice=windows")) != 2 || speechLog.Count(l => l == "speech_play_end") != 2 || ended != 1)
+            Fail("Playback did not run once per sentence: " + string.Join(" ; ", speechLog));
+        await tts.PlayTestSoundAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        if (!speechLog.Contains("speech_test_sound_end")) Fail("Test sound did not play: " + string.Join(" ; ", speechLog));
+        Console.WriteLine("PASS real playback: " + string.Join(" ; ", speechLog));
+        using (var endpoints = new NAudio.CoreAudioApi.MMDeviceEnumerator())
+            foreach (var endpoint in endpoints.EnumerateAudioEndPoints(NAudio.CoreAudioApi.DataFlow.Render, NAudio.CoreAudioApi.DeviceState.Active))
+            {
+                var number = OpenClicky.App.Speech.RenderDevices.WaveOutNumber(endpoint.ID);
+                if (number < 0) Fail("No WaveOut device for the active output " + endpoint.FriendlyName);
+                Console.WriteLine($"PASS output device {endpoint.FriendlyName} -> WaveOut {number}");
+            }
         return 0;
     }
     catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }

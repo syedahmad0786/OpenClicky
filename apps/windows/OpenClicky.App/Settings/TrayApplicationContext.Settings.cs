@@ -1,10 +1,11 @@
 using System.Diagnostics;
-using System.Speech.Synthesis;
 using System.Text.Json;
 using OpenClicky.App.Settings;
+using OpenClicky.App.Speech;
 using OpenClicky.Core;
 using OpenClicky.Core.Settings;
 using OpenClicky.Core.Shell;
+using OpenClicky.Core.Speech;
 using OpenClicky.Input;
 using OpenClicky.Providers;
 
@@ -20,7 +21,6 @@ internal sealed partial class TrayApplicationContext
     private readonly Dictionary<string, (ConnectorStatus Status, int? Tools)> _connectorChecks = new(StringComparer.Ordinal);
     private NAudioMicrophoneRecorder? _micTest;
     private System.Windows.Forms.Timer? _micTestTimer;
-    private SpeechSynthesizer? _voicePreview;
     private HotkeyRecorder? _hotkeyRecorder;
     private bool _accountBusy, _whisperBusy;
     /// <summary>One native modal at a time from the notch: a double click must not stack warnings, prompts or pickers.</summary>
@@ -135,10 +135,10 @@ internal sealed partial class TrayApplicationContext
             case "signOut": _ = SignOutFromShellAsync(); break;
             case "refreshModels": _ = RefreshModelsFromShellAsync(announce: true); break;
             case "manageUsage": OpenUrl(NativeSettings.UsageUrl); break;
-            case "secret.edit" when arg == "openrouter": EditOpenRouterKey(); break;
+            case "secret.edit": EditSecret(arg); break;
             case "testMic": StartMicTest(); break;
             case "downloadWhisper": _ = DownloadWhisperFromShellAsync(); break;
-            case "playTestSound": System.Media.SystemSounds.Asterisk.Play(); break; // default output device
+            case "playTestSound": _ = _tts.PlayTestSoundAsync(); break;
             case "previewVoice": PreviewVoice(arg); break;
             case "clearHistory": ClearHistory(); _shell?.AddToast("Conversation and task history cleared."); break;
             case "exportMemory": ExportMemory(); break;
@@ -239,16 +239,25 @@ internal sealed partial class TrayApplicationContext
         RequestShellPush();
     }
 
-    /// <summary>OpenRouter key: masked native prompt, stored only in Credential Manager. Empty clears it.</summary>
-    private void EditOpenRouterKey()
+    /// <summary>secret.edit for "openrouter" or "openai": masked native prompt, stored only in Credential Manager. Empty clears it.</summary>
+    private void EditSecret(string? arg)
     {
-        if (Modal(() => NativeSettings.PromptSecret("OpenRouter API key", "Paste your OpenRouter API key. It is saved with Windows Credential Manager, never in settings or logs. Leave it empty to remove the key."), null)
+        if (SettingsActionArgs.SecretFor(arg) is not { } secret) { Log("settings: unknown secret"); return; }
+        var (name, title) = secret;
+        var openAi = name == SecretNames.OpenAiApiKey;
+        var use = openAi ? " It is used only for OpenAI voices." : "";
+        if (Modal(() => NativeSettings.PromptSecret(title, $"Paste your {title}.{use} It is saved with Windows Credential Manager, never in settings or logs. Leave it empty to remove the key."), null)
             is not { Secret: var key }) return;
-        if (key.Length == 0) _secrets.Delete(SecretNames.OpenRouterApiKey);
-        else _secrets.Set(SecretNames.OpenRouterApiKey, key);
-        _settings.OpenRouterApiKey = key.Length == 0 ? null : key;
-        RefreshConnection();
-        _shell?.AddToast(key.Length == 0 ? "OpenRouter key removed." : "OpenRouter key saved.");
+        if (key.Length == 0) _secrets.Delete(name);
+        else _secrets.Set(name, key);
+        var label = openAi ? "OpenAI key" : "OpenRouter key";
+        if (!openAi)
+        {
+            _settings.OpenRouterApiKey = key.Length == 0 ? null : key;
+            RefreshConnection();
+        }
+        SettingsProbe.Refresh();
+        _shell?.AddToast(key.Length == 0 ? $"{label} removed." : $"{label} saved.");
         RequestShellPush();
     }
 
@@ -311,36 +320,16 @@ internal sealed partial class TrayApplicationContext
         }
     }
 
-    /// <summary>Speaks a short sample with a Windows voice at the saved speed. OpenAI voices need sub-project B's key.</summary>
+    /// <summary>Says the preview line with that voice at the saved speed on the selected device.</summary>
     private void PreviewVoice(string? id)
     {
         if (string.IsNullOrEmpty(id)) return;
-        if (SettingsCatalog.OpenAiVoices.Contains(id)) { _shell?.AddToast("Add your OpenAI key to preview this voice."); return; }
-        var name = id == SettingsCatalog.WindowsDefaultVoice ? null : SettingsProbe.VoiceName(id);
-        if (id != SettingsCatalog.WindowsDefaultVoice && name is null) { _shell?.AddToast("That voice is not installed on this PC."); return; }
-        StopVoicePreview();
-        var synth = new SpeechSynthesizer();
-        try
+        if (VoiceCatalog.IsOpenAi(id))
         {
-            if (name is not null) synth.SelectVoice(name);
-            // ponytail: linear speed→SAPI rate around the app's usual rate 2 (0.5→-2 … 1.5→6); tune by ear if needed.
-            synth.Rate = Math.Clamp((int)Math.Round(2 + (_settings.SpeechSpeed - 1) * 8), -10, 10);
-            synth.SetOutputToDefaultAudioDevice();
-            synth.SpeakAsync("Hi, this is how I sound.");
-            _voicePreview = synth;
+            if (!SettingsProbe.Current.OpenAiKeySet) { _shell?.AddToast("Add your OpenAI key to preview this voice."); return; }
         }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or PlatformNotSupportedException)
-        {
-            synth.Dispose();
-            _shell?.AddToast("That voice could not play: " + ex.Message);
-        }
-    }
-
-    private void StopVoicePreview()
-    {
-        try { _voicePreview?.SpeakAsyncCancelAll(); } catch (ObjectDisposedException) { }
-        _voicePreview?.Dispose();
-        _voicePreview = null;
+        else if (id != SettingsCatalog.WindowsDefaultVoice && SettingsProbe.VoiceName(id) is null) { _shell?.AddToast("That voice is not installed on this PC."); return; }
+        _ = _tts.PreviewAsync(id);
     }
 
     /// <summary>The classic "Clear conversation and task history"; both surfaces confirm before calling it.</summary>
@@ -487,7 +476,7 @@ internal sealed partial class TrayApplicationContext
     private void DisposeSettings()
     {
         StopMicTest();
-        StopVoicePreview();
+        _tts.Stop();
         _hotkeyRecorder?.Dispose();
         _settingsProbe?.Dispose();
     }

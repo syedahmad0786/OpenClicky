@@ -7,7 +7,7 @@ public static class SettingsCatalog
 {
     public static readonly IReadOnlyList<double> Speeds = [0.5, 0.75, 1, 1.25, 1.5];
     public static readonly IReadOnlyList<string> Accents = ["#3380FF", "#FF4C4C", "#D4A017", "#26C281"];
-    public static readonly IReadOnlyList<string> OpenAiVoices = ["alloy", "ash", "ballad", "cedar", "coral", "echo", "marin", "sage", "shimmer", "verse"];
+    public static readonly IReadOnlyList<string> OpenAiVoices = Speech.VoiceCatalog.OpenAiIds;
     public const string WindowsDefaultVoice = "windows-default";
     public const string DefaultProxyUrl = "http://127.0.0.1:8787";
     public const int MaxDictionaryWords = 50, MaxWordLength = 40, MaxDenyListChars = 2_000, MaxIdLength = 160, MaxVoiceLength = 80;

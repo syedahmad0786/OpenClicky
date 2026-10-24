@@ -101,6 +101,14 @@ public static class SettingsActionArgs
         _ => ReachState.Unknown,
     };
 
+    /// <summary>The secret a secret.edit arg names, with the prompt title; null for anything else.</summary>
+    public static (string Name, string Title)? SecretFor(string? arg) => arg switch
+    {
+        "openrouter" => (SecretNames.OpenRouterApiKey, "OpenRouter API key"),
+        "openai" => (SecretNames.OpenAiApiKey, "OpenAI API key"),
+        _ => null,
+    };
+
     /// <summary>"win:" + 16 hex chars of SHA-256 of the voice token id: stable, and short enough for the voice cap.</summary>
     public static string VoiceShortId(string tokenId) =>
         "win:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(tokenId)))[..16].ToLowerInvariant();

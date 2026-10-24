@@ -150,6 +150,7 @@ internal sealed class SettingsRuntimeProbe : IDisposable
                 : _chromeConnected() ? ChromeState.Connected : ChromeState.Waiting, ChromeState.NotInstalled),
             Reach = Guard("privacy", PrivacyConsent.Read, []),
             DefaultAgentFolder = _defaultAgentFolder,
+            OpenAiKeySet = Guard("openai key", () => !string.IsNullOrWhiteSpace(_secrets.Get(SecretNames.OpenAiApiKey)), false),
         };
         return (runtime, voices);
     }

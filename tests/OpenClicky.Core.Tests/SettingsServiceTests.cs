@@ -154,6 +154,22 @@ public class SettingsServiceTests
     public void ConsentValuesMapToReachStates(string? value, ReachState expected) =>
         Assert.Equal(expected, SettingsActionArgs.ConsentState(value));
 
+    [Theory]
+    [InlineData("openrouter", SecretNames.OpenRouterApiKey)]
+    [InlineData("openai", SecretNames.OpenAiApiKey)]
+    [InlineData("OpenAI", null)]
+    [InlineData("chatgpt", null)]
+    [InlineData(null, null)]
+    public void SecretEditAcceptsOnlyKnownKeys(string? arg, string? secret) =>
+        Assert.Equal(secret, SettingsActionArgs.SecretFor(arg)?.Name);
+
+    [Fact]
+    public void OpenAiKeyIsStoredUnderItsOwnName()
+    {
+        Assert.Equal("openai-api-key", SecretNames.OpenAiApiKey);
+        Assert.Contains("OpenAI", SettingsActionArgs.SecretFor("openai")!.Value.Title);
+    }
+
     [Fact]
     public void VoiceShortIdsAreShortStableAndDistinct()
     {

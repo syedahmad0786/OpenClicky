@@ -1,5 +1,6 @@
 using OpenClicky.Agent;
 using OpenClicky.Capture;
+using OpenClicky.App.Speech;
 using OpenClicky.Core;
 using OpenClicky.Core.Agent;
 using OpenClicky.Input;
@@ -21,7 +22,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
     private readonly SettingsForm _settingsForm;
     private readonly IMicrophoneRecorder _mic;
     private readonly WgcScreenCaptureService _capture;
-    private readonly LocalSpeechTtsClient _tts;
+    private readonly SpeechOutput _tts;
     private readonly LocalWhisperRuntime _whisperRuntime;
     private readonly CompositeAgentExecutor _executor = new();
     private readonly WinFormsAgentConfirm _confirm;
@@ -90,7 +91,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         _overlay = new BuddyOverlayController();
         _capture = new WgcScreenCaptureService(Log, () => _settings.ForceGdiCapture);
         _mic = CreateMic();
-        _tts = new LocalSpeechTtsClient();
+        _tts = new SpeechOutput(() => _settings, _secrets, text => OnUi(() => _shell?.AddToast(text)), Log);
         _tts.Enabled = _settings.SpeakReplies;
         _whisperRuntime = new LocalWhisperRuntime(Log);
 

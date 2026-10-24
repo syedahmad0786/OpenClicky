@@ -41,7 +41,7 @@ it("Voice: speed chips post voice.speed and mark the current speed", () => {
   expect(posts("settings.patch")).toEqual([{ kind: "settings.patch", key: "voice.speed", value: 1.25 }]);
 });
 
-it("Voice: available tile previews and patches; unavailable tiles are dimmed and post nothing", () => {
+it("Voice: available tile previews and patches; unavailable tiles are dimmed and ask for the OpenAI key", () => {
   const posts = host();
   render(<SettingsPanel state={make("voice", tenVoices)} />);
   const grid = screen.getByRole("group", { name: "Voice" });
@@ -55,7 +55,19 @@ it("Voice: available tile previews and patches; unavailable tiles are dimmed and
   expect(alloy).toHaveClass("is-unavailable");
   expect(alloy).toHaveTextContent("Needs your OpenAI key");
   fireEvent.click(alloy);
-  expect(postMessage).not.toHaveBeenCalled();
+  expect(posts("settings.action")).toEqual([{ kind: "settings.action", action: "secret.edit", arg: "openai" }]);
+  expect(posts("settings.patch")).toEqual([]);
+});
+
+it("Voice: the OpenAI key row asks the host for the key and never takes it on the page", () => {
+  const posts = host();
+  const { unmount } = render(<SettingsPanel state={make("voice", tenVoices)} />);
+  fireEvent.click(screen.getByRole("button", { name: "Add key" }));
+  expect(posts("settings.action")).toEqual([{ kind: "settings.action", action: "secret.edit", arg: "openai" }]);
+  expect(document.querySelector("input[type=password]")).toBeNull();
+  unmount();
+  render(<SettingsPanel state={make("voice", (s) => { s.settings.voice.voices = s.settings.voice.voices.map((x) => ({ ...x, available: true })); })} />);
+  expect(screen.getByRole("button", { name: "Change" })).toBeInTheDocument();
 });
 
 it("Voice: toggles patch, output device list posts and test sound acts", () => {

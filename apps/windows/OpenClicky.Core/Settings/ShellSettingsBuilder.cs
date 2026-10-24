@@ -90,7 +90,7 @@ public static class ShellSettingsBuilder
             .Take(MaxVoices - 1 - SettingsCatalog.OpenAiVoices.Count)
             .Select(v => new VoiceOption(v.Id, v.Name, "Installed voice", true)));
         voices.AddRange(SettingsCatalog.OpenAiVoices.Select(name => new VoiceOption(
-            name, char.ToUpperInvariant(name[0]) + name[1..], runtime.OpenAiKeySet ? "OpenAI voice" : "Needs your OpenAI key", runtime.OpenAiKeySet)));
+            name, char.ToUpperInvariant(name[0]) + name[1..], runtime.OpenAiKeySet ? Speech.VoiceCatalog.Descriptor(name) : "Needs your OpenAI key", runtime.OpenAiKeySet)));
         return voices;
     }
 
