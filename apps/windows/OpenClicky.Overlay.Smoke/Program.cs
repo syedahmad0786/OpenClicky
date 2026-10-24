@@ -534,6 +534,23 @@ internal static class Program
             if (spot.Spot is not { } s || s.Hole != new RectangleF(x, y, 200, 100) || !s.Screen.Contains(s.Hole)) return "spotlight hole is not the box inside the dimmed area";
             if (One($"[DRAW:badge id=b x={x} y={y} n=3]").Badge is not { Text: "3" }) return "badge has no numeral";
 
+            // Only the last spotlight is kept (they would stack to black); other parts are not touched.
+            var spots = DrawingRenderer.Layout(
+            [
+                Tagged($"[DRAW:spotlight id=o1 x={x} y={y} w=200 h=100]", 1),
+                Tagged($"[DRAW:badge id=b x={x} y={y} n=3]", 2),
+                Tagged($"[DRAW:spotlight id=o2 x={x + 300} y={y} w=100 h=50]", 3),
+                Tagged($"[DRAW:spotlight id=o3 x={x + 500} y={y} w=100 h=50]", 4),
+            ]);
+            if (spots.Count != 2 || spots.Count(l => l.Part.Op.Kind == CoreDrawing.DrawOpKind.Spotlight) != 1 || spots.Single(l => l.Spot is not null).Part.Id != "o3")
+                return $"spotlights: {string.Join(",", spots.Select(l => l.Part.Id))}, expected the badge and the last spotlight";
+            // A spotlight lasts 30 s, then fades over 600 ms (120 ms with reduced motion) and is gone.
+            static bool Near(float a, float b) => Math.Abs(a - b) < 0.01f;
+            if (!Near(DrawingRenderer.SpotlightAlpha(0, false), 1) || !Near(DrawingRenderer.SpotlightAlpha(30, false), 1)
+                || !Near(DrawingRenderer.SpotlightAlpha(30.3, false), 0.5f) || DrawingRenderer.SpotlightAlpha(30.7, false) != 0
+                || !Near(DrawingRenderer.SpotlightAlpha(30.06, true), 0.5f) || DrawingRenderer.SpotlightAlpha(30.2, true) != 0)
+                return "spotlight lifetime: 1 until 30 s, then a 600 ms fade (120 ms reduced) to 0";
+
             var card = One($"[DRAW:card id=c x={x} y={y} title=Hello text=\"Some words here\" stock=sky]");
             if (card.Paper is not { } paper) return "card has no paper";
             if (Math.Abs(paper.Rect.Width - 280 * card.Dip) > 1) return $"card width {paper.Rect.Width} is not 280 DIP";
@@ -642,6 +659,27 @@ internal static class Program
             if (dimChanged < 1500 || holeChanged > 40) return $"spotlight pixels: outside changed {dimChanged} (of 3600), inside {holeChanged}";
             Console.WriteLine($"spotlight_outside_changed={dimChanged} inside_changed={holeChanged}");
 
+            // A spotlight expires: driven by the clock handed to Show/Render, so there is no 30 s wait. It stays up until then, fades
+            // (still animating), is dropped, and the same part shown again does not come back; a newer spotlight does.
+            using (var ink = new DrawingWindow())
+            {
+                var accent = Color.FromArgb(0x33, 0x80, 0xFF);
+                var first = Tagged($"[DRAW:spotlight id=o x={hole.X} y={hole.Y} w={hole.Width} h={hole.Height}]", 1);
+                ink.Show([first], [], 0);
+                ink.Render(10, accent, false);
+                if (!ink.HasParts) return "the spotlight was gone before its 30 s";
+                if (!ink.Render(30.3, accent, false) || !ink.HasParts) return "the spotlight did not fade after 30 s";
+                if (ink.Render(31, accent, false) || ink.HasParts) return "the spotlight was not dropped after its fade";
+                ink.Show([first], [], 32);
+                if (ink.HasParts) return "an expired spotlight came back when its drawing was shown again";
+                ink.Show([Tagged($"[DRAW:spotlight id=o x={hole.X} y={hole.Y} w={hole.Width} h={hole.Height}]", 2)], [], 40);
+                if (!ink.HasParts) return "a newer spotlight was not shown";
+                ink.Render(40.1, accent, false);
+                if (ink.Render(70.5, accent, true) || ink.HasParts) return "with reduced motion the spotlight did not go 120 ms after its 30 s";
+                ink.Show([], [], 71);
+                ink.Render(71, accent, false);
+            }
+
             // A card paints where it was put.
             var card = Tagged($"[DRAW:card id=c x={x} y={y} title=Notes text=\"Check the drawing\" stock=mint]");
             overlay.ShowDrawing([card], [new(card, TimeSpan.Zero, TimeSpan.FromSeconds(0.3), false)]);
@@ -699,6 +737,15 @@ internal static class Program
             overlay.DetachSuppressed = () => false;
             if (!PumpUntil(() => Visible(catchers[0]) && Visible(catchers[1]), TimeSpan.FromSeconds(2))) return "the click targets did not return after the task";
 
+            // An open host dialog takes them down too (they are topmost and invisible, and would steal a click meant for Yes/No).
+            overlay.DrawingButtonsSuppressed = () => true;
+            if (!PumpUntil(() => !Visible(catchers[0]) && !Visible(catchers[1]), TimeSpan.FromSeconds(2))) return "an open dialog left the click targets up";
+            NativeMethods.SendMessage(catchers[0], WmLButtonDown, (IntPtr)1, Lp(5, 5));
+            NativeMethods.SendMessage(catchers[0], WmLButtonUp, IntPtr.Zero, Lp(5, 5));
+            if (clicks.Count != 1) return "a click was acted on while a dialog was open";
+            overlay.DrawingButtonsSuppressed = () => false;
+            if (!PumpUntil(() => Visible(catchers[0]) && Visible(catchers[1]), TimeSpan.FromSeconds(2))) return "the click targets did not return after the dialog";
+
             overlay.ShowDrawing([], []);
             if (!PumpUntil(() => !catchers.Any(Visible), TimeSpan.FromSeconds(2))) return "clearing the drawing left a click target up";
             return null;
@@ -707,6 +754,7 @@ internal static class Program
         {
             overlay.ButtonClicked -= OnClick;
             overlay.DetachSuppressed = null;
+            overlay.DrawingButtonsSuppressed = null;
             overlay.ShowDrawing([], []);
             overlay.Hide();
             Cursor.Position = saved;

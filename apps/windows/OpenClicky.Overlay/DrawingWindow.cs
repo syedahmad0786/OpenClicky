@@ -20,17 +20,34 @@ internal sealed class DrawingWindow : IDisposable
     private Bitmap? _bitmap;
     private bool _dirty;
     private double _lastPresent = double.NegativeInfinity;
+    // The one spotlight lives SpotlightSeconds from when it appeared, then fades and is dropped (the document keeps it, so an
+    // expired one is remembered and not laid out again). The one-shot timer wakes the owner's frame loop, which may be stopped.
+    private (string Id, int Seq)? _spotKey, _spotExpired;
+    private double _spotStart;
+    private readonly System.Windows.Forms.Timer _expiry = new() { Interval = (int)(DrawingRenderer.SpotlightSeconds * 1000) + 50 };
 
-    public DrawingWindow(Action<string>? log = null) => _window = new("OpenClicky Ink", log);
+    public DrawingWindow(Action<string>? log = null)
+    {
+        _window = new("OpenClicky Ink", log);
+        _expiry.Tick += (_, _) =>
+        {
+            _expiry.Stop();
+            Wake?.Invoke();
+        };
+    }
 
     public nint Handle => _window.Handle;
 
     public bool HasParts => _layouts.Count > 0;
 
+    /// <summary>Called (UI thread) when a spotlight is due to start fading and the frame loop needs to run.</summary>
+    public Action? Wake { get; set; }
+
     /// <summary>Replaces the drawing. Animation starts are relative to <paramref name="now"/> (seconds).</summary>
     public void Show(IReadOnlyList<DrawPart> parts, IReadOnlyList<PartAnimation> animations, double now)
     {
         _layouts = DrawingRenderer.Layout(parts);
+        TrackSpotlight(now);
         foreach (var animation in animations)
         {
             var start = now + animation.Start.TotalSeconds;
@@ -49,6 +66,27 @@ internal sealed class DrawingWindow : IDisposable
             _bitmap = null;
         }
         _dirty = true;
+    }
+
+    private static bool IsSpotlight(DrawingRenderer.PartLayout l) => l.Part.Op.Kind == DrawOpKind.Spotlight;
+
+    /// <summary>A new spotlight starts its 30 s now; the one that already expired stays gone; none stops the timer.</summary>
+    private void TrackSpotlight(double now)
+    {
+        var spot = _layouts.FirstOrDefault(IsSpotlight);
+        var key = spot is null ? ((string, int)?)null : (spot.Part.Id, spot.Part.Seq);
+        if (key is not null && key == _spotExpired)
+        {
+            _layouts = _layouts.Where(l => !IsSpotlight(l)).ToArray();
+            key = null;
+        }
+        if (key == _spotKey) return;
+        _spotKey = key;
+        _expiry.Stop();
+        if (key is null) return;
+        _spotExpired = null;
+        _spotStart = now;
+        _expiry.Start();
     }
 
     /// <summary>Every reveal and erase ends now.</summary>
@@ -80,11 +118,16 @@ internal sealed class DrawingWindow : IDisposable
     /// The drawn buttons that can be clicked now: fully revealed, at most three, in drawing order. Rects are virtual-screen
     /// pixels, rounded out to the pill that was painted.
     /// </summary>
-    public IReadOnlyList<(string Label, string Prompt, Rectangle Rect)> LiveButtons() =>
-        _layouts.Where(l => l.ButtonRect is not null && !_reveals.ContainsKey((l.Part.Id, l.Part.Seq)))
-            .Take(DrawingRenderer.MaxButtons)
-            .Select(l => (l.Part.Op.Text ?? "", l.Part.Op.Args.GetValueOrDefault("prompt") ?? "", Rectangle.Round(l.ButtonRect!.Value)))
-            .ToArray();
+    public void LiveButtons(List<(string Label, string Prompt, Rectangle Rect)> into)
+    {
+        into.Clear();
+        foreach (var l in _layouts)
+        {
+            if (into.Count == DrawingRenderer.MaxButtons) break;
+            if (l.ButtonRect is { } pill && !_reveals.ContainsKey((l.Part.Id, l.Part.Seq)))
+                into.Add((l.Part.Op.Text ?? "", l.Part.Op.Args.GetValueOrDefault("prompt") ?? "", Rectangle.Round(pill)));
+        }
+    }
 
     /// <summary>Presents the drawing if it changed or is animating; true while an animation still runs.</summary>
     public bool Render(double now, Color accent, bool reducedMotion)
@@ -97,6 +140,21 @@ internal sealed class DrawingWindow : IDisposable
         }
         if (_erasing.RemoveAll(e => now >= End(e.Start, e.Duration)) > 0) _dirty = true;
         var animating = _reveals.Count > 0 || _erasing.Count > 0;
+        var spotAlpha = 1f;
+        if (_spotKey is { } spotKey && now - _spotStart > DrawingRenderer.SpotlightSeconds)
+        {
+            spotAlpha = DrawingRenderer.SpotlightAlpha(now - _spotStart, reducedMotion);
+            if (spotAlpha <= 0)
+            {
+                _layouts = _layouts.Where(l => !IsSpotlight(l)).ToArray();
+                _reveals.Remove(spotKey);
+                _spotExpired = spotKey;
+                _spotKey = null;
+                spotAlpha = 1;
+                _dirty = true;
+            }
+            else animating = true; // repainted at the animation pace while it fades
+        }
 
         if (_layouts.Count == 0 && _erasing.Count == 0)
         {
@@ -134,7 +192,7 @@ internal sealed class DrawingWindow : IDisposable
             foreach (var layout in _layouts.OrderBy(l => l.Part.Op.Kind == DrawOpKind.Spotlight ? 0 : 1))
             {
                 var (progress, alpha) = State(layout.Part, now, reducedMotion);
-                DrawingRenderer.Draw(g, layout, progress, alpha, accent);
+                DrawingRenderer.Draw(g, layout, progress, IsSpotlight(layout) ? alpha * spotAlpha : alpha, accent);
             }
             foreach (var (layout, start, duration) in _erasing)
             {
@@ -160,6 +218,7 @@ internal sealed class DrawingWindow : IDisposable
 
     public void Dispose()
     {
+        _expiry.Dispose();
         _window.Dispose();
         _bitmap?.Dispose();
     }

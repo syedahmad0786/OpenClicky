@@ -73,6 +73,7 @@ public sealed class BuddyOverlayController : IOverlayController
     private const float BarEase = 0.35f, ListeningBubbleShiftDip = 16;
     private const int MaxLabelChars = 120;
     private const float CatcherDip = 36;
+    private const int ButtonPollMilliseconds = 100;
     private const string DockBubbleText = "i'll wait up here";
     private const float RingStartScale = 0.85f, RingStiffness = 300, RingDamping = 26;
 
@@ -89,6 +90,10 @@ public sealed class BuddyOverlayController : IOverlayController
     private readonly Rectangle?[] _buttonRects = new Rectangle?[DrawingRenderer.MaxButtons];
     private readonly (string Label, string Prompt)[] _buttonActions = new (string, string)[DrawingRenderer.MaxButtons];
     private bool _buttonsLive;
+    private readonly List<(string Label, string Prompt, Rectangle Rect)> _liveButtons = new(DrawingRenderer.MaxButtons);
+    private double _lastButtonSync = double.NegativeInfinity;
+    /// <summary>Polls the click targets (about 10 Hz) while one is up, so a starting task or an open dialog takes them down even when the frame loop is stopped.</summary>
+    private readonly System.Windows.Forms.Timer _buttonTimer = new() { Interval = ButtonPollMilliseconds };
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 16 };
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private CancellationTokenSource? _selectionCancellation;
@@ -157,6 +162,14 @@ public sealed class BuddyOverlayController : IOverlayController
         }
         _accent = ParseAccent(_style.AccentHex);
         _timer.Tick += (_, _) => Frame();
+        _buttonTimer.Tick += (_, _) => SyncButtons();
+        // A spotlight reaching its end of life needs frames to fade out, even if the loop had stopped.
+        _drawing.Wake = () =>
+        {
+            if (_disposed || _hidden || _timer.Enabled) return;
+            _lastTick = Now;
+            _timer.Start();
+        };
     }
 
     /// <summary>The cursor window. Smoke / diagnostics only.</summary>
@@ -173,6 +186,15 @@ public sealed class BuddyOverlayController : IOverlayController
     /// and any detached state and click target are dropped, so injected zig-zags and clicks cannot detach or be swallowed.
     /// </summary>
     public Func<bool>? DetachSuppressed { get; set; }
+
+    /// <summary>
+    /// Asked about every 100 ms (UI thread): true while the host has a dialog of its own open. The drawing-button click targets
+    /// come down then (they are topmost and invisible, and must not take a click meant for the dialog). Not used for the
+    /// detach target, which only <see cref="DetachSuppressed"/> governs.
+    /// </summary>
+    public Func<bool>? DrawingButtonsSuppressed { get; set; }
+
+    private bool ButtonsSuppressed => DetachSuppressed?.Invoke() == true || DrawingButtonsSuppressed?.Invoke() == true;
 
     /// <summary>
     /// Raised (UI thread) with the label and the model-authored prompt when a drawn button is clicked. The prompt is untrusted
@@ -403,6 +425,7 @@ public sealed class BuddyOverlayController : IOverlayController
         void DisposeNow()
         {
             _timer.Dispose();
+            _buttonTimer.Dispose();
             _cursorWindow.Dispose();
             _drawingWindow.Dispose();
             _drawing.Dispose();
@@ -519,19 +542,26 @@ public sealed class BuddyOverlayController : IOverlayController
         DrawCursorFrame(now, dt);
         var drawingAnimating = DrawDrawingFrame(now);
         var inkAnimating = _drawing.Render(now, _accent, _style.ReducedMotion);
-        SyncButtons();
-        // ponytail: with a live button the timer keeps ticking (cheap) so a starting agent task takes the click targets down.
-        if (!CursorVisible && !drawingAnimating && !inkAnimating && !_buttonsLive) _timer.Stop();
+        var idle = !CursorVisible && !drawingAnimating && !inkAnimating;
+        // While frames run the targets are re-synced at the poll rate; the last frame before the loop stops always syncs, and
+        // the button timer carries on from there for as long as a target is up.
+        if (idle || now - _lastButtonSync >= ButtonPollMilliseconds / 1000.0) SyncButtons();
+        if (idle) _timer.Stop();
     }
 
     /// <summary>
-    /// Puts a click target over each fully drawn button and takes the rest down. None is up while an agent task runs: it injects
-    /// clicks of its own, and a target on top of a button would swallow one.
+    /// Puts a click target over each fully drawn button and takes the rest down. None is up while an agent task runs (it injects
+    /// clicks of its own, and a target on top of a button would swallow one) or while the host has a dialog open. Runs from the
+    /// frame loop and, while a target is up, from <see cref="_buttonTimer"/>.
     /// </summary>
     private void SyncButtons()
     {
-        var live = DetachSuppressed?.Invoke() == true ? Array.Empty<(string Label, string Prompt, Rectangle Rect)>() : _drawing.LiveButtons();
+        _lastButtonSync = Now;
+        var live = _liveButtons;
+        if (_hidden || ButtonsSuppressed) live.Clear();
+        else _drawing.LiveButtons(live);
         _buttonsLive = live.Count > 0;
+        if (_buttonTimer.Enabled != _buttonsLive) _buttonTimer.Enabled = _buttonsLive;
         for (var i = 0; i < _buttonCatchers.Length; i++)
         {
             if (i >= live.Count)
@@ -556,11 +586,13 @@ public sealed class BuddyOverlayController : IOverlayController
     {
         for (var i = 0; i < _buttonCatchers.Length; i++) HideButton(i);
         _buttonsLive = false;
+        _buttonTimer.Stop();
+        _lastButtonSync = double.NegativeInfinity; // the next frame syncs at once
     }
 
     private void OnButtonClicked(int index)
     {
-        if (_disposed || _hidden || DetachSuppressed?.Invoke() == true || _buttonRects[index] is null) return;
+        if (_disposed || _hidden || ButtonsSuppressed || _buttonRects[index] is null) return;
         var (label, prompt) = _buttonActions[index];
         ButtonClicked?.Invoke(label, prompt);
     }

@@ -23,6 +23,8 @@ internal sealed partial class TrayApplicationContext
         _overlay.ButtonClicked += OnDrawingButtonClicked;
         // An agent task that is running (not paused) injects input: it must not detach the companion or have a click swallowed.
         _overlay.DetachSuppressed = () => _taskCts is not null && !_taskControl.IsPaused;
+        // The invisible topmost click targets over drawn buttons come down while a confirm dialog is open, so they cannot take a click meant for Yes/No.
+        _overlay.DrawingButtonsSuppressed = () => _confirm.IsDialogOpen;
         _talk.StateChanged += state => OnUi(() => { if (state == CompanionVoiceState.Listening && _micWatch is null) WatchMicLevels(); });
         WatchForStaleDrawing();
     }
@@ -30,11 +32,14 @@ internal sealed partial class TrayApplicationContext
     /// <summary>
     /// UI thread: a button the model drew was clicked. Its prompt is model-authored, untrusted text: it runs as an ordinary talk
     /// turn (quoted as the user's request, the label shown as their message), so any [OPEN]/[TYPE] it provokes still follows
-    /// AgentAccessPolicy. No agent task is running then: the overlay takes the click targets down while one does.
+    /// AgentAccessPolicy. No agent task is running then: the overlay takes the click targets down while one does. Ignored while
+    /// dictating (the wrapped prompt would be typed into the user's field) or while a confirm dialog is up; otherwise it gets the
+    /// same pre-steps as any submit (<see cref="PrepareSubmission"/>).
     /// </summary>
     private async void OnDrawingButtonClicked(string label, string prompt)
     {
-        if (_taskCts is not null && !_taskControl.IsPaused) return;
+        if (_dictationActive || _confirm.IsDialogOpen || (_taskCts is not null && !_taskControl.IsPaused)) return;
+        PrepareSubmission();
         try { await _talk.SubmitTextAsync(OpenClicky.Core.Drawing.DrawingButtons.Request(label, prompt), displayAs: label); }
         catch (Exception ex) { Log($"drawing_button_failed={ex.GetType().Name}"); }
     }

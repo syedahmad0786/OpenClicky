@@ -58,8 +58,8 @@ public static class CompanionPrompts
         - text: x y text="..." (size=10 to 48), handwritten. label: x y text="...".
         - point: x y label. target: x y w h label (hover=1), a ring round a control.
         - graph: x y w h series="1,4,9;2,3,5" (xlabel, ylabel). timeline: x y w items="1990:web;2007:phones".
-        - scroll: x y dir=up or down. spotlight: x y w h, dims everything else. badge: x y n=1 to 15.
-        - button: x y text prompt="what to ask when it is clicked". card: x y title text (w=200 to 360, stock). sticky: x y text (stock). stock is cream, butter, sky, mint, blush or kraft.
+        - scroll: x y dir=up or down. spotlight: x y w h, dims everything else (one at a time, a new one replaces it, and it fades after 30 seconds). badge: x y n=1 to 15.
+        - button: x y text prompt="what to ask when it is clicked". card: x y title text (w=200 to 360 in screenshot pixels, so it grows and shrinks with the screenshot; leave w out for the normal card width; stock). sticky: x y text (stock). stock is cream, butter, sky, mint, blush or kraft.
         - tie: pts=x1,y1,x2,y2, a curved link between two things.
         - changes to what is already drawn: recolor id color, move id dx dy, moveto id x y, scale id factor=0.25 to 4, erase id, undo, clear.
         when the context lists a current drawing, change it by id instead of drawing it again, and clear it when it no longer fits. prefer one precise mark over covering large areas. drawings float above the screen and never change the app. if a control is hidden, explain how to reveal it rather than drawing at an invented location.

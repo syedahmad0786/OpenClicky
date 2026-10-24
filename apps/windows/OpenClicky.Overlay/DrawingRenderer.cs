@@ -24,6 +24,12 @@ public static class DrawingRenderer
     public const int MaxButtons = 3;
     /// <summary>The largest ink bitmap in pixels (two 4K monitors, 64 MB).</summary>
     public const long MaxInkPixels = 2L * 3840 * 2160;
+    /// <summary>A spotlight dims the screen for this long, then fades out (<see cref="SpotlightFadeSeconds"/>, or the short reduced-motion fade).</summary>
+    public const double SpotlightSeconds = 30, SpotlightFadeSeconds = 0.6, SpotlightReducedFadeSeconds = 0.12;
+
+    /// <summary>The spotlight's opacity factor <paramref name="age"/> seconds after it appeared: 1 until 30 s, then down to 0 (gone).</summary>
+    internal static float SpotlightAlpha(double age, bool reducedMotion) =>
+        age <= SpotlightSeconds ? 1 : (float)Math.Max(0, 1 - (age - SpotlightSeconds) / (reducedMotion ? SpotlightReducedFadeSeconds : SpotlightFadeSeconds));
     private static readonly string HandFamily = Installed("Segoe Print") ? "Segoe Print" : "Segoe UI";
     // Semibold is a named instance of the variable font; fall back to its bold, then to the static Segoe UI faces.
     private static readonly (string Family, FontStyle Style) Semibold =
@@ -238,6 +244,8 @@ public static class DrawingRenderer
                 }
             }
             layout.Bounds = paint;
+            // Spotlights would stack their dimming (four of them black the screen): the last one drawn wins.
+            if (op.Kind == DrawOpKind.Spotlight) layouts.RemoveAll(l => l.Part.Op.Kind == DrawOpKind.Spotlight);
             layouts.Add(layout);
         }
 

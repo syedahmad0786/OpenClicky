@@ -520,12 +520,18 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
 
     private Task SubmitFromHomeAsync(string text, bool agent) => SubmitRequestAsync(text, agent, fromShell: false);
 
-    /// <summary>Shared text submit path. A shell submit leaves the classic window closed when it finishes.</summary>
-    private async Task SubmitRequestAsync(string text, bool agent, bool fromShell)
+    /// <summary>What every new text submit does first: ends a walkthrough and any dictation, and cancels a submission still waiting to start.</summary>
+    private void PrepareSubmission()
     {
         StopWalkthrough();
         if (_dictationActive) CancelDictation();
         _submissionCts?.Cancel();
+    }
+
+    /// <summary>Shared text submit path. A shell submit leaves the classic window closed when it finishes.</summary>
+    private async Task SubmitRequestAsync(string text, bool agent, bool fromShell)
+    {
+        PrepareSubmission();
         var route = HomeRequestRouting.Resolve(text, agent);
         if (route.IsLocal)
         {
