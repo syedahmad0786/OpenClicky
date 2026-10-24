@@ -103,11 +103,11 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             _mic,
             () => _dictationActive
                 ? LocalWhisperModel.IsAvailable
-                    ? new LocalWhisperSttClient(new NAudioMicrophoneRecorder(() => _settings.MicrophoneDeviceId), _whisperRuntime, Log)
+                    ? new LocalWhisperSttClient(NewSttMic(), _whisperRuntime, Log)
                     : _settings.UseWindowsSpeech ? new LocalSpeechSttClient() : null
                 : _settings.UseWindowsSpeech || _settings.AuthProvider == AuthProvider.ChatGPT
                 ? LocalWhisperModel.IsAvailable
-                    ? new LocalWhisperSttClient(new NAudioMicrophoneRecorder(() => _settings.MicrophoneDeviceId), _whisperRuntime, Log)
+                    ? new LocalWhisperSttClient(NewSttMic(), _whisperRuntime, Log)
                     : new LocalSpeechSttClient()
                 : ProviderFactory.CreateSttClient(_settings, _secrets),
             () => _demoTalk ? new OfflineTalkClient() : ProviderFactory.CreateTalkClient(_settings, _secrets, Log),
@@ -240,7 +240,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         _home.Disposed += (_, _) => _routineTimer.Dispose();
         // Esc (never swallowed) stops OpenClicky only while it is doing something; a cancelled shortcut ends itself.
         // Speech outside a turn (announcements, previews) stops too; SpeechOutput.Stop is a no-op when nothing plays.
-        _hotkey.EscapePressed += (_, _) => { _tts.Stop(); if (IsBusy) Stop(); };
+        _hotkey.EscapePressed += (_, _) => { _tts.Stop(); _shell?.ClearCaptions(); if (IsBusy) Stop(); };
         // Only once a talk press is past the tap window: a cancelled press must leave no trace.
         _talk.HeldTalkStarted += () => { _submissionCts?.Cancel(); PauseTask(); };
         _hotkey.TextMode += (_, _) => OpenTextMode();
@@ -441,6 +441,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         _taskControl.Resume();
         _submissionCts?.Cancel();
         _talk.Cancel();
+        _shell?.ClearCaptions();
         _home.TurnOffGuide();
     }
 

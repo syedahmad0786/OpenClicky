@@ -204,11 +204,38 @@ public sealed class ShellController : IDisposable
     {
         if (string.IsNullOrWhiteSpace(text)) return;
         text = text.Trim();
-        var card = new NotchCard("toast-" + Guid.NewGuid().ToString("N"), NotchCardKind.Toast, Cut(text, 160),
-            text.Length > 160 ? Cut(text, 1_000) : null, [], ToastMs);
-        _cards.Insert(0, (card, DateTimeOffset.UtcNow.AddMilliseconds(ToastMs)));
+        AddCard(new NotchCard("toast-" + Guid.NewGuid().ToString("N"), NotchCardKind.Toast, Cut(text, 160),
+            text.Length > 160 ? Cut(text, 1_000) : null, [], ToastMs));
+    }
+
+    /// <summary>Shows a card newest first; a card with the same id is replaced (and moves to the front).</summary>
+    public void AddCard(NotchCard card)
+    {
+        _cards.RemoveAll(c => c.Card.Id == card.Id);
+        _cards.Insert(0, (card, card.AutoDismissMs is { } ms ? DateTimeOffset.UtcNow.AddMilliseconds(ms) : null));
         if (_cards.Count > MaxCards) _cards.RemoveAt(_cards.Count - 1);
         RequestPush();
+    }
+
+    public void RemoveCard(string id)
+    {
+        if (_cards.RemoveAll(c => c.Card.Id == id) > 0) RequestPush();
+    }
+
+    /// <summary>A spoken word for the captions bar (at most 200 chars); dropped when the surface is not up.</summary>
+    public void PostCaptionWord(string word)
+    {
+        if (_surface is null || string.IsNullOrWhiteSpace(word)) return;
+        try { _surface.Post(JsonSerializer.Serialize(new { kind = "caption.word", text = Cut(word.Trim(), 200) }, ShellContract.Options)); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { _host.Trace("shell_caption_error=" + ex.GetType().Name); }
+    }
+
+    /// <summary>The reply finished: the page fades the captions out 1.5 s later unless another word arrives.</summary>
+    public void ClearCaptions()
+    {
+        if (_surface is null) return;
+        try { _surface.Post("""{"kind":"caption.clear"}"""); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { _host.Trace("shell_caption_error=" + ex.GetType().Name); }
     }
 
     private void SetNotch(ShellNotch notch)
@@ -318,10 +345,16 @@ public sealed class ShellController : IDisposable
                 _host.OpenUrl(intent.GetString("target") switch { "whatsNew" => WhatsNewUrl, "bug" => BugUrl, _ => FeatureUrl });
                 break;
             case "app.quit": _host.Quit(); break;
-            case "card.dismiss" or "card.action":
-                // Toasts carry no actions, so an action on any card just dismisses it.
-                _cards.RemoveAll(c => c.Card.Id == intent.GetString("cardId"));
-                RequestPush();
+            case "card.dismiss":
+                RemoveCard(intent.GetString("cardId")!);
+                break;
+            case "card.action":
+                // Only an action the card actually offers reaches the host; anything else (a toast, a stale card) just dismisses.
+                var cardId = intent.GetString("cardId")!;
+                var actionId = intent.GetString("actionId")!;
+                var offered = _cards.Any(c => c.Card.Id == cardId && c.Card.Actions.Any(a => a.Id == actionId));
+                if (!offered) _host.Trace("shell card action not offered: " + Cut(actionId, 40));
+                if (!offered || !_host.CardAction(cardId, actionId)) RemoveCard(cardId);
                 break;
             default: _host.Trace("shell intent not handled: " + intent.Kind); break;
         }

@@ -39,3 +39,10 @@ it("ShellApp renders nothing until shell.state arrives, then the collapsed notch
   view.unmount();
   expect(host.listeners.size).toBe(0);
 });
+
+it("ShellApp mounts the captions bar, which shows words even before the first state", () => {
+  const host = mockHost();
+  const view = render(<ShellApp />);
+  host.send({ kind: "caption.word", text: "Hello" });
+  expect(view.container.querySelector(".captions")).toHaveTextContent("Hello");
+});

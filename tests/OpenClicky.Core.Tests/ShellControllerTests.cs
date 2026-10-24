@@ -1,5 +1,6 @@
 using System.Text.Json;
 using OpenClicky.Core.Shell;
+using OpenClicky.Core.Speech;
 
 namespace OpenClicky.Core.Tests;
 
@@ -31,6 +32,8 @@ public class ShellControllerTests
         public void SettingsSection(string section) => Calls.Add("section:" + section);
         public void PatchSetting(string key, JsonElement value) => Calls.Add($"patch:{key}={value.GetRawText()}");
         public void SettingsAction(string action, string? arg) => Calls.Add($"action:{action}:{arg}");
+        public bool KeepCard { get; set; }
+        public bool CardAction(string cardId, string actionId) { Calls.Add($"card:{cardId}:{actionId}"); return KeepCard; }
     }
 
     private sealed class FakeSurface : IShellSurface
@@ -309,5 +312,63 @@ public class ShellControllerTests
         controller.PostMicLevel(double.NaN);
         Assert.Equal(["""{"kind":"mic.level","level":0.25}""", """{"kind":"mic.level","level":1}""", """{"kind":"mic.level","level":0}"""],
             surface.Posted.Where(p => p.Contains("mic.level")));
+    }
+
+    private static string[] CardIds(FakeSurface surface)
+    {
+        using var d = JsonDocument.Parse(surface.Posted.Last(p => p.Contains("shell.state")));
+        return d.RootElement.GetProperty("state").GetProperty("cards").EnumerateArray().Select(c => c.GetProperty("id").GetString()!).ToArray();
+    }
+
+    [Fact]
+    public async Task CardsDedupeByIdNewestFirst()
+    {
+        var (controller, _, surface) = await Started();
+        controller.AddCard(TalkCards.MutedSpeaker());
+        controller.AddCard(TalkCards.MicTrouble());
+        controller.AddCard(TalkCards.MutedSpeaker()); // replaced and moved to the front
+        Assert.Equal([TalkCards.MutedSpeakerId, TalkCards.MicTroubleId], CardIds(surface));
+        controller.RemoveCard(TalkCards.MicTroubleId);
+        Assert.Equal([TalkCards.MutedSpeakerId], CardIds(surface));
+    }
+
+    [Fact]
+    public async Task CardActionsReachTheHostOnlyWhenTheCardOffersThem()
+    {
+        var (controller, host, surface) = await Started();
+        controller.AddCard(TalkCards.MutedSpeaker());
+        controller.AddCard(TalkCards.MicTrouble());
+        controller.AddToast("hello");
+        var toast = CardIds(surface)[0];
+
+        surface.Send(new { kind = "card.action", cardId = TalkCards.MutedSpeakerId, actionId = TalkCards.MicSettingsAction }); // not this card's action
+        surface.Send(new { kind = "card.action", cardId = toast, actionId = "anything" }); // toasts carry no actions
+        Assert.DoesNotContain(host.Calls, c => c.StartsWith("card:"));
+        Assert.Equal([TalkCards.MicTroubleId], CardIds(surface)); // both just dismissed
+
+        host.KeepCard = true;
+        surface.Send(new { kind = "card.action", cardId = TalkCards.MicTroubleId, actionId = TalkCards.MicSettingsAction });
+        Assert.Equal([TalkCards.MicTroubleId], CardIds(surface)); // the host kept it
+        host.KeepCard = false;
+        surface.Send(new { kind = "card.action", cardId = TalkCards.MicTroubleId, actionId = TalkCards.MicSettingsAction });
+        Assert.Equal(["card:mic-trouble:micSettings", "card:mic-trouble:micSettings"], host.Calls.Where(c => c.StartsWith("card:")));
+        Assert.Empty(CardIds(surface));
+
+        controller.AddCard(TalkCards.MutedSpeaker());
+        surface.Send(new { kind = "card.dismiss", cardId = TalkCards.MutedSpeakerId });
+        Assert.Empty(CardIds(surface));
+        Assert.Equal(2, host.Calls.Count(c => c.StartsWith("card:"))); // dismiss never runs an action
+    }
+
+    [Fact]
+    public async Task PostsCaptionWordsAndClear()
+    {
+        var (controller, _, surface) = await Started();
+        controller.PostCaptionWord(" Hello ");
+        controller.PostCaptionWord("   ");
+        controller.PostCaptionWord(new string('a', 300));
+        controller.ClearCaptions();
+        Assert.Equal(["""{"kind":"caption.word","text":"Hello"}""", """{"kind":"caption.word","text":"%s"}""".Replace("%s", new string('a', 200)), """{"kind":"caption.clear"}"""],
+            surface.Posted.Where(p => p.Contains("caption.")));
     }
 }

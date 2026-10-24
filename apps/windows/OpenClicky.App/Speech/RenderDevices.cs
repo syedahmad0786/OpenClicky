@@ -30,6 +30,52 @@ internal static class RenderDevices
         catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or ArgumentException or NAudio.MmException) { return -1; }
     }
 
+    /// <summary>
+    /// The endpoint replies play on (the selected one while it is active, else the default output) with its mute state and
+    /// master volume (0–1); null when there is no output device or Core Audio fails.
+    /// </summary>
+    public static (string Id, bool Muted, float Volume)? ReadVolume(string? endpointId)
+    {
+        try
+        {
+            using var enumerator = new MMDeviceEnumerator();
+            using var endpoint = OpenEndpoint(enumerator, endpointId);
+            var volume = endpoint.AudioEndpointVolume;
+            return (endpoint.ID, volume.Mute, volume.MasterVolumeLevelScalar);
+        }
+        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or ArgumentException or InvalidOperationException) { return null; }
+    }
+
+    /// <summary>Unmutes the endpoint and sets its master volume; false when it is gone or Core Audio fails.</summary>
+    public static bool SetVolume(string endpointId, float level)
+    {
+        try
+        {
+            using var enumerator = new MMDeviceEnumerator();
+            using var endpoint = enumerator.GetDevice(endpointId);
+            if (endpoint.State != DeviceState.Active) return false;
+            endpoint.AudioEndpointVolume.Mute = false;
+            endpoint.AudioEndpointVolume.MasterVolumeLevelScalar = Math.Clamp(level, 0f, 1f);
+            return true;
+        }
+        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or ArgumentException or InvalidOperationException) { return false; }
+    }
+
+    private static MMDevice OpenEndpoint(MMDeviceEnumerator enumerator, string? endpointId)
+    {
+        if (!string.IsNullOrWhiteSpace(endpointId))
+        {
+            try
+            {
+                var selected = enumerator.GetDevice(endpointId);
+                if (selected.State == DeviceState.Active) return selected;
+                selected.Dispose();
+            }
+            catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or ArgumentException) { } // unplugged: the default plays
+        }
+        return enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+    }
+
     public static Task PlayAsync(SpeechClip clip, int device, Action<string>? wordSpoken, CancellationToken cancellationToken)
     {
         var format = new WaveFormat(clip.Info.SampleRate, clip.Info.BitsPerSample, clip.Info.Channels);

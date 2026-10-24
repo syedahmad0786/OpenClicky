@@ -29,6 +29,9 @@ public interface IShellHost
     void PatchSetting(string key, JsonElement value);
     /// <summary>An allow-listed settings.action; <paramref name="arg"/> is at most 512 chars and still untrusted.</summary>
     void SettingsAction(string action, string? arg);
+    /// <summary>A button on a card the controller still shows; <paramref name="actionId"/> is one of that card's actions.
+    /// Return true to keep the card, false to remove it.</summary>
+    bool CardAction(string cardId, string actionId);
 }
 
 /// <summary>The page surface (a WebView2 window in the app, a fake in tests).</summary>

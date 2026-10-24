@@ -39,14 +39,22 @@ internal sealed class SpeechOutput : ITtsClient
     /// <summary>Read replies aloud (AppSettings.SpeakReplies). Previews and the test sound play regardless.</summary>
     public bool Enabled { get; set; } = true;
 
-    /// <summary>A word as playback reaches it. Raised on a worker thread.</summary>
+    /// <summary>A word of a reply as playback reaches it (previews raise none). Raised on a worker thread.</summary>
     public event Action<string>? WordSpoken;
 
     /// <summary>After each <see cref="SpeakAsync"/> finishes, fails or is stopped. Raised on a worker thread.</summary>
     public event Action? SpeechEnded;
 
-    public Task SpeakAsync(string text, CancellationToken cancellationToken = default) =>
-        Enabled && !string.IsNullOrWhiteSpace(text) ? SpeakCoreAsync(text, null, cancellationToken) : Task.CompletedTask;
+    /// <summary>A reply (not a preview) is about to be spoken. Raised on the caller's thread; handlers must be quick.</summary>
+    public event Action? ReplySpeechStarting;
+
+    public Task SpeakAsync(string text, CancellationToken cancellationToken = default)
+    {
+        if (!Enabled || string.IsNullOrWhiteSpace(text)) return Task.CompletedTask;
+        try { ReplySpeechStarting?.Invoke(); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { _log("speech_starting_handler_error=" + ex.GetType().Name); }
+        return SpeakCoreAsync(text, null, cancellationToken);
+    }
 
     /// <summary>
     /// Says the preview line with <paramref name="voiceId"/> at the current speed. Like the test sound, it stops whatever is
@@ -112,7 +120,7 @@ internal sealed class SpeechOutput : ITtsClient
                     if (gap > TimeSpan.Zero) await Task.Delay(gap, token).ConfigureAwait(false);
                     var device = RenderDevices.WaveOutNumber(settings.OutputDeviceId);
                     _log($"speech_play_start voice={voice} device={device} audio_ms={(int)clip.Info.Duration.TotalMilliseconds}");
-                    try { await RenderDevices.PlayAsync(clip, device, WordSpoken, token).ConfigureAwait(false); }
+                    try { await RenderDevices.PlayAsync(clip, device, voiceOverride is null ? WordSpoken : null, token).ConfigureAwait(false); }
                     finally { Interlocked.Exchange(ref _lastEndTicks, Environment.TickCount64); }
                     _log("speech_play_end");
                 }

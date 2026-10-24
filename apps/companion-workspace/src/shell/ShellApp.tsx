@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { listenToHost, postPage } from "./bridge";
+import { CaptionsBar } from "./captions/CaptionsBar";
 import type { ShellState } from "./contract";
 import { Notch } from "./notch/Notch";
 import { useRegions } from "./notch/useRegions";
@@ -34,5 +35,10 @@ export default function ShellApp() {
     root.dataset.reducedMotion = String(reduced);
     root.style.setProperty("--accent", accent!);
   }, [theme, accent, reduced]);
-  return state ? <Notch state={state} /> : null;
+  return (
+    <>
+      {state ? <Notch state={state} /> : null}
+      <CaptionsBar />
+    </>
+  );
 }
