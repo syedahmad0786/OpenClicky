@@ -21,8 +21,29 @@ public class SpeechPlanTests
         Assert.Equal(TimeSpan.Zero, SpeechPlan.GapBefore(null)); // first sentence
         Assert.Equal(TimeSpan.FromMilliseconds(350), SpeechPlan.GapBefore(TimeSpan.Zero));
         Assert.Equal(TimeSpan.FromMilliseconds(250), SpeechPlan.GapBefore(TimeSpan.FromMilliseconds(100)));
-        Assert.Equal(TimeSpan.Zero, SpeechPlan.GapBefore(TimeSpan.FromMilliseconds(600))); // synthesis already took longer
-        Assert.Equal(TimeSpan.Zero, SpeechPlan.GapBefore(TimeSpan.FromSeconds(1.5))); // idle: a new reply
+        Assert.Equal(TimeSpan.Zero, SpeechPlan.GapBefore(TimeSpan.FromMilliseconds(350)));
+    }
+
+    [Fact]
+    public void GapIsMeasuredAfterRenderingSoASlowRenderAddsNoWait()
+    {
+        // The next sentence is rendered first; the gap is then what is left of 0.35 s since the last one ended.
+        Assert.Equal(TimeSpan.FromMilliseconds(150), SpeechPlan.GapBefore(TimeSpan.FromMilliseconds(200))); // 200 ms render
+        Assert.Equal(TimeSpan.Zero, SpeechPlan.GapBefore(TimeSpan.FromMilliseconds(900))); // a slow (network) render
+    }
+
+    [Theory]
+    [InlineData("Speakers (Realtek(R) Audio)", 1)] // exact: WaveOut names are cut to 31 characters
+    [InlineData("Speakers (MR720)", 0)]
+    [InlineData("Speakers (MR720) Stereo", 0)] // prefix only
+    [InlineData("Headphones (Bluetooth Hands-Free)", 3)] // longest prefix wins over "Headphones"
+    [InlineData("Monitor (NVIDIA High Definition Audio)", -1)] // two identical truncated names: tie
+    [InlineData("Line out", -1)] // unknown
+    public void MapsEndpointNamesToWaveOutDevices(string friendlyName, int expected)
+    {
+        string[] products = ["Speakers (MR720)", "Speakers (Realtek(R) Audio)", "Headphones", "Headphones (Bluetooth Hands-F",
+            "Monitor (NVIDIA High Definitio", "Monitor (NVIDIA High Definitio", ""];
+        Assert.Equal(expected, SpeechPlan.MatchWaveOut(friendlyName, products));
     }
 
     [Fact]

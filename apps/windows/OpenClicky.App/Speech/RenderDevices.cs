@@ -11,8 +11,10 @@ internal sealed record SpeechClip(byte[] Wav, WavInfo Info, IReadOnlyList<(strin
 internal static class RenderDevices
 {
     /// <summary>
-    /// The WaveOut device number for a Core Audio endpoint id, or -1 (the default device) when unset, unplugged or not
-    /// found. WaveOut names are the endpoint's friendly name cut to 31 characters, so a prefix match is used.
+    /// The WaveOut device number for a Core Audio endpoint id, or -1 (the default device) when unset, unplugged, not found
+    /// or ambiguous (<see cref="SpeechPlan.MatchWaveOut"/>).
+    /// ponytail: WaveOut only knows devices by their 31-character name; play through WasapiOut(MMDevice) instead if two
+    /// identical outputs must be told apart.
     /// </summary>
     public static int WaveOutNumber(string? endpointId)
     {
@@ -22,29 +24,28 @@ internal static class RenderDevices
             using var enumerator = new MMDeviceEnumerator();
             using var endpoint = enumerator.GetDevice(endpointId);
             if (endpoint.State != DeviceState.Active) return -1;
-            var name = endpoint.FriendlyName;
-            for (var i = 0; i < WaveOut.DeviceCount; i++)
-            {
-                var product = WaveOut.GetCapabilities(i).ProductName;
-                if (product.Length > 0 && name.StartsWith(product, StringComparison.OrdinalIgnoreCase)) return i;
-            }
+            var products = Enumerable.Range(0, WaveOut.DeviceCount).Select(i => WaveOut.GetCapabilities(i).ProductName).ToList();
+            return SpeechPlan.MatchWaveOut(endpoint.FriendlyName, products);
         }
-        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or ArgumentException or NAudio.MmException) { }
-        return -1;
+        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or ArgumentException or NAudio.MmException) { return -1; }
     }
 
     public static Task PlayAsync(SpeechClip clip, int device, Action<string>? wordSpoken, CancellationToken cancellationToken)
     {
         var format = new WaveFormat(clip.Info.SampleRate, clip.Info.BitsPerSample, clip.Info.Channels);
         var audio = new RawSourceWaveStream(new MemoryStream(clip.Wav, clip.Info.DataOffset, clip.Info.DataLength, writable: false), format);
-        return PlayAsync(output => output.Init(audio), audio, device, clip.Words, wordSpoken, cancellationToken);
+        return Task.Run(() => PlayCoreAsync(output => output.Init(audio), audio, device, clip.Words, wordSpoken, cancellationToken), CancellationToken.None);
     }
 
     public static Task PlayAsync(ISampleProvider audio, int device, CancellationToken cancellationToken) =>
-        PlayAsync(output => output.Init(audio), null, device, [], null, cancellationToken);
+        Task.Run(() => PlayCoreAsync(output => output.Init(audio), null, device, [], null, cancellationToken), CancellationToken.None);
 
-    /// <summary>Plays to the end; cancelling stops at once. Words are raised on a worker thread as playback reaches them.</summary>
-    private static async Task PlayAsync(Action<WaveOutEvent> init, IDisposable? source, int device,
+    /// <summary>
+    /// Plays to the end; cancelling stops at once. Always started on a pool thread (the public overloads use Task.Run):
+    /// a WaveOutEvent created on the UI thread would post PlaybackStopped through the UI loop. Words are raised on a
+    /// worker thread as playback reaches them; a throwing subscriber is ignored.
+    /// </summary>
+    private static async Task PlayCoreAsync(Action<WaveOutEvent> init, IDisposable? source, int device,
         IReadOnlyList<(string Word, TimeSpan At)> words, Action<string>? wordSpoken, CancellationToken cancellationToken)
     {
         using var owned = source;
@@ -63,13 +64,19 @@ internal static class RenderDevices
                 if (wordSpoken is not null && next < words.Count)
                 {
                     var at = TimeSpan.FromSeconds(output.GetPosition() / bytesPerSecond);
-                    while (next < words.Count && words[next].At <= at) wordSpoken(words[next++].Word);
+                    while (next < words.Count && words[next].At <= at) Raise(wordSpoken, words[next++].Word);
                 }
                 await Task.WhenAny(stopped.Task, Task.Delay(25, CancellationToken.None)).ConfigureAwait(false);
             }
             await stopped.Task.ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
-            while (wordSpoken is not null && next < words.Count) wordSpoken(words[next++].Word); // the tail the last poll missed
+            while (wordSpoken is not null && next < words.Count) Raise(wordSpoken, words[next++].Word); // the tail the last poll missed
         }
+    }
+
+    private static void Raise(Action<string> handler, string word)
+    {
+        try { handler(word); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { DebugLog.Append("speech_word_handler_error=" + ex.GetType().Name); }
     }
 }

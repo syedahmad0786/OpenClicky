@@ -25,6 +25,7 @@ internal sealed class SpeechOutput : ITtsClient
     private CancellationTokenSource _stop = new();
     private long _lastEndTicks; // Environment.TickCount64 when the last sentence ended; 0 = never
     private int _fallbackToastShown;
+    private readonly OpenAiVoiceBreaker _openAi = new();
 
     /// <param name="toast">Shows a short notice (called on a worker thread).</param>
     public SpeechOutput(Func<AppSettings> settings, ISecretStore secrets, Action<string> toast, Action<string> log)
@@ -47,7 +48,10 @@ internal sealed class SpeechOutput : ITtsClient
     public Task SpeakAsync(string text, CancellationToken cancellationToken = default) =>
         Enabled && !string.IsNullOrWhiteSpace(text) ? SpeakCoreAsync(text, null, cancellationToken) : Task.CompletedTask;
 
-    /// <summary>Stops anything playing and says the preview line with <paramref name="voiceId"/> at the current speed.</summary>
+    /// <summary>
+    /// Says the preview line with <paramref name="voiceId"/> at the current speed. Like the test sound, it stops whatever is
+    /// playing first, including a reply's current sentence (the reply's later sentences still play).
+    /// </summary>
     public async Task PreviewAsync(string voiceId)
     {
         Stop();
@@ -56,7 +60,7 @@ internal sealed class SpeechOutput : ITtsClient
         catch (Exception ex) when (ex is not OutOfMemoryException) { _log("speech_preview_error=" + ex.GetType().Name); _toast("That voice could not play."); }
     }
 
-    /// <summary>A 0.3 s 880 Hz tone on the selected output device.</summary>
+    /// <summary>A 0.3 s 880 Hz tone on the selected output device; stops whatever is playing first.</summary>
     public async Task PlayTestSoundAsync()
     {
         Stop();
@@ -81,11 +85,10 @@ internal sealed class SpeechOutput : ITtsClient
     /// <summary>Cuts playback now; a sentence waiting for its gap or being synthesized is dropped.</summary>
     public void Stop()
     {
-        lock (_gate)
-        {
-            _stop.Cancel();
-            _stop = new CancellationTokenSource(); // ponytail: the old source is not disposed (no timer, nothing to leak)
-        }
+        CancellationTokenSource old;
+        lock (_gate) (old, _stop) = (_stop, new CancellationTokenSource());
+        old.Cancel(); // outside the lock: cancellation callbacks (WaveOut stop, SAPI cancel) run synchronously here
+        // ponytail: the old source is not disposed (no timer, nothing to leak)
     }
 
     private CancellationToken StopToken() { lock (_gate) return _stop.Token; }
@@ -101,11 +104,12 @@ internal sealed class SpeechOutput : ITtsClient
             {
                 foreach (var sentence in SpeechPlan.Sentences(text))
                 {
+                    var settings = _settings();
+                    var (clip, voice) = await RenderAsync(sentence, voiceOverride ?? settings.VoiceId, SettingsCatalog.SnapSpeed(settings.SpeechSpeed), token).ConfigureAwait(false);
+                    // Rendered first, so rendering time counts towards the 0.35 s gap; only the rest is waited.
                     var last = Interlocked.Read(ref _lastEndTicks);
                     var gap = SpeechPlan.GapBefore(last == 0 ? null : TimeSpan.FromMilliseconds(Environment.TickCount64 - last));
                     if (gap > TimeSpan.Zero) await Task.Delay(gap, token).ConfigureAwait(false);
-                    var settings = _settings();
-                    var (clip, voice) = await RenderAsync(sentence, voiceOverride ?? settings.VoiceId, SettingsCatalog.SnapSpeed(settings.SpeechSpeed), token).ConfigureAwait(false);
                     var device = RenderDevices.WaveOutNumber(settings.OutputDeviceId);
                     _log($"speech_play_start voice={voice} device={device} audio_ms={(int)clip.Info.Duration.TotalMilliseconds}");
                     try { await RenderDevices.PlayAsync(clip, device, WordSpoken, token).ConfigureAwait(false); }
@@ -115,7 +119,12 @@ internal sealed class SpeechOutput : ITtsClient
             }
             finally { _playing.Release(); }
         }
-        finally { SpeechEnded?.Invoke(); }
+        finally
+        {
+            // A throwing subscriber must not replace the playback outcome (completion, cancellation or the real error).
+            try { SpeechEnded?.Invoke(); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { _log("speech_ended_handler_error=" + ex.GetType().Name); }
+        }
     }
 
     /// <summary>The sentence as audio and which engine made it ("openai" or "windows").</summary>
@@ -123,20 +132,28 @@ internal sealed class SpeechOutput : ITtsClient
     {
         if (VoiceCatalog.IsOpenAi(voiceId))
         {
-            try
+            var key = _secrets.Get(SecretNames.OpenAiApiKey);
+            var keyId = StringComparer.Ordinal.GetHashCode(key ?? "");
+            if (string.IsNullOrWhiteSpace(key)) Fallback("speech_openai_error=NoKey");
+            else if (!_openAi.ShouldTry(keyId, Environment.TickCount64)) _log("speech_openai_skipped"); // a recent failure; already toasted
+            else
             {
-                var key = _secrets.Get(SecretNames.OpenAiApiKey);
-                if (string.IsNullOrWhiteSpace(key)) throw new InvalidOperationException("No OpenAI key saved.");
-                return (await OpenAiVoice.RenderAsync(key, voiceId, sentence, speed, token).ConfigureAwait(false), "openai");
-            }
-            catch (Exception ex) when (ex is not OutOfMemoryException && !token.IsCancellationRequested)
-            {
-                _log("speech_openai_error=" + ex.GetType().Name); // never the message: it could echo the request
-                if (Interlocked.Exchange(ref _fallbackToastShown, 1) == 0) _toast("Couldn't reach the OpenAI voice — using a Windows voice instead.");
+                try { return (await OpenAiVoice.RenderAsync(key, voiceId, sentence, speed, token).ConfigureAwait(false), "openai"); }
+                catch (Exception ex) when (ex is not OutOfMemoryException && !token.IsCancellationRequested)
+                {
+                    _openAi.Failed(keyId, ex is HttpRequestException { StatusCode: { } status } ? (int)status : null, Environment.TickCount64);
+                    Fallback("speech_openai_error=" + ex.GetType().Name); // never the message: it could echo the request
+                }
             }
             voiceId = SettingsCatalog.WindowsDefaultVoice;
         }
         // A worker thread: SAPI must not post its events to the UI thread, and synthesis must not block it.
         return (await Task.Run(() => WindowsVoice.RenderAsync(sentence, voiceId, speed, token), token).ConfigureAwait(false), "windows");
+
+        void Fallback(string log)
+        {
+            _log(log);
+            if (Interlocked.Exchange(ref _fallbackToastShown, 1) == 0) _toast("Couldn't reach the OpenAI voice — using a Windows voice instead.");
+        }
     }
 }

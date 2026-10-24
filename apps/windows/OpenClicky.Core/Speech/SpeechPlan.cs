@@ -15,16 +15,35 @@ public static partial class SpeechPlan
 {
     public static readonly TimeSpan SentenceGap = TimeSpan.FromMilliseconds(350);
 
-    /// <summary>Longer than this since the last sentence ended means a new reply, which starts without a gap.</summary>
-    public static readonly TimeSpan IdleAfter = TimeSpan.FromSeconds(1);
-
     /// <summary>round((speed − 1) × 10) clamped to −10…10; NaN counts as normal speed.</summary>
     public static int SapiRate(double speed) =>
         double.IsNaN(speed) ? 0 : (int)Math.Clamp(Math.Round((speed - 1) * 10, MidpointRounding.AwayFromZero), -10, 10);
 
-    /// <summary>How long to wait before the next sentence, given the time since the previous one ended (null: none yet).</summary>
+    /// <summary>
+    /// How long to wait before playing the next sentence, given the time since the previous one ended (null: none yet).
+    /// Measured after the sentence is rendered, so rendering time counts towards the gap and a new reply (idle) waits nothing.
+    /// </summary>
     public static TimeSpan GapBefore(TimeSpan? sinceLastEnd) =>
-        sinceLastEnd is not { } idle || idle > IdleAfter || idle >= SentenceGap ? TimeSpan.Zero : SentenceGap - idle;
+        sinceLastEnd is not { } idle || idle >= SentenceGap ? TimeSpan.Zero : SentenceGap - idle;
+
+    /// <summary>
+    /// The WaveOut device for an output endpoint's friendly name, given the WaveOut product names (cut to 31 characters by
+    /// Windows): an exact match on the cut name first, else the longest product name the friendly name starts with.
+    /// Ties and no match give -1, the default device.
+    /// </summary>
+    public static int MatchWaveOut(string friendlyName, IReadOnlyList<string> productNames)
+    {
+        var cut = friendlyName.Length > 31 ? friendlyName[..31] : friendlyName;
+        var exact = Indexes(p => p.Equals(cut, StringComparison.OrdinalIgnoreCase));
+        if (exact.Count > 0) return exact.Count == 1 ? exact[0] : -1;
+        var prefixes = Indexes(p => p.Length > 0 && friendlyName.StartsWith(p, StringComparison.OrdinalIgnoreCase));
+        if (prefixes.Count == 0) return -1;
+        var longest = prefixes.Max(i => productNames[i].Length);
+        var best = prefixes.Where(i => productNames[i].Length == longest).ToList();
+        return best.Count == 1 ? best[0] : -1;
+
+        List<int> Indexes(Func<string, bool> match) => Enumerable.Range(0, productNames.Count).Where(i => match(productNames[i])).ToList();
+    }
 
     /// <summary>Sentences ending in . ! or ? followed by whitespace (so "1.5" and "example.com" stay whole), trimmed.</summary>
     public static IReadOnlyList<string> Sentences(string text) =>
