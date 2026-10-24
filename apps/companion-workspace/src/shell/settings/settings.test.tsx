@@ -35,12 +35,11 @@ it("lists the sidebar sections in order with group headers and posts settings.se
   expect(screen.getByRole("heading", { name: "Access & privacy" })).toBeInTheDocument(); // optimistic
 });
 
-it("follows the section the host pushes and shows Coming next for unbuilt pages", () => {
+it("follows the section the host pushes", () => {
   host();
   const { rerender } = render(<SettingsPanel state={make("general")} />);
   rerender(<SettingsPanel state={make("integrations")} />);
   expect(screen.getByRole("heading", { name: "Integrations" })).toBeInTheDocument();
-  expect(screen.getByText("Coming next")).toBeInTheDocument();
 });
 
 it("General toggles post general.set and the update row follows the update state", () => {

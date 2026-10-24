@@ -248,6 +248,7 @@ button.oc-pill:disabled, .oc-toggle:disabled, .oc-tile:disabled, .oc-chip:disabl
 .oc-badge { display: inline-block; padding: 3px 9px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em; border-radius: 999px; }
 .oc-badge--ok { color: var(--success); background: var(--success-bg); }
 .oc-badge--warn { color: var(--warn); background: var(--warn-bg); }
+.oc-badge--danger { color: var(--danger); background: color-mix(in srgb, var(--danger) 14%, transparent); }
 .oc-badge--muted { color: var(--text-2); background: var(--field); }
 
 /* Paper card */

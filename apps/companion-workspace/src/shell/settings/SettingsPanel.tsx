@@ -4,13 +4,16 @@ import type { SettingsSection, ShellState } from "../contract";
 import { AccessPage } from "./AccessPage";
 import { AccountPage } from "./AccountPage";
 import { AdvancedPage } from "./AdvancedPage";
-import { Page } from "./common";
+import { AgentsPage } from "./AgentsPage";
 import { CursorPage } from "./CursorPage";
 import { DictationPage } from "./DictationPage";
+import { ClipboardPage, MemoryPage, NotesPage, TasksPage } from "./ExtrasPages";
 import { GeneralPage } from "./GeneralPage";
+import { IntegrationsPage } from "./IntegrationsPage";
 import { MicrophonePage } from "./MicrophonePage";
+import { RoutinesPage } from "./RoutinesPage";
 import { ShortcutsPage } from "./ShortcutsPage";
-import { SECTION_TITLES, Sidebar } from "./Sidebar";
+import { Sidebar } from "./Sidebar";
 import { VoicePage } from "./VoicePage";
 import "./settings.css";
 
@@ -25,7 +28,13 @@ function renderPage(section: SettingsSection, state: ShellState) {
     case "cursor": return <CursorPage state={state} />;
     case "access": return <AccessPage state={state} />;
     case "advanced": return <AdvancedPage state={state} />;
-    default: return <Page title={SECTION_TITLES[section]}><p className="settings-page__soon">Coming next</p></Page>;
+    case "integrations": return <IntegrationsPage state={state} />;
+    case "agents": return <AgentsPage state={state} />;
+    case "routines": return <RoutinesPage state={state} />;
+    case "memory": return <MemoryPage />;
+    case "notes": return <NotesPage />;
+    case "clipboard": return <ClipboardPage />;
+    case "tasks": return <TasksPage />;
   }
 }
 
