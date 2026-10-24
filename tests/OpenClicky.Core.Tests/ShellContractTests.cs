@@ -110,6 +110,25 @@ public class ShellContractTests
     }
 
     [Fact]
+    public void LoneSurrogatesAreRejectedNotThrown()
+    {
+        // JSON-escaped lone surrogate in a payload string, in kind, in an enum field, and a raw lone surrogate.
+        Assert.False(ShellIntentParser.TryParse("""{"kind":"text.submit","text":"\ud800"}""", out _));
+        Assert.False(ShellIntentParser.TryParse("""{"kind":"\ud800"}""", out _));
+        Assert.False(ShellIntentParser.TryParse("""{"kind":"notch.tab","tab":"\ud800"}""", out _));
+        Assert.False(ShellIntentParser.TryParse("{\"kind\":\"text.submit\",\"text\":\"\ud800\"}", out _));
+        Assert.False(ShellIntentParser.TryParse("{\"kind\":\"ready\",\"x\":\"\udc00\"}", out _));
+    }
+
+    [Fact]
+    public void IntentGetStringIsSafeOnLoneSurrogate()
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse("""{"kind":"ready","name":"\ud800"}""");
+        var intent = new ShellIntent("ready", doc.RootElement.Clone());
+        Assert.Null(intent.GetString("name"));
+    }
+
+    [Fact]
     public void RegionCountAndDepthAreBounded()
     {
         string Rects(int n) => "{\"kind\":\"surface.regions\",\"rects\":[" + string.Join(",", Enumerable.Repeat("{\"x\":0,\"y\":0,\"w\":1,\"h\":1,\"r\":0}", n)) + "]}";

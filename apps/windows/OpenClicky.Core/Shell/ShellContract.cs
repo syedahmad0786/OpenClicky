@@ -99,7 +99,7 @@ public static class ShellContract
 public sealed record ShellIntent(string Kind, JsonElement Payload)
 {
     public string? GetString(string name) =>
-        Payload.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+        Payload.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? ShellIntentParser.ReadString(v) : null;
 
     public bool? GetBool(string name) =>
         Payload.TryGetProperty(name, out var v) && (v.ValueKind is JsonValueKind.True or JsonValueKind.False) ? v.GetBoolean() : null;
@@ -125,15 +125,23 @@ public static class ShellIntentParser
             if (root.ValueKind != JsonValueKind.Object
                 || !root.TryGetProperty("kind", out var kindElement)
                 || kindElement.ValueKind != JsonValueKind.String
-                || kindElement.GetString() is not { } kind
+                || ReadString(kindElement) is not { } kind
                 || !IsValid(kind, root)) return false;
             intent = new ShellIntent(kind, root.Clone());
             return true;
         }
-        catch (JsonException)
+        catch (Exception e) when (e is JsonException or ArgumentException or InvalidOperationException)
         {
+            // Hostile input (e.g. lone surrogates) must reject, never throw.
             return false;
         }
+    }
+
+    /// <summary>GetString throws on an escaped lone surrogate; treat that as no string.</summary>
+    internal static string? ReadString(JsonElement element)
+    {
+        try { return element.GetString(); }
+        catch (InvalidOperationException) { return null; }
     }
 
     // Unknown kinds fall through to false: this switch is the allow-list.
@@ -155,13 +163,13 @@ public static class ShellIntentParser
     };
 
     private static bool Str(JsonElement m, string name, int max) =>
-        m.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String && v.GetString() is { Length: > 0 } s && s.Length <= max;
+        m.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String && ReadString(v) is { Length: > 0 } s && s.Length <= max;
 
     private static bool Bool(JsonElement m, string name) =>
         m.TryGetProperty(name, out var v) && (v.ValueKind is JsonValueKind.True or JsonValueKind.False);
 
     private static bool OneOf(JsonElement m, string name, string[] allowed) =>
-        m.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String && Array.IndexOf(allowed, v.GetString()) >= 0;
+        m.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String && Array.IndexOf(allowed, ReadString(v)) >= 0;
 
     private static bool Rects(JsonElement m)
     {
