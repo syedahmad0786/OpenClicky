@@ -28,6 +28,9 @@ public class ShellControllerTests
         public void Quit() => Calls.Add("quit");
         public void ShowClassic() => Calls.Add("classic");
         public void Trace(string message) => Calls.Add("trace:" + message);
+        public void SettingsSection(string section) => Calls.Add("section:" + section);
+        public void PatchSetting(string key, JsonElement value) => Calls.Add($"patch:{key}={value.GetRawText()}");
+        public void SettingsAction(string action, string? arg) => Calls.Add($"action:{action}:{arg}");
     }
 
     private sealed class FakeSurface : IShellSurface
@@ -258,5 +261,43 @@ public class ShellControllerTests
         controller.EndTurn();
         using var final = JsonDocument.Parse(surface.Posted[^1]);
         Assert.Equal(0, final.RootElement.GetProperty("state").GetProperty("chat").GetProperty("rows").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task RoutesSettingsIntents()
+    {
+        var (controller, host, surface) = await Started();
+        surface.Send(new { kind = "settings.section", section = "microphone" });
+        surface.Send(new { kind = "settings.section", section = "billing" }); // not a section: dropped
+        surface.Send(new { kind = "settings.patch", key = "voice.captions", value = false });
+        surface.Send(new { kind = "settings.action", action = "secret.edit", arg = "openrouter" });
+        surface.Send(new { kind = "settings.action", action = "testMic" });
+        surface.Send(new { kind = "settings.action", action = "format.disk" }); // not allow-listed: dropped
+        Assert.Equal(["section:microphone", "patch:voice.captions=false", "action:secret.edit:openrouter", "action:testMic:"],
+            host.Calls.Where(c => !c.StartsWith("trace:")));
+        Assert.Equal("microphone", controller.Notch.Section);
+        using var state = JsonDocument.Parse(surface.Posted[^1]);
+        Assert.Equal("microphone", state.RootElement.GetProperty("state").GetProperty("notch").GetProperty("section").GetString());
+    }
+
+    [Fact]
+    public async Task OpeningTheSettingsTabTellsTheHostItsSection()
+    {
+        var (controller, host, surface) = await Started();
+        surface.Send(new { kind = "notch.tab", tab = "settings" });
+        controller.OpenNotch(NotchTab.Settings, "general");
+        Assert.Equal(["section:general", "section:general"], host.Calls.Where(c => c.StartsWith("section:")));
+        Assert.Equal(new ShellNotch(NotchTab.Settings, true, "general"), controller.Notch);
+    }
+
+    [Fact]
+    public async Task PostsMicLevelsClamped()
+    {
+        var (controller, _, surface) = await Started();
+        controller.PostMicLevel(0.25);
+        controller.PostMicLevel(7);
+        controller.PostMicLevel(double.NaN);
+        Assert.Equal(["""{"kind":"mic.level","level":0.25}""", """{"kind":"mic.level","level":1}""", """{"kind":"mic.level","level":0}"""],
+            surface.Posted.Where(p => p.Contains("mic.level")));
     }
 }

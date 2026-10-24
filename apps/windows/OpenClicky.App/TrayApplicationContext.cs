@@ -157,13 +157,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             _home.UpdateTasks(_taskRuns);
         }
         catch (Exception ex) { ClassicMessage("Saved task history was left unchanged: " + ex.Message); }
-        _settingsForm = new SettingsForm(_settings, _secrets, OnSettingsApplied, () =>
-        {
-            _talk.ClearHistory();
-            _home.ClearConversation();
-            ClearTasks();
-            ResetShellChat();
-        });
+        _settingsForm = new SettingsForm(_settings, _secrets, OnSettingsApplied, ClearHistory);
         _companionDock = new CompanionDockForm(ToggleConversation, ShowHome,
             () => _ = SelectScreenAreaAsync(), ShowClipboardShelf, _talk.StopConversation,
             () => (_home.Visible && _home.WindowState != FormWindowState.Minimized) || _settingsForm.Visible || _clipboardShelf?.Visible == true || _walkthroughForm.Visible);

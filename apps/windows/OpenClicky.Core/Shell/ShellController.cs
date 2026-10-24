@@ -98,11 +98,20 @@ public sealed class ShellController : IDisposable
         surface.Dispose();
     }
 
-    /// <summary>Opens the notch peek (tray, second instance, taskbar button).</summary>
-    public void OpenNotch(NotchTab? tab = null)
+    /// <summary>Opens the notch peek (tray, second instance, taskbar button), optionally on a tab and settings section.</summary>
+    public void OpenNotch(NotchTab? tab = null, string? section = null)
     {
-        SetNotch(_notch with { Tab = tab ?? _notch.Tab, Open = true });
+        SetNotch(_notch with { Tab = tab ?? _notch.Tab, Open = true, Section = section is not null && ShellContract.Sections.Contains(section) ? section : _notch.Section });
+        if (_notch.Tab == NotchTab.Settings) _host.SettingsSection(_notch.Section);
         RequestPush();
+    }
+
+    /// <summary>The microphone test level (0–1) for the settings page; dropped when the surface is not up.</summary>
+    public void PostMicLevel(double level)
+    {
+        if (_surface is null) return;
+        try { _surface.Post(JsonSerializer.Serialize(new { kind = "mic.level", level = double.IsFinite(level) ? Math.Clamp(level, 0, 1) : 0 }, ShellContract.Options)); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { _host.Trace("shell_level_error=" + ex.GetType().Name); }
     }
 
     public void SetUpdate(ShellUpdate update)
@@ -256,8 +265,17 @@ public sealed class ShellController : IDisposable
             case "text.submit": _host.SubmitText(intent.GetString("text")!); break;
             case "notch.tab":
                 SetNotch(_notch with { Tab = Enum.Parse<NotchTab>(intent.GetString("tab")!, ignoreCase: true) });
+                if (_notch.Tab == NotchTab.Settings) _host.SettingsSection(_notch.Section);
                 RequestPush();
                 break;
+            case "settings.section":
+                SetNotch(_notch with { Section = intent.GetString("section")! });
+                _host.SettingsSection(_notch.Section);
+                RequestPush();
+                break;
+            // The host validates, persists and re-pushes (also on rejection, so the page reverts).
+            case "settings.patch": _host.PatchSetting(intent.GetString("key")!, intent.Payload.GetProperty("value")); break;
+            case "settings.action": _host.SettingsAction(intent.GetString("action")!, intent.GetString("arg")); break;
             case "notch.open":
                 SetNotch(_notch with { Open = intent.GetBool("open") == true });
                 RequestPush();

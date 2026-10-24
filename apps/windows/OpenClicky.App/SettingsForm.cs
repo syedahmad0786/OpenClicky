@@ -1,3 +1,4 @@
+using OpenClicky.App.Settings;
 using OpenClicky.Core;
 using OpenClicky.Providers;
 using OpenClicky.Input;
@@ -31,7 +32,6 @@ internal sealed class SettingsForm : Form
     private readonly TextBox _denyExtraBox;
     private readonly TextBox _logBox;
     private readonly Action? _clearHistory;
-    private readonly ChatGptOAuthService _chatGptOAuth = new(msg => DebugLog.Append(msg));
     private HotkeyChord _draft;
     private bool _signInBusy;
     private readonly CheckBox _windowsSpeech;
@@ -106,7 +106,7 @@ internal sealed class SettingsForm : Form
         _refreshModels = AppTheme.Button("Refresh models");
         _refreshModels.Click += async (_, _) => await RefreshModelsAsync();
         var manageUsage = AppTheme.Button("Manage usage");
-        manageUsage.Click += (_, _) => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("https://chatgpt.com/settings/usage") { UseShellExecute = true });
+        manageUsage.Click += (_, _) => System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(NativeSettings.UsageUrl) { UseShellExecute = true });
         usageButtons.Controls.AddRange(new Control[] { _refreshModels, manageUsage });
         _chatGptPanel.Controls.Add(usageButtons);
         var speechNote = AppTheme.Label("Your ChatGPT plan powers Ask and Agent. Voice recognition and spoken replies run locally on Windows. Sign-in does not give OpenClicky access to your ChatGPT conversations.", 9);
@@ -279,13 +279,10 @@ internal sealed class SettingsForm : Form
         try
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
-            var client = new ChatGptResponsesClient(ct => _chatGptOAuth.GetAccessTokenAsync(_settings, _secrets, ct));
-            var models = await client.ListModelsAsync(cts.Token);
-            if (models.Count == 0) throw new InvalidOperationException("No models are available for this ChatGPT account.");
+            var models = await NativeSettings.ListModelsAsync(_settings, _secrets, cts.Token);
             var selected = (_chatGptModelBox.SelectedItem as ChatGptModel)?.Slug ?? _settings.ChatGptModel;
             _chatGptModelBox.DataSource = models.ToList();
-            _chatGptModelBox.SelectedItem = models.FirstOrDefault(m => m.Slug == selected)
-                ?? models.FirstOrDefault(m => m.Slug == "gpt-5.6-terra") ?? models[0];
+            _chatGptModelBox.SelectedItem = NativeSettings.PickModel(models, selected);
             _settings.ChatGptModel = ((ChatGptModel)_chatGptModelBox.SelectedItem!).Slug;
             var quick = new List<ChatGptModel> { new("", "Use the same model") };
             quick.AddRange(models);
@@ -317,7 +314,7 @@ internal sealed class SettingsForm : Form
         try
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
-            var credential = await _chatGptOAuth.SignInAsync(_settings, _secrets, cts.Token).ConfigureAwait(true);
+            var credential = await NativeSettings.OAuth.SignInAsync(_settings, _secrets, cts.Token).ConfigureAwait(true);
             _providerChatGpt.Checked = true;
             _settings.AuthProvider = AuthProvider.ChatGPT;
             SettingsStore.Save(_settings);
@@ -362,7 +359,8 @@ internal sealed class SettingsForm : Form
         RefreshChatGptButtons();
         try
         {
-            var revoked = await _chatGptOAuth.SignOutAsync(_settings, _secrets).ConfigureAwait(true);
+            var revoked = await NativeSettings.OAuth.SignOutAsync(_settings, _secrets).ConfigureAwait(true);
+            NativeSettings.ForgetModels();
             _chatGptModelBox.DataSource = null;
             _quickModelBox.DataSource = null;
             SettingsStore.Save(_settings);

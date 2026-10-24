@@ -41,6 +41,7 @@ internal sealed class HomeForm : Form
     private int _streamStart = -1, _streamLength;
     private string? _completedStreamText;
     private VisualWorkspacePanel? _visualWorkspace;
+    private bool _syncingAccess;
     private (SizeType Type, float Height)[]? _nativeComposerRows;
     private float _nativeComposerHeight;
 
@@ -275,12 +276,10 @@ internal sealed class HomeForm : Form
         _access.SelectedIndexChanged += (_, _) =>
         {
             var mode = (AgentAccessMode)_access.SelectedIndex;
+            if (_syncingAccess) return;
             if (mode is AgentAccessMode.FullAccess or AgentAccessMode.Auto)
             {
-                var warning = mode == AgentAccessMode.FullAccess
-                    ? "Full access performs desktop input without individual approvals. It may send, publish, delete or change visible data. Stop cannot undo completed actions. Only use it in a task and account you intend to control. Enable Full access?"
-                    : "Auto asks you to approve the task plan, then runs routine steps. Sensitive-step detection uses model descriptions and conservative rules; it can miss risk. Choose Approve each action for strict control. Enable Auto?";
-                if (MessageBox.Show(this, warning, "Choose task access", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes) { _access.SelectedIndex = 1; return; }
+                if (MessageBox.Show(this, OpenClicky.App.Settings.NativeSettings.AccessWarning(mode), OpenClicky.App.Settings.NativeSettings.AccessWarningTitle, MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes) { _access.SelectedIndex = 1; return; }
             }
             _settings.AgentAccess = mode;
             try { SettingsStore.Save(_settings); }
@@ -398,6 +397,15 @@ internal sealed class HomeForm : Form
         if (!_busy) _status.Text = running ? "Task running · voice pauses it" : "Ready when you are";
     }
     public void ShowTasks() => _workspace.SelectedIndex = 1;
+    public void ShowNotes() => _workspace.SelectedIndex = 4;
+
+    /// <summary>The access mode changed elsewhere (the notch page, after its own warning): show it without asking again.</summary>
+    public void RefreshAccess()
+    {
+        _syncingAccess = true;
+        try { _access.SelectedIndex = Enum.IsDefined(_settings.AgentAccess) ? (int)_settings.AgentAccess : 1; }
+        finally { _syncingAccess = false; }
+    }
     public string RequestText => _prompt.Text.Trim();
     private Task PrepareSuggestedPromptAsync(string prompt)
     {

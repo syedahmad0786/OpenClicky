@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace OpenClicky.Core.Shell;
 
 /// <summary>What the shell controller needs from the app. All calls arrive on the UI thread.</summary>
@@ -21,6 +23,12 @@ public interface IShellHost
     /// <summary>The shell could not start: show the classic window instead.</summary>
     void ShowClassic();
     void Trace(string message);
+    /// <summary>The settings page shows <paramref name="section"/> (picked, or the Settings tab opened): refresh what it needs.</summary>
+    void SettingsSection(string section);
+    /// <summary>A shape-checked settings.patch; the host validates the key and value (SettingsPatch) and re-pushes.</summary>
+    void PatchSetting(string key, JsonElement value);
+    /// <summary>An allow-listed settings.action; <paramref name="arg"/> is at most 512 chars and still untrusted.</summary>
+    void SettingsAction(string action, string? arg);
 }
 
 /// <summary>The page surface (a WebView2 window in the app, a fake in tests).</summary>

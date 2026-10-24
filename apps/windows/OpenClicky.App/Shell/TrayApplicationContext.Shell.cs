@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Reflection;
 using OpenClicky.App.Shell;
 using OpenClicky.Core;
+using OpenClicky.Core.Settings;
 using OpenClicky.Core.Shell;
 using OpenClicky.Core.Updates;
 
@@ -36,7 +37,7 @@ internal sealed partial class TrayApplicationContext : IShellHost
     {
         var menu = new ContextMenuStrip();
         menu.Items.Add("Open OpenClicky", null, (_, _) => ShowHome());
-        menu.Items.Add("Settings", null, (_, _) => ShowSettings());
+        menu.Items.Add("Settings", null, (_, _) => ShowNotchSettings());
         _pauseItem = new ToolStripMenuItem(_settings.Paused ? "Resume" : "Pause", null, (_, _) => SetPaused(!_settings.Paused));
         menu.Items.Add(_pauseItem);
         menu.Items.Add("Classic window", null, (_, _) => ShowClassic());
@@ -111,6 +112,7 @@ internal sealed partial class TrayApplicationContext : IShellHost
     private async Task StartShellAsync()
     {
         ReconcileLaunchAtLogin();
+        SettingsProbe.Refresh();
         _shell = new ShellController(this, CreateShellSurfaceAsync, push => { _pendingPush = push; _shellPushTimer.Start(); });
         var started = await _shell.StartAsync();
         if (_lifetime.IsCancellationRequested) return;
@@ -141,7 +143,8 @@ internal sealed partial class TrayApplicationContext : IShellHost
         // Each source is guarded: one failing store must not leave the shell without state.
         var now = DateTimeOffset.UtcNow;
         var routines = ShellSource<IReadOnlyList<Routine>>("routines", () => _work.Routines(), []);
-        var jobs = ShellSource("jobs", () => _work.Jobs().OrderByDescending(j => j.LastRunAt ?? j.CreatedAt).Take(ShellStateBuilder.MaxJobs).Select(job =>
+        var allJobs = ShellSource<IReadOnlyList<WorkJob>>("jobs", () => _work.Jobs(), []);
+        var jobs = ShellSource("jobs", () => allJobs.OrderByDescending(j => j.LastRunAt ?? j.CreatedAt).Take(ShellStateBuilder.MaxJobs).Select(job =>
         {
             var steps = _taskRuns.LastOrDefault(r => r.JobId == job.Id)?.Events
                 .Select(e => e.Message).Where(m => !string.IsNullOrWhiteSpace(m)).TakeLast(ShellStateBuilder.MaxBullets).ToList() ?? [];
@@ -160,8 +163,10 @@ internal sealed partial class TrayApplicationContext : IShellHost
             _shellTurns = turns;
             return turns;
         }, []);
-        return new ShellInputs(_settings, jobs, chat, ShellSource("connectors", _connectors.List, []), CurrentPhase(), now)
+        var connectors = ShellSource("connectors", _connectors.List, []);
+        return new ShellInputs(_settings, jobs, chat, connectors, CurrentPhase(), now)
         {
+            SettingsRuntime = ShellSource("settings", () => SettingsRuntimeFor(routines, allJobs, connectors), SettingsRuntime.Empty),
             Theme = ShellSource("theme", GeneralBehaviour.ReadTheme, ShellTheme.Light),
             ReducedMotion = ShellSource("reduced motion", GeneralBehaviour.ReducedMotion, false),
             FallbackUserName = Environment.UserName,
@@ -344,6 +349,7 @@ internal sealed partial class TrayApplicationContext : IShellHost
     private void DisposeShell()
     {
         Microsoft.Win32.SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
+        DisposeSettings();
         _shellPushTimer.Dispose();
         _updateTimer.Dispose();
         _shell?.Dispose();
