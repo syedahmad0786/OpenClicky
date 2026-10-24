@@ -14,12 +14,13 @@ function Lead({ kind }: { kind: NotchCard["kind"] }) {
     : <span className="notch-card__lead notch-card__dot" aria-hidden="true" />;
 }
 
-function CardView({ card, onDismiss }: { card: NotchCard; onDismiss: (id: string) => void }) {
+function CardView({ card, onDismiss, active }: { card: NotchCard; onDismiss: (id: string) => void; active: boolean }) {
   const ms = card.autoDismissMs ?? 0;
   const timer = useRef<number | undefined>(undefined);
   const left = useRef(ms);
   const since = useRef(0);
-  const holds = useRef(0); // pointer and keyboard focus both pause the countdown
+  const holds = useRef(0); // pointer hover and keyboard focus both pause the countdown
+  const focusHeld = useRef(false);
   const dismiss = useRef(onDismiss);
   dismiss.current = onDismiss;
 
@@ -39,6 +40,7 @@ function CardView({ card, onDismiss }: { card: NotchCard; onDismiss: (id: string
   useEffect(() => {
     left.current = ms;
     holds.current = 0;
+    focusHeld.current = false;
     start();
     return () => window.clearTimeout(timer.current);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- restart only when the card or its delay changes
@@ -46,8 +48,17 @@ function CardView({ card, onDismiss }: { card: NotchCard; onDismiss: (id: string
 
   return (
     <div
-      className="notch-card" data-region data-kind={card.kind} role="group" aria-label={card.title}
-      onPointerEnter={hold} onPointerLeave={release} onFocus={hold} onBlur={release}
+      className="notch-card" data-region={active || undefined} data-kind={card.kind} role="group" aria-label={card.title}
+      onPointerEnter={hold} onPointerLeave={release}
+      onFocus={(e) => {
+        // Only keyboard focus pauses; a mouse click on a button also focuses it and must not freeze the countdown.
+        let keyboard = false;
+        try { keyboard = e.target.matches(":focus-visible"); } catch { /* selector unsupported: treat as mouse */ }
+        if (keyboard && !focusHeld.current) { focusHeld.current = true; hold(); }
+      }}
+      onBlur={(e) => {
+        if (focusHeld.current && !e.currentTarget.contains(e.relatedTarget as Node | null)) { focusHeld.current = false; release(); }
+      }}
     >
       <Lead kind={card.kind} />
       <div className="notch-card__main">
@@ -68,11 +79,17 @@ function CardView({ card, onDismiss }: { card: NotchCard; onDismiss: (id: string
   );
 }
 
-/**
- * Cards stacked under the notch: the host lists them oldest first, so the newest three are shown with the
- * newest on top. Dismissing hides a card at once and tells the host, which removes it from the next state.
- */
-export function NotchCards({ cards }: { cards: NotchCard[] }) {
+export interface NotchCardsProps {
+  /** Newest first (index 0 is the newest); the first three are shown, newest on top. */
+  cards: NotchCard[];
+  /** False while the panel above is closing: the cards stay mounted (timers, dismissals) but report no region. */
+  active?: boolean;
+  onPointerEnter?: () => void;
+  onPointerLeave?: () => void;
+}
+
+/** Cards stacked under the notch. Dismissing hides a card at once and tells the host, which drops it from the next state. */
+export function NotchCards({ cards, active = true, onPointerEnter, onPointerLeave }: NotchCardsProps) {
   const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
   const ids = cards.map((c) => c.id).join("\n");
   // Forget dismissals the host has processed, so a card that comes back with the same id shows again.
@@ -83,11 +100,11 @@ export function NotchCards({ cards }: { cards: NotchCard[] }) {
   }), [ids]);
 
   const dismiss = (id: string) => { setGone((old) => new Set(old).add(id)); postPage({ kind: "card.dismiss", cardId: id }); };
-  const visible = cards.filter((c) => !gone.has(c.id)).slice(-MAX_VISIBLE_CARDS).reverse();
+  const visible = cards.filter((c) => !gone.has(c.id)).slice(0, MAX_VISIBLE_CARDS);
   if (!visible.length) return null;
   return (
-    <div className="notch-cards" aria-live="polite">
-      {visible.map((card) => <CardView key={card.id} card={card} onDismiss={dismiss} />)}
+    <div className="notch-cards" aria-live="polite" onPointerEnter={onPointerEnter} onPointerLeave={onPointerLeave}>
+      {visible.map((card) => <CardView key={card.id} card={card} onDismiss={dismiss} active={active} />)}
     </div>
   );
 }

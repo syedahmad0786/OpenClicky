@@ -14,7 +14,8 @@ const job = (n: number, patch: Partial<JobCard> = {}): JobCard => ({
   id: `job-${n}`, title: `Job ${n}`, state: "done", colour: "blue", bullets: [], files: [], plan: [],
   updatedAt: new Date(Date.UTC(2026, 0, 1, 0, n)).toISOString(), ...patch,
 });
-const jobs = (count: number) => Array.from({ length: count }, (_, i) => job(i + 1));
+/** Newest first, like the host: job-count down to job-1. */
+const jobs = (count: number) => Array.from({ length: count }, (_, i) => job(count - i));
 
 it("alternates sides, newest nearest the panel, tilted 3 to 5 degrees", () => {
   mockHost();

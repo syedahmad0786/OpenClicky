@@ -9,11 +9,6 @@ export const EXPANDED_PER_SIDE = 8;
 /** Degrees, alternating lean; the right side mirrors the left. */
 const TILTS = [-4, 3, -5, 4, -3, 5, -4, 3];
 
-function newestFirst(jobs: JobCard[]): JobCard[] {
-  const at = (job: JobCard) => Date.parse(job.updatedAt) || 0;
-  return jobs.map((job, i) => ({ job, i })).sort((a, b) => at(b.job) - at(a.job) || a.i - b.i).map((x) => x.job);
-}
-
 function Side({ side, jobs }: { side: "left" | "right"; jobs: JobCard[] }) {
   const [expanded, setExpanded] = useState(false);
   if (!jobs.length) return null;
@@ -37,12 +32,12 @@ function Side({ side, jobs }: { side: "left" | "right"; jobs: JobCard[] }) {
 }
 
 /**
- * Jobs other than the featured one, as paper cards on both sides of the open panel. Newest first, dealt
+ * Jobs other than the featured one (host order, newest first), as paper cards on both sides of the open panel. Dealt
  * alternately left and right so the newest sits nearest the panel on its side. Beyond three a side shows a
  * "+N more" pill; expanding shows up to eight per side (ponytail: no paging for the rest).
  */
 export function JobDeck({ jobs, featuredId }: { jobs: JobCard[]; featuredId: string | null }) {
-  const rest = newestFirst(jobs.filter((job) => job.id !== featuredId));
+  const rest = jobs.filter((job) => job.id !== featuredId); // the host lists jobs newest first
   return (
     <>
       <Side side="left" jobs={rest.filter((_, i) => i % 2 === 0)} />

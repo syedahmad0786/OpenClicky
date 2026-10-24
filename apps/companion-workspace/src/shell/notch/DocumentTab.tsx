@@ -45,7 +45,7 @@ function Csv({ source }: { source: string }) {
   const [selected, setSelected] = useState<number | null>(null);
   const { head, body, numeric } = useMemo(() => {
     const [head = [], ...body] = parseCsv(source);
-    const width = Math.max(head.length, ...body.map((r) => r.length));
+    const width = body.reduce((w, r) => Math.max(w, r.length), head.length); // no spread: 100k rows would overflow the stack
     return { head: Array.from({ length: width }, (_, c) => head[c] ?? ""), body, numeric: Array.from({ length: width }, (_, c) => isNumericColumn(body, c)) };
   }, [source]);
   const stats = selected !== null && numeric[selected] ? columnStats(body, selected) : null;

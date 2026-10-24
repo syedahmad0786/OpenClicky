@@ -65,6 +65,10 @@ export function Notch({ state }: { state: ShellState }) {
 
   const changeTab = useCallback((next: NotchTab) => { setTab(next); postPage({ kind: "notch.tab", tab: next }); }, []);
 
+  // Hovering the cards counts as inside the open panel (no auto-close), but never opens a collapsed one.
+  const onCardsEnter = () => { if (phaseRef.current !== "open") return; inside.current = true; cancelClose(); };
+  const onCardsLeave = () => { inside.current = false; scheduleClose(); };
+
   const onFocus = (e: FocusEvent) => { if (e.target instanceof HTMLTextAreaElement) cancelClose(); };
   const onBlur = (e: FocusEvent) => { if (e.target instanceof HTMLTextAreaElement && !inside.current) scheduleClose(); };
 
@@ -85,7 +89,7 @@ export function Notch({ state }: { state: ShellState }) {
         </div>
         {phase === "open" && tab === "home" ? <JobDeck jobs={state.jobs} featuredId={state.featured?.id ?? null} /> : null}
       </div>
-      <NotchCards cards={state.cards} />
+      <NotchCards cards={state.cards} active={phase !== "closing"} onPointerEnter={onCardsEnter} onPointerLeave={onCardsLeave} />
     </div>
   );
 }

@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { DocumentView } from "../contract";
 import { DocumentTab } from "./DocumentTab";
-import { parseCsv } from "./documentParse";
+import { parseCsv, parseInline } from "./documentParse";
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); delete window.chrome; });
 
@@ -103,4 +103,26 @@ it("csv renders a table and computes sum, average and count for the selected num
 
   fireEvent.click(screen.getByRole("button", { name: "price" })); // toggles off
   expect(screen.queryByRole("group", { name: "Column statistics" })).toBeNull();
+});
+
+it("inline parsing keeps its meaning: code, bold, link, plain text, unmatched markers", () => {
+  expect(parseInline("a `b` **c** [d](http://x/y) e [f **g")).toEqual([
+    { t: "text", text: "a " }, { t: "code", text: "b" }, { t: "text", text: " " }, { t: "bold", text: "c" }, { t: "text", text: " " },
+    { t: "link", text: "d", url: "http://x/y" }, { t: "text", text: " e [f **g" },
+  ]);
+});
+
+it("inline parsing stays linear on a huge paragraph of unmatched markers", () => {
+  const text = "[a ".repeat(20_000) + "** ".repeat(20_000) + "`x ".repeat(20_000) + "[b](";
+  const start = performance.now();
+  const parts = parseInline(text);
+  expect(performance.now() - start).toBeLessThan(500);
+  expect(parts.length).toBeGreaterThan(0);
+});
+
+it("a CSV with 150k rows renders without a spread overflow", () => {
+  mockHost();
+  const content = Array.from({ length: 150_000 }, (_, i) => `r${i},${i}`).join("\n");
+  render(<DocumentTab doc={doc({ kind: "csv", content })} onClose={() => {}} />);
+  expect(screen.getAllByRole("columnheader")).toHaveLength(2);
 });
