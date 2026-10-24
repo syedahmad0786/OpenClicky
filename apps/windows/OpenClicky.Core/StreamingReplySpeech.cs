@@ -25,7 +25,7 @@ internal sealed class StreamingReplySpeech
 
     public static string Clean(string raw)
     {
-        var text = ScreenAnnotations.Parse(VisualArtifactReply.Parse(IntelligentUiParser.Parse(raw).PlainText).PlainText).Text;
+        var text = ScreenAnnotations.Parse(VisualArtifactReply.Parse(IntelligentUiParser.Parse(TalkActionParser.Parse(raw, partial: true).Text).PlainText).PlainText).Text;
         var command = text.LastIndexOf('[');
         if (command >= 0 && text.IndexOf(']', command) < 0) text = text[..command];
         return PointParser.Parse(text).SpokenText.Trim();

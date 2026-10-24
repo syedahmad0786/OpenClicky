@@ -8,6 +8,31 @@ namespace OpenClicky.Core.Tests;
 public class CompanionWorkflowTests
 {
     [Fact]
+    public async Task ActionTagsAreStrippedFromSpeechAndHistoryAndRaisedOnce()
+    {
+        var historyPath = Path.Combine(Path.GetTempPath(), $"openclicky-actions-{Guid.NewGuid():N}.json");
+        var tts = new RecordingTts();
+        var messages = new List<string>();
+        var raised = new List<IReadOnlyList<TalkAction>>();
+        try
+        {
+            using var talk = new TalkOrchestrator(new Hotkey(), new Overlay(), new Capture(), new Mic(), () => null,
+                () => new Talk((_, _) => Task.FromResult("Opening it now. [OPEN:https://example.com] Copied. [COPY:hi there] [POINT:none]")), tts,
+                () => new AppSettings { PersistConversationHistory = true, SpeakReplies = true }, log: _ => { }, historyPath: historyPath);
+            talk.MessageReceived += (role, text) => { if (role == "OpenClicky") messages.Add(text); };
+            talk.ActionsRequested += raised.Add;
+            await talk.SubmitTextAsync("open example and copy hi");
+            var saved = Assert.Single(ConversationHistoryStore.Load(historyPath, 100));
+            Assert.Equal("Opening it now. Copied.", saved.assistant);
+            Assert.Equal(["Opening it now. Copied."], messages);
+            Assert.Equal("Opening it now. Copied.", string.Join(" ", tts.Spoken));
+            var actions = Assert.Single(raised);
+            Assert.Equal([new TalkAction(TalkActionKind.Open, "https://example.com"), new TalkAction(TalkActionKind.Copy, "hi there")], actions);
+        }
+        finally { ConversationHistoryStore.Clear(historyPath); }
+    }
+
+    [Fact]
     public async Task TaskReceiptIsAvailableInTheSameConversation()
     {
         IReadOnlyList<(string role, string text)> seen = [];
@@ -624,6 +649,26 @@ public class CompanionWorkflowTests
         Assert.Contains("Found it.", messages);
         Assert.Equal((100, 50), overlay.LastPoint);
         Assert.Equal(CompanionVoiceState.Idle, talk.State);
+    }
+
+    [Fact]
+    public async Task StreamingReply_NeverSpeaksOrShowsActionTags()
+    {
+        var tts = new RecordingTts();
+        var partials = new List<string>();
+        var raised = 0;
+        const string tag = @"[COPY:a \] b]";
+        using var talk = new TalkOrchestrator(new Hotkey(), new Overlay(), new Capture(), new Mic(), () => null,
+            () => new StreamingTalk(["Done.", @"Done. [COPY:a \] b", "Done. " + tag + " Next.", "Done. " + tag + " Next."]),
+            tts, () => new AppSettings { PersistConversationHistory = false, SpeakReplies = true }, log: _ => { });
+        talk.AssistantResponseChanged += (text, complete) => { if (!complete) partials.Add(text); };
+        talk.ActionsRequested += _ => raised++;
+
+        await talk.SubmitTextAsync("copy it", false);
+
+        Assert.Equal(["Done.", "Next."], tts.Spoken);
+        Assert.All(partials, text => Assert.DoesNotContain("COPY", text));
+        Assert.Equal(1, raised);
     }
 
     [Fact]

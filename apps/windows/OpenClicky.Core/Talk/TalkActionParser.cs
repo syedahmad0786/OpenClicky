@@ -1,0 +1,88 @@
+using System.Text;
+
+namespace OpenClicky.Core;
+
+public enum TalkActionKind { Open, Copy, Type }
+
+public sealed record TalkAction(TalkActionKind Kind, string Value);
+
+public sealed record TalkActionParseResult(string Text, IReadOnlyList<TalkAction> Actions);
+
+/// <summary>
+/// Extracts [OPEN:url], [COPY:text] and [TYPE:text] tags from a talk reply. Tags are always removed from the
+/// returned text; only valid ones (first three, in order) become actions. Fenced code blocks are left untouched
+/// because the ag-ui visual block lives there. Run this before the POINT/MARK/ag-ui parsers.
+/// </summary>
+public static class TalkActionParser
+{
+    public const int MaxActions = 3;
+    public const int MaxTextLength = 2000;
+
+    private static readonly (string Prefix, TalkActionKind Kind)[] Tags =
+        [("[OPEN:", TalkActionKind.Open), ("[COPY:", TalkActionKind.Copy), ("[TYPE:", TalkActionKind.Type)];
+
+    /// <param name="partial">Streaming text: an unclosed tag is cut off (so it is never spoken) instead of kept as text.</param>
+    public static TalkActionParseResult Parse(string reply, bool partial = false)
+    {
+        ArgumentNullException.ThrowIfNull(reply);
+        var text = new StringBuilder(reply.Length);
+        var actions = new List<TalkAction>();
+        var removed = false;
+        var inFence = false;
+        for (var i = 0; i < reply.Length;)
+        {
+            if (string.CompareOrdinal(reply, i, "```", 0, 3) == 0)
+            {
+                inFence = !inFence;
+                text.Append("```");
+                i += 3;
+                continue;
+            }
+            var tag = inFence || reply[i] != '[' ? -1 : Array.FindIndex(Tags, t => string.CompareOrdinal(reply, i, t.Prefix, 0, t.Prefix.Length) == 0);
+            if (tag < 0)
+            {
+                text.Append(reply[i++]);
+                continue;
+            }
+            var end = FindClose(reply, i + Tags[tag].Prefix.Length, out var value);
+            if (end < 0)
+            {
+                if (partial) { removed = true; break; }
+                text.Append(reply[i++]);
+                continue;
+            }
+            removed = true;
+            if (actions.Count < MaxActions && Validate(Tags[tag].Kind, value.Trim()) is { } action) actions.Add(action);
+            i = end;
+            // Drop the gap the tag leaves behind so "a [COPY:x] b" reads "a b".
+            if (i < reply.Length && reply[i] is (char)13 or (char)10)
+                while (text.Length > 0 && text[^1] is ' ' or (char)9) text.Length--;
+            else if (text.Length == 0 || char.IsWhiteSpace(text[^1]))
+                while (i < reply.Length && reply[i] is ' ' or (char)9) i++;
+        }
+        return new(removed ? text.ToString().Trim() : reply, actions);
+    }
+
+    /// <summary>Index just past the closing ']' (a backslash-escaped \] stays in the value), or -1 when unclosed.</summary>
+    private static int FindClose(string s, int start, out string value)
+    {
+        var sb = new StringBuilder();
+        for (var j = start; j < s.Length; j++)
+        {
+            if (s[j] == '\\' && j + 1 < s.Length && s[j + 1] == ']') { sb.Append(']'); j++; }
+            else if (s[j] == ']') { value = sb.ToString(); return j + 1; }
+            else sb.Append(s[j]);
+        }
+        value = "";
+        return -1;
+    }
+
+    private static TalkAction? Validate(TalkActionKind kind, string value)
+    {
+        if (value.Length == 0) return null;
+        if (kind != TalkActionKind.Open) return value.Length <= MaxTextLength ? new(kind, value) : null;
+        return Uri.TryCreate(value, UriKind.Absolute, out var uri)
+            && uri.Scheme is "http" or "https" && uri.UserInfo.Length == 0
+            ? new(kind, value) : null;
+    }
+}

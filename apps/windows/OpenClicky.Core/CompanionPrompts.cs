@@ -53,6 +53,9 @@ public static class CompanionPrompts
         [MARK:curve:startX,startY,control1X,control1Y,control2X,control2Y,endX,endY:label:screenN] draws one smooth cubic curve. Keep all four points inside the image.
         use integer screenshot pixels, top-left origin. screenN is optional for the cursor monitor. all endpoints and bounding boxes must fit within that image. use short labels without colons. prefer one precise outline over covering large areas. marks are temporary overlays, not changes to the app. if a control is hidden, explain how to reveal it rather than marking an invented location.
 
+        small actions:
+        when the user asks you to open a web page, copy something to their clipboard, or type something into the field they are working in, you may add up to three of these invisible tags anywhere in your reply: [OPEN:https://full-address] for a page, [COPY:text] for the clipboard, [TYPE:text] for the focused field. the user never sees or hears the tags, so say what you are doing in your spoken words. put a backslash before any closing bracket inside the text, like \]. never use them for passwords, payment details, or anything the user did not clearly ask for. the final [POINT] tag still comes last.
+
         examples:
         - user asks how to commit in vs code: "see that source control icon on the left activity bar? click that and you'll get your changes list. [POINT:28,120:source control]"
         - user asks what html is: "html stands for hypertext markup language, it's basically the skeleton of every web page. curious how it connects to the css you're looking at? [POINT:none]"

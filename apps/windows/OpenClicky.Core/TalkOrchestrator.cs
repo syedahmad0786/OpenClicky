@@ -80,6 +80,8 @@ public sealed class TalkOrchestrator : IDisposable
     public event Action<ConversationTurn>? TurnCommitted;
     public event Action<string>? TranscriptChanged;
     public event Action<IntelligentUiDocument?>? IntelligentUiChanged;
+    /// <summary>Open/copy/type tags the model added to a finished reply; the host decides whether to run them.</summary>
+    public event Action<IReadOnlyList<TalkAction>>? ActionsRequested;
 
     public void Start()
     {
@@ -643,7 +645,8 @@ public sealed class TalkOrchestrator : IDisposable
                 if (accepted is null) return;
                 raw = accepted;
             }
-            var intelligent = IntelligentUiParser.Parse(raw);
+            var requested = TalkActionParser.Parse(raw);
+            var intelligent = IntelligentUiParser.Parse(requested.Text);
             IntelligentUiChanged?.Invoke(intelligent.Document);
             var visual = VisualArtifactReply.Parse(intelligent.PlainText);
             var annotated = ScreenAnnotations.Parse(visual.PlainText);
@@ -687,6 +690,8 @@ public sealed class TalkOrchestrator : IDisposable
                 await speechTail.ConfigureAwait(false);
             }
             else await Task.Delay(marks.Count > 0 && !_conversationActive && walkthrough is null ? 6000 : 1800, token).ConfigureAwait(false);
+            token.ThrowIfCancellationRequested();
+            if (walkthrough is null && !selfContainedVisual && requested.Actions.Count > 0) ActionsRequested?.Invoke(requested.Actions);
             var visualRemaining = TimeSpan.FromSeconds(8) - visualStarted.Elapsed;
             // Continuous voice resumes after speech instead of waiting out the eight-second mark display.
             if (!_conversationActive && walkthrough is null && marks.Count > 0 && visualRemaining > TimeSpan.Zero)
