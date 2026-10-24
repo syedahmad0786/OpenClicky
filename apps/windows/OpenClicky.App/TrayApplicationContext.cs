@@ -99,7 +99,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         _talk = new TalkOrchestrator(
             _hotkey,
             _overlay,
-            _capture,
+            CreateTalkCapture(),
             _mic,
             () => _dictationActive
                 ? LocalWhisperModel.IsAvailable

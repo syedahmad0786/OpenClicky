@@ -675,13 +675,15 @@ public sealed class TalkOrchestrator : IDisposable
                 screens = [selected with { Label = "screen 1 — user-selected area. Only these visible pixels were shared. Use :screen1 for marks." }];
                 context += "\nThe user deliberately selected this region. Explain only this visible area.\n";
             }
-            else if (bounds is { } window)
+            else if (bounds is not null)
             {
-                var detail = await Task.Run(() => _capture.CaptureRegionJpegAsync(window, token), token).ConfigureAwait(false)
-                    ?? throw new InvalidOperationException("The current app could not be captured. Select the area you want help with.");
-                if (handle != _windowHandle?.Invoke() || title != _windowTitle?.Invoke())
+                // Every display, cursor monitor first (the capture service excludes OpenClicky's own windows). The
+                // foreground window may be on any of them, so only its handle is compared before and after.
+                var all = await Task.Run(() => _capture.CaptureAllMonitorsJpegAsync(token), token).ConfigureAwait(false);
+                if (all.Count == 0) throw new InvalidOperationException("The screen could not be captured. Select the area you want help with.");
+                if (handle != _windowHandle?.Invoke())
                 { ReportAssistantMessage("The app changed during capture. Ask again for a fresh view."); return; }
-                screens = [detail with { Label = "screen 1 — current app only. Use :screen1 for marks." }];
+                screens = MonitorCap.Apply(all);
             }
             else { screens = []; context += "\nNo screen image is available. Do not invent visible controls; ask the user to select an area if needed.\n"; }
             if (!selfContainedVisual && _foregroundCaptureEligible is not null && !_foregroundCaptureEligible())
@@ -712,8 +714,8 @@ public sealed class TalkOrchestrator : IDisposable
                 try
                 {
                     var changed = (_foregroundCaptureEligible is not null && !_foregroundCaptureEligible())
-                        || (_windowTitle is not null && !string.Equals(title, _windowTitle(), StringComparison.Ordinal))
-                        || (_windowBounds is not null && bounds != _windowBounds())
+                        || (selectedRegion is not null && _windowTitle is not null && !string.Equals(title, _windowTitle(), StringComparison.Ordinal))
+                        || (selectedRegion is not null && _windowBounds is not null && bounds != _windowBounds())
                         || (_windowHandle is not null && handle != _windowHandle());
                     if (changed) Interlocked.Exchange(ref observationChanged, 1);
                 }

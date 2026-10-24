@@ -232,8 +232,8 @@ public class CompanionWorkflowTests
         Assert.Equal(1, talk.Walkthrough.View.Step);
         Assert.DoesNotContain("MARK:", talk.Walkthrough.View.Instruction);
         await talk.MoveWalkthroughAsync(WalkthroughMove.Next);
-        Assert.Equal(0, capture.Calls);
-        Assert.Equal(2, capture.RegionCalls);
+        Assert.Equal(2, capture.Calls);
+        Assert.Equal(0, capture.RegionCalls);
         Assert.Equal(1, talk.Walkthrough.View.Step);
         Assert.False(talk.Walkthrough.View.Busy);
         talk.StopWalkthrough();
@@ -290,22 +290,89 @@ public class CompanionWorkflowTests
     }
 
     [Fact]
-    public async Task ActiveWindowCapture_UsesOnlyFreshRelevantRegionAndMapsItsPoint()
+    public async Task TalkTurn_CapturesEveryMonitorCursorFirstAndMapsPointOnTheSecondScreen()
     {
-        var capture = new Capture { Region = new([], 100, 50, 300, 400, 200, 100, false, "detail") };
+        var capture = new Capture
+        {
+            Monitors =
+            [
+                new([0xff, 0xd8], 100, 50, 0, 0, 200, 100, true, "screen 1 of 2 - cursor is on this screen (primary focus)"),
+                new([0xff, 0xd8], 100, 50, 300, 400, 200, 100, false, "screen 2 of 2 - secondary screen"),
+            ],
+        };
         var overlay = new Overlay();
+        var seen = 0;
         using var talk = new TalkOrchestrator(new Hotkey(), overlay, capture, new Mic(), () => null,
-            () => new Talk((text, token) => Task.FromResult("Here it is. [POINT:50,25:field:screen1]"), inspectScreens: screens =>
-            {
-                var screen = Assert.Single(screens);
-                Assert.Contains("current app only", screen.Label);
-                Assert.Contains(":screen1", screen.Label);
-            }), new Tts(), () => new AppSettings { PersistConversationHistory = false }, log: _ => { },
+            () => new Talk((text, token) => Task.FromResult("Here it is. [POINT:50,25:field:screen2]"), inspectScreens: screens => seen = screens.Count),
+            new Tts(), () => new AppSettings { PersistConversationHistory = false }, log: _ => { },
             windowTitle: () => "Claude", windowBounds: () => (300, 400, 200, 100));
         await talk.SubmitTextAsync(AppKnowledge.ScreenHelpRequest, false);
+        Assert.Equal(1, capture.Calls);
+        Assert.Equal(0, capture.RegionCalls);
+        Assert.Equal(2, seen);
+        Assert.Equal((400, 450), overlay.LastPoint);
+    }
+
+    [Fact]
+    public async Task TalkTurn_SendsAtMostFourMonitors()
+    {
+        var monitors = Enumerable.Range(0, 6)
+            .Select(i => new ScreenCaptureResult([0xff, 0xd8], 100, 50, i * 200, 0, 200, 100, i == 0, $"screen {i + 1} of 6 - x"))
+            .ToList();
+        var seen = new List<string>();
+        using var talk = new TalkOrchestrator(new Hotkey(), new Overlay(), new Capture { Monitors = monitors }, new Mic(), () => null,
+            () => new Talk((_, _) => Task.FromResult("ok [POINT:none]"), inspectScreens: screens => seen.AddRange(screens.Select(s => s.Label))),
+            new Tts(), () => new AppSettings { PersistConversationHistory = false }, log: _ => { },
+            windowTitle: () => "Claude", windowBounds: () => (0, 0, 200, 100));
+        await talk.SubmitTextAsync("What is on screen?", false);
+        Assert.Equal(["screen 1 of 4 - x", "screen 2 of 4 - x", "screen 3 of 4 - x", "screen 4 of 4 - x"], seen);
+    }
+
+    [Fact]
+    public async Task TalkTurn_GuardComparesOnlyTheForegroundHandleAroundCapture()
+    {
+        var providerCalls = 0;
+        var title = "A";
+        var bounds = (0, 0, 200, 100);
+        var capture = new Capture { OnCapture = () => { title = "B"; bounds = (50, 50, 300, 300); } };
+        var messages = new List<string>();
+        using var talk = new TalkOrchestrator(new Hotkey(), new Overlay(), capture, new Mic(), () => null,
+            () => { providerCalls++; return new Talk((_, _) => Task.FromResult("Done. [POINT:none]")); }, new Tts(),
+            () => new AppSettings { PersistConversationHistory = false }, log: _ => { },
+            windowTitle: () => title, windowBounds: () => bounds, windowHandle: () => 7);
+        talk.MessageReceived += (role, text) => { if (role == "OpenClicky") messages.Add(text); };
+        await talk.SubmitTextAsync("What is on screen?", false);
+        Assert.Equal(1, providerCalls);
+        Assert.DoesNotContain(messages, text => text.Contains("changed", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains("Done.", messages);
+    }
+
+    [Fact]
+    public async Task TalkTurn_ForegroundHandleChangeDuringCaptureDiscardsTheTurn()
+    {
+        nint handle = 7;
+        var providerCalls = 0;
+        var messages = new List<string>();
+        using var talk = new TalkOrchestrator(new Hotkey(), new Overlay(), new Capture { OnCapture = () => handle = 8 }, new Mic(), () => null,
+            () => new Talk((_, _) => { providerCalls++; return Task.FromResult("unreachable"); }), new Tts(),
+            () => new AppSettings { PersistConversationHistory = false }, log: _ => { },
+            windowTitle: () => "A", windowBounds: () => (0, 0, 200, 100), windowHandle: () => handle);
+        talk.MessageReceived += (role, text) => { if (role == "OpenClicky") messages.Add(text); };
+        await talk.SubmitTextAsync("What is on screen?", false);
+        Assert.Equal(0, providerCalls);
+        Assert.Contains(messages, text => text.Contains("changed during capture", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task SelectedRegionAsk_StillCapturesOnlyTheRegion()
+    {
+        var capture = new Capture { Region = new([0xff, 0xd8], 100, 50, 300, 400, 200, 100, false, "detail") };
+        using var talk = new TalkOrchestrator(new Hotkey(), new Overlay(), capture, new Mic(), () => null,
+            () => new Talk((_, _) => Task.FromResult("ok [POINT:none]")), new Tts(),
+            () => new AppSettings { PersistConversationHistory = false }, log: _ => { });
+        await talk.SubmitRegionAsync("What is this?", (300, 400, 200, 100));
         Assert.Equal(0, capture.Calls);
         Assert.Equal(1, capture.RegionCalls);
-        Assert.Equal((400, 450), overlay.LastPoint);
     }
 
     [Theory]
@@ -330,7 +397,7 @@ public class CompanionWorkflowTests
         var mic = new Mic();
         var previews = new List<string>();
         var overlay = new Overlay();
-        var capture = new Capture { Region = new([], 100, 50, 0, 0, 200, 100, true, "fresh window") };
+        var capture = new Capture();
         using var talk = new TalkOrchestrator(new Hotkey(), overlay, capture, mic, () => live,
             () => new Talk((text, token) => Task.FromResult("Here it is. [MARK:circle:10,10,30,20:button] [POINT:25,20:button]")),
             new Tts(), () => new AppSettings { PersistConversationHistory = false }, log: _ => { },
@@ -341,8 +408,8 @@ public class CompanionWorkflowTests
         Assert.Contains("Circle the", previews);
         await talk.EndListeningAsync();
         Assert.Equal(0, mic.Starts);
-        Assert.Equal(0, capture.Calls);
-        Assert.Equal(1, capture.RegionCalls);
+        Assert.Equal(1, capture.Calls);
+        Assert.Equal(0, capture.RegionCalls);
         Assert.Single(overlay.Marks);
         Assert.Equal(CompanionVoiceState.Idle, talk.State);
     }
@@ -367,12 +434,12 @@ public class CompanionWorkflowTests
     [Fact]
     public async Task ChangedWindow_DiscardsOldAnswerAndMarks()
     {
-        var title = "ChatGPT";
+        nint handle = 1;
         var overlay = new Overlay();
         var messages = new List<string>();
         using var talk = new TalkOrchestrator(new Hotkey(), overlay, new Capture(), new Mic(), () => null,
-            () => new Talk((text, token) => { title = "Claude"; return Task.FromResult("Old target. [MARK:circle:10,10,30,20:old] [POINT:25,20:old]"); }),
-            new Tts(), () => new AppSettings { PersistConversationHistory = false }, log: _ => { }, windowTitle: () => title);
+            () => new Talk((text, token) => { handle = 2; return Task.FromResult("Old target. [MARK:circle:10,10,30,20:old] [POINT:25,20:old]"); }),
+            new Tts(), () => new AppSettings { PersistConversationHistory = false }, log: _ => { }, windowHandle: () => handle);
         talk.MessageReceived += (_, text) => messages.Add(text);
         await talk.SubmitTextAsync("show projects", false);
         Assert.Null(overlay.LastPoint);
@@ -636,7 +703,6 @@ public class CompanionWorkflowTests
         var capture = new Capture();
         var overlay = new Overlay();
         var messages = new List<string>();
-        capture.Region = new([], 100, 50, 0, 0, 200, 100, true, "fresh window");
         using var talk = new TalkOrchestrator(new Hotkey(), overlay, capture, mic, () => throw new Exception("STT must not run"),
             () => new Talk((text, token) => Task.FromResult("Found it. [POINT:50,25:button]")), new Tts(),
             () => new AppSettings { PersistConversationHistory = false }, log: _ => { },
@@ -644,8 +710,8 @@ public class CompanionWorkflowTests
         talk.MessageReceived += (_, text) => messages.Add(text);
         await talk.SubmitTextAsync("Find the button", remember: false);
         Assert.Equal(0, mic.Starts);
-        Assert.Equal(0, capture.Calls);
-        Assert.Equal(1, capture.RegionCalls);
+        Assert.Equal(1, capture.Calls);
+        Assert.Equal(0, capture.RegionCalls);
         Assert.Contains("Found it.", messages);
         Assert.Equal((100, 50), overlay.LastPoint);
         Assert.Equal(CompanionVoiceState.Idle, talk.State);
@@ -719,7 +785,7 @@ public class CompanionWorkflowTests
     [Fact]
     public async Task StreamingReply_WindowSwitchWithholdsLaterPartialsAndQueuedSpeech()
     {
-        var title = "Original app";
+        nint handle = 1;
         var partials = new List<string>();
         var messages = new List<string>();
         var tts = new GatedRecordingTts();
@@ -727,13 +793,13 @@ public class CompanionWorkflowTests
         using var talk = new TalkOrchestrator(new Hotkey(), new Overlay(), new Capture(), new Mic(), () => null,
             () => stream,
             tts, () => new AppSettings { PersistConversationHistory = false, SpeakReplies = true }, log: _ => { },
-            windowTitle: () => Volatile.Read(ref title));
+            windowHandle: () => Volatile.Read(ref handle));
         talk.AssistantResponseChanged += (text, complete) => { if (!complete) partials.Add(text); };
         talk.MessageReceived += (role, text) => { if (role == "OpenClicky") messages.Add(text); };
 
         var turn = talk.SubmitTextAsync("help", false);
         await stream.TwoUpdatesSent.Task.WaitAsync(TimeSpan.FromSeconds(3));
-        Volatile.Write(ref title, "Different app");
+        Volatile.Write(ref handle, 2);
         tts.ReleaseFirst();
         stream.Continue.TrySetResult();
         await turn;
@@ -1001,7 +1067,7 @@ public class CompanionWorkflowTests
     [Fact]
     public async Task ScreenReferencedVisualStillRequiresCapture()
     {
-        var capture = new Capture();
+        var capture = new Capture { Monitors = [] };
         var messages = new List<string>();
         using var talk = new TalkOrchestrator(new Hotkey(), new Overlay(), capture, new Mic(), () => null,
             () => new Talk((_, _) => Task.FromResult("unreachable")), new Tts(),
@@ -1011,7 +1077,7 @@ public class CompanionWorkflowTests
 
         await talk.SubmitTextAsync("Create a chart from this screenshot", false);
 
-        Assert.Equal(1, capture.RegionCalls);
+        Assert.Equal(1, capture.Calls);
         Assert.Contains(messages, text => text.Contains("could not be captured", StringComparison.OrdinalIgnoreCase));
     }
 
@@ -1054,7 +1120,7 @@ public class CompanionWorkflowTests
     public async Task EligibleUntitledExternalForegroundStillUsesScreenPipeline()
     {
         var providerCalls = 0;
-        var capture = new Capture { Region = new([0xff, 0xd8], 100, 50, 0, 0, 100, 50, true, "external") };
+        var capture = new Capture();
         using var talk = new TalkOrchestrator(new Hotkey(), new Overlay(), capture, new Mic(), () => null,
             () => { providerCalls++; return new Talk((_, _) => Task.FromResult("done [POINT:none]")); },
             new Tts(), () => new AppSettings { PersistConversationHistory = false }, log: _ => { },
@@ -1063,7 +1129,7 @@ public class CompanionWorkflowTests
 
         await talk.SubmitTextAsync("Explain what is on this screen", false);
 
-        Assert.Equal(1, capture.RegionCalls);
+        Assert.Equal(1, capture.Calls);
         Assert.Equal(1, providerCalls);
     }
 
@@ -1182,10 +1248,12 @@ public class CompanionWorkflowTests
         public int Calls;
         public int RegionCalls;
         public ScreenCaptureResult? Region;
+        public IReadOnlyList<ScreenCaptureResult>? Monitors;
+        public Action? OnCapture;
         public Task<ScreenCaptureResult?> CaptureRegionJpegAsync((int X, int Y, int Width, int Height) bounds, CancellationToken token = default)
         { RegionCalls++; return Task.FromResult(Region); }
         public Task<IReadOnlyList<ScreenCaptureResult>> CaptureAllMonitorsJpegAsync(CancellationToken token = default)
-        { Calls++; return Task.FromResult<IReadOnlyList<ScreenCaptureResult>>([new([0xff,0xd8], 100,50,0,0,200,100,true,"test")]); }
+        { Calls++; OnCapture?.Invoke(); return Task.FromResult(Monitors ?? [new([0xff,0xd8], 100,50,0,0,200,100,true,"test")]); }
     }
     private sealed class Mic : IMicrophoneRecorder
     {
