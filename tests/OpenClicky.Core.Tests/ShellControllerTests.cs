@@ -333,6 +333,21 @@ public class ShellControllerTests
     }
 
     [Fact]
+    public async Task UpdateCardReplacesInPlaceAndNeverResurrects()
+    {
+        var (controller, _, surface) = await Started();
+        string?[] Bodies() { using var d = JsonDocument.Parse(surface.Posted.Last(p => p.Contains("shell.state"))); return d.RootElement.GetProperty("state").GetProperty("cards").EnumerateArray().Select(c => c.TryGetProperty("body", out var b) ? b.GetString() : null).ToArray(); }
+        controller.AddCard(TalkCards.MutedSpeaker());
+        controller.AddCard(TalkCards.MicTrouble());
+        controller.UpdateCard(TalkCards.MutedSpeaker(copied: true));
+        Assert.Equal([TalkCards.MicTroubleId, TalkCards.MutedSpeakerId], CardIds(surface)); // kept its place
+        Assert.Equal("I copied my answer to your clipboard.", Bodies()[1]);
+        controller.RemoveCard(TalkCards.MutedSpeakerId); // the user dismissed it
+        controller.UpdateCard(TalkCards.MutedSpeaker(copied: true));
+        Assert.Equal([TalkCards.MicTroubleId], CardIds(surface));
+    }
+
+    [Fact]
     public async Task CardActionsReachTheHostOnlyWhenTheCardOffersThem()
     {
         var (controller, host, surface) = await Started();

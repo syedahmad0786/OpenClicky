@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using OpenClicky.App.Speech;
 using OpenClicky.Core;
 using OpenClicky.Core.Shell;
@@ -18,6 +17,8 @@ internal sealed partial class TrayApplicationContext
     /// <summary>The microphone of the newest local recognizer (a held talk press creates its own).</summary>
     private NAudioMicrophoneRecorder? _sttMic;
     private System.Windows.Forms.Timer? _micWatch;
+    /// <summary>UI thread: Environment.TickCount64 when the talk shortcut started recording (its Pressed).</summary>
+    private long _talkPressedAt;
 
     private NAudioMicrophoneRecorder NewSttMic() => _sttMic = new NAudioMicrophoneRecorder(() => _settings.MicrophoneDeviceId);
 
@@ -25,8 +26,8 @@ internal sealed partial class TrayApplicationContext
     {
         // Previews raise no words, so they never show captions.
         _tts.WordSpoken += word => { if (_settings.Captions) OnUi(() => _shell?.PostCaptionWord(word)); };
-        // SpeechEnded fires per sentence; inside a turn the turn's end clears. Speech outside one (announcements) clears here.
-        _tts.SpeechEnded += () => OnUi(() => { if (_talk.State == CompanionVoiceState.Idle) _shell?.ClearCaptions(); });
+        // SpeechEnded fires per sentence: the page's 1.5 s debounce keeps the bar while the next sentence follows.
+        _tts.SpeechEnded += () => OnUi(() => { if (CaptionsPolicy.ClearOnSpeechEnded(_talk.State)) _shell?.ClearCaptions(); });
         _tts.ReplySpeechStarting += CheckSpeakerBeforeReply;
         _talk.StateChanged += state =>
         {
@@ -36,14 +37,21 @@ internal sealed partial class TrayApplicationContext
             OnUi(() =>
             {
                 if (state == CompanionVoiceState.Processing) { _replyText = null; _copyReplyPending = false; }
-                else if (state == CompanionVoiceState.Idle) _shell?.ClearCaptions();
+                if (CaptionsPolicy.ClearOnState(state)) _shell?.ClearCaptions();
             });
         };
         _talk.AssistantResponseChanged += (text, complete) =>
         {
-            if (complete) OnUi(() => { _replyText = text; if (_copyReplyPending) CopyReply(); });
+            if (complete) OnUi(() =>
+            {
+                _replyText = text;
+                if (_copyReplyPending && CopyReply()) _shell?.UpdateCard(TalkCards.MutedSpeaker(copied: true));
+            });
         };
+        _hotkey.Pressed += (_, _) => _talkPressedAt = Environment.TickCount64;
         _talk.HeldTalkStarted += WatchMicDuringHold;
+        // A cancelled release (Esc, another key) runs after the orchestrator's handler and before the watch's next tick.
+        _hotkey.Released += (_, e) => { if (e is ShortcutEndedEventArgs { Cancelled: true }) CancelMicWatch(); };
     }
 
     /// <summary>Worker thread, once per turn before its first sentence plays: a muted or silent output gets a card and the reply on the clipboard. It still speaks.</summary>
@@ -56,31 +64,32 @@ internal sealed partial class TrayApplicationContext
         {
             if (_shell is not { IsActive: true }) return; // the card says the answer was copied: no card, no copy
             _mutedEndpointId = output.Id;
-            _shell.AddCard(TalkCards.MutedSpeaker());
-            if (_replyText is not null) CopyReply();
-            else _copyReplyPending = true; // streaming: the full reply arrives after the first sentence
+            // The "copied" sentence appears only once the copy worked; streaming: the full reply arrives after the first sentence.
+            if (_replyText is not null) _shell.AddCard(TalkCards.MutedSpeaker(copied: CopyReply()));
+            else { _shell.AddCard(TalkCards.MutedSpeaker()); _copyReplyPending = true; }
         });
     }
 
-    private void CopyReply()
+    /// <summary>Puts this turn's reply on the clipboard; false when there is none or the clipboard refused it.</summary>
+    private bool CopyReply()
     {
         _copyReplyPending = false;
-        if (string.IsNullOrWhiteSpace(_replyText)) return;
-        try { Clipboard.SetText(_replyText, TextDataFormat.UnicodeText); }
+        if (string.IsNullOrWhiteSpace(_replyText)) return false;
+        try { Clipboard.SetText(_replyText, TextDataFormat.UnicodeText); return true; }
         catch (Exception ex) when (ex is System.Runtime.InteropServices.ExternalException or ThreadStateException)
-        { Log("speaker_silent_copy_error=" + ex.GetType().Name); }
+        { Log("speaker_silent_copy_error=" + ex.GetType().Name); return false; }
     }
 
     /// <summary>
-    /// A revealed talk hold: sample the recording microphone every 100 ms until listening ends. A hold of 3 s or more that
-    /// never reached 0.01 gets the microphone card. Only NAudio recorders have a level; with any other recognizer it is skipped.
+    /// A revealed talk hold: sample the recording microphone every 100 ms until listening ends. A hold of 3 s or more (from
+    /// the press) that never reached 0.01 gets the microphone card. Only NAudio recorders have a level; with any other
+    /// recognizer it is skipped. A cancelled hold (Esc, Stop) disposes the watch first, so it never warns.
     /// </summary>
     private void WatchMicDuringHold()
     {
-        _micWatch?.Dispose();
-        _micWatch = null;
+        CancelMicWatch();
         if (_talk.State != CompanionVoiceState.Listening) return;
-        var clock = Stopwatch.StartNew();
+        var pressedAt = _talkPressedAt;
         long heldMs = 0;
         var maxPeak = 0f;
         var measurable = true;
@@ -93,7 +102,7 @@ internal sealed partial class TrayApplicationContext
                     : _sttMic is { IsRecording: true } live ? live : null;
                 if (mic is null) measurable = false;
                 else maxPeak = Math.Max(maxPeak, mic.PeakLevel);
-                heldMs = clock.ElapsedMilliseconds;
+                heldMs = Environment.TickCount64 - pressedAt;
                 return;
             }
             timer.Dispose();
@@ -125,9 +134,11 @@ internal sealed partial class TrayApplicationContext
         }
     }
 
-    private void DisposeTalkFeedback()
+    private void CancelMicWatch()
     {
         _micWatch?.Dispose();
         _micWatch = null;
     }
+
+    private void DisposeTalkFeedback() => CancelMicWatch();
 }

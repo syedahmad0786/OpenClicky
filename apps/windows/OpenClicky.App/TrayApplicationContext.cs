@@ -240,7 +240,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         _home.Disposed += (_, _) => _routineTimer.Dispose();
         // Esc (never swallowed) stops OpenClicky only while it is doing something; a cancelled shortcut ends itself.
         // Speech outside a turn (announcements, previews) stops too; SpeechOutput.Stop is a no-op when nothing plays.
-        _hotkey.EscapePressed += (_, _) => { _tts.Stop(); _shell?.ClearCaptions(); if (IsBusy) Stop(); };
+        _hotkey.EscapePressed += (_, _) => { CancelMicWatch(); _tts.Stop(); _shell?.ClearCaptions(); if (IsBusy) Stop(); };
         // Only once a talk press is past the tap window: a cancelled press must leave no trace.
         _talk.HeldTalkStarted += () => { _submissionCts?.Cancel(); PauseTask(); };
         _hotkey.TextMode += (_, _) => OpenTextMode();
@@ -435,6 +435,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
 
     private void Stop()
     {
+        CancelMicWatch(); // before the state leaves Listening: a stopped hold must not warn
         StopWalkthrough();
         if (_dictationActive) CancelDictation();
         CancelTask();

@@ -65,13 +65,14 @@ internal static class RenderDevices
     {
         if (!string.IsNullOrWhiteSpace(endpointId))
         {
+            MMDevice? selected = null;
             try
             {
-                var selected = enumerator.GetDevice(endpointId);
+                selected = enumerator.GetDevice(endpointId);
                 if (selected.State == DeviceState.Active) return selected;
                 selected.Dispose();
             }
-            catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or ArgumentException) { } // unplugged: the default plays
+            catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or ArgumentException) { selected?.Dispose(); } // unplugged: the default plays
         }
         return enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
     }

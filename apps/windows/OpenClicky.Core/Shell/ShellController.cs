@@ -217,6 +217,15 @@ public sealed class ShellController : IDisposable
         RequestPush();
     }
 
+    /// <summary>Replaces a card that is still shown, keeping its place and expiry; nothing happens once it is gone.</summary>
+    public void UpdateCard(NotchCard card)
+    {
+        var index = _cards.FindIndex(c => c.Card.Id == card.Id);
+        if (index < 0) return;
+        _cards[index] = (card, _cards[index].Expires);
+        RequestPush();
+    }
+
     public void RemoveCard(string id)
     {
         if (_cards.RemoveAll(c => c.Card.Id == id) > 0) RequestPush();
