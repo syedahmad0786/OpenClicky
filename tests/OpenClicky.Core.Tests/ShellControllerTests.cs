@@ -11,7 +11,8 @@ public class ShellControllerTests
     {
         public List<string> Calls { get; } = [];
         public List<string> Files { get; } = [Inside];
-        public ShellInputs CollectInputs() => new(new AppSettings(),
+        public bool ThrowOnCollect { get; set; }
+        public ShellInputs CollectInputs() => ThrowOnCollect ? throw new InvalidOperationException("data source down") : new(new AppSettings(),
             [new ShellJobInput(new WorkJob("j1", "openclicky", "Report", "p", DateTimeOffset.UtcNow, "completed", DateTimeOffset.UtcNow), Files, [])],
             [], [], ShellPhase.Idle, DateTimeOffset.UtcNow);
         public void ToggleTalk() => Calls.Add("talk");
@@ -33,6 +34,9 @@ public class ShellControllerTests
     {
         public List<string> Posted { get; } = [];
         public event Action<string, string>? Message;
+        public event Action? Failed;
+        public void Fail() => Failed?.Invoke();
+        public bool HasListeners => Message is not null || Failed is not null;
         public void Post(string json) => Posted.Add(json);
         public void SetNotch(ShellNotch notch) { }
         public bool Disposed { get; private set; }
@@ -40,12 +44,14 @@ public class ShellControllerTests
         public void Send(object message) { var json = JsonSerializer.Serialize(message); Message?.Invoke(JsonDocument.Parse(json).RootElement.GetProperty("kind").GetString()!, json); }
     }
 
-    private static async Task<(ShellController, FakeHost, FakeSurface)> Started(params string[] extraFiles)
+    private static Task<(ShellController, FakeHost, FakeSurface)> Started(params string[] extraFiles) => Started(null, extraFiles);
+
+    private static async Task<(ShellController, FakeHost, FakeSurface)> Started(Func<long>? clock, params string[] extraFiles)
     {
         var host = new FakeHost();
         host.Files.AddRange(extraFiles);
         var surface = new FakeSurface();
-        var controller = new ShellController(host, () => Task.FromResult<IShellSurface>(surface), push => push());
+        var controller = new ShellController(host, () => Task.FromResult<IShellSurface>(surface), push => push(), clock);
         Assert.True(await controller.StartAsync());
         return (controller, host, surface);
     }
@@ -95,14 +101,84 @@ public class ShellControllerTests
         Assert.DoesNotContain("classic", host.Calls);
     }
 
-    [Fact]
-    public async Task ExecutableFilesAreRevealedNotOpened()
+    [Theory] // at most ShellStateBuilder.MaxFiles (6) files per job reach the state, Inside included
+    [InlineData(@"C:\jobs\j1\output\setup.EXE", @"C:\jobs\j1\output\run.ps1", @"C:\jobs\j1\output\link.lnk", @"C:\jobs\j1\output\x.wsf", @"C:\jobs\j1\output\x.cpl")]
+    [InlineData(@"C:\jobs\j1\output\x.js", @"C:\jobs\j1\output\x.appref-ms", @"C:\jobs\j1\output\noextension", @"C:\jobs\j1\output\notes.md.", @"C:\jobs\j1\output\x.settingcontent-ms")]
+    public async Task NonAllowListedFilesAreRevealedNotOpened(params string[] risky)
     {
-        string[] risky = [@"C:\jobs\j1\output\setup.EXE", @"C:\jobs\j1\output\run.ps1", @"C:\jobs\j1\output\link.lnk"];
         var (_, host, surface) = await Started(risky);
         foreach (var path in risky) surface.Send(new { kind = "file.open", path });
         Assert.DoesNotContain(host.Calls, c => c.StartsWith("open:"));
         Assert.Equal(risky.Select(p => "reveal:" + p), host.Calls.Where(c => c.StartsWith("reveal:")));
+    }
+
+    [Fact]
+    public async Task AllowListedDocumentsAndMediaOpen()
+    {
+        string[] safe = [@"C:\jobs\j1\output\a.PDF", @"C:\jobs\j1\output\b.docx", @"C:\jobs\j1\output\c.Mp4", @"C:\jobs\j1\output\d.htm", @"C:\jobs\j1\output\e.csv"];
+        var (_, host, surface) = await Started(safe);
+        foreach (var path in safe) surface.Send(new { kind = "file.open", path });
+        Assert.DoesNotContain(host.Calls, c => c.StartsWith("reveal:"));
+        Assert.Equal(safe.Select(p => "open:" + p), host.Calls.Where(c => c.StartsWith("open:")));
+    }
+
+    [Fact]
+    public async Task FirstPushFailureFallsBackToClassic()
+    {
+        var host = new FakeHost { ThrowOnCollect = true };
+        var surface = new FakeSurface();
+        var controller = new ShellController(host, () => Task.FromResult<IShellSurface>(surface), push => push());
+        Assert.False(await controller.StartAsync());
+        Assert.False(controller.IsActive);
+        Assert.True(surface.Disposed);
+        Assert.False(surface.HasListeners);
+        Assert.Contains("classic", host.Calls);
+        Assert.Contains(host.Calls, c => c.StartsWith("trace:shell_push_error"));
+    }
+
+    [Fact]
+    public async Task LaterPushFailureKeepsTheShell()
+    {
+        var (controller, host, surface) = await Started();
+        host.ThrowOnCollect = true;
+        controller.AddToast("x");
+        Assert.True(controller.IsActive);
+        Assert.DoesNotContain("classic", host.Calls);
+        host.ThrowOnCollect = false;
+        controller.AddToast("y");
+        Assert.Contains("shell.state", surface.Posted[^1]);
+    }
+
+    [Fact]
+    public async Task SurfaceFailureFallsBackToClassic()
+    {
+        var (controller, host, surface) = await Started();
+        surface.Fail();
+        Assert.False(controller.IsActive);
+        Assert.True(surface.Disposed);
+        Assert.False(surface.HasListeners);
+        Assert.Equal(1, host.Calls.Count(c => c == "classic"));
+        var posted = surface.Posted.Count;
+        controller.AddToast("after");
+        Assert.Equal(posted, surface.Posted.Count);
+    }
+
+    [Fact]
+    public async Task LinkOpenAndUpdateCheckAreRateLimited()
+    {
+        long now = 10_000;
+        var (_, host, surface) = await Started(() => now);
+        surface.Send(new { kind = "link.open", target = "bug" });
+        surface.Send(new { kind = "link.open", target = "whatsNew" });
+        surface.Send(new { kind = "update.check" });
+        surface.Send(new { kind = "update.check" });
+        now += ShellController.IntentCooldownMs - 1;
+        surface.Send(new { kind = "link.open", target = "bug" });
+        now += 1;
+        surface.Send(new { kind = "link.open", target = "whatsNew" });
+        surface.Send(new { kind = "update.check" });
+        Assert.Equal(["url:" + ShellController.BugUrl, "check", "url:" + ShellController.WhatsNewUrl, "check"], host.Calls.Where(c => !c.StartsWith("trace:")));
+        Assert.Contains(host.Calls, c => c.Contains("rate-limited"));
     }
 
     [Fact]

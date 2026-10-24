@@ -6,8 +6,8 @@ namespace OpenClicky.App.Shell;
 
 /// <summary>
 /// <see cref="IShellSurface"/> over the WebView2 <see cref="ShellSurfaceWindow"/> showing <c>shell.html</c>.
-/// While the notch is collapsed it follows the cursor's monitor (checked every 500 ms); the settings tab lifts
-/// the region area cap because its 920×720 panel exceeds 45% of small monitors.
+/// While the notch is collapsed it follows the cursor's monitor (checked every 500 ms); the settings tab raises
+/// the region area cap to the settings envelope because its 920×720 panel exceeds 45% of small monitors.
 /// </summary>
 internal sealed class ShellSurfaceAdapter : IShellSurface
 {
@@ -26,12 +26,14 @@ internal sealed class ShellSurfaceAdapter : IShellSurface
     {
         Window = window;
         window.PageMessage += (_, e) => Message?.Invoke(e.Kind, e.Json);
+        window.SurfaceFailed += (_, _) => Failed?.Invoke();
         _follow.Tick += (_, _) => FollowCursor();
         _follow.Start();
     }
 
     public ShellSurfaceWindow Window { get; }
     public event Action<string, string>? Message;
+    public event Action? Failed;
 
     public static async Task<ShellSurfaceAdapter> CreateAsync(Uri origin, string token, string userDataFolder, bool excludeFromCapture)
     {

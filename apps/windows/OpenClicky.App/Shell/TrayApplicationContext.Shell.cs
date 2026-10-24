@@ -24,6 +24,9 @@ internal sealed partial class TrayApplicationContext : IShellHost
     private ToolStripMenuItem? _pauseItem;
     private Action? _pendingPush;
     private ReleaseInfo? _release;
+    private const string UpdateAvailableTitle = "OpenClicky update available";
+    private string? _announcedRelease;
+    private bool _installingUpdate;
     private readonly bool _background;
     /// <summary>Caches so a push does not hit SQLite or the disk: history refreshes on TurnCommitted, outputs when a job finishes or is opened.</summary>
     private IReadOnlyList<ConversationTurn>? _shellTurns;
@@ -72,6 +75,9 @@ internal sealed partial class TrayApplicationContext : IShellHost
             push?.Invoke();
         };
         _updateTimer.Tick += async (_, _) => await CheckUpdatesAsync(announce: false);
+        _tray.BalloonTipClicked += OnBalloonClicked;
+        // GetUserNameExW can block on a domain lookup: read it off the UI thread, then push the name.
+        GeneralBehaviour.WarmAccountDisplayName(() => OnUi(RequestShellPush));
         _talk.StateChanged += _ => OnUi(RequestShellPush);
         _talk.TurnCommitted += turn => OnUi(() => { _shellTurns = null; _shell?.EndTurn(turn.Assistant); });
         _talk.MessageReceived += (role, text) => OnUi(() =>
@@ -124,32 +130,54 @@ internal sealed partial class TrayApplicationContext : IShellHost
         using (var probe = new HttpClient { Timeout = TimeSpan.FromSeconds(5) })
         using (var page = await probe.GetAsync(new Uri(runtime.Origin, "shell.html"), HttpCompletionOption.ResponseHeadersRead, _lifetime.Token))
             if (!page.IsSuccessStatusCode) throw new FileNotFoundException("The packaged shell page is missing.", "shell.html");
-        _shellSurface = await ShellSurfaceAdapter.CreateAsync(runtime.Origin, runtime.SessionToken, WebViewFolder, !_settings.ShowInScreenRecordings);
+        // The shell page never calls the workspace runtime API, so it gets its own bootstrap token, not the runtime's.
+        var token = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+        _shellSurface = await ShellSurfaceAdapter.CreateAsync(runtime.Origin, token, WebViewFolder, !_settings.ShowInScreenRecordings);
         return _shellSurface;
     }
 
     ShellInputs IShellHost.CollectInputs()
     {
+        // Each source is guarded: one failing store must not leave the shell without state.
         var now = DateTimeOffset.UtcNow;
-        var routines = _work.Routines();
-        var jobs = _work.Jobs().OrderByDescending(j => j.LastRunAt ?? j.CreatedAt).Take(ShellStateBuilder.MaxJobs).Select(job =>
+        var routines = ShellSource<IReadOnlyList<Routine>>("routines", () => _work.Routines(), []);
+        var jobs = ShellSource("jobs", () => _work.Jobs().OrderByDescending(j => j.LastRunAt ?? j.CreatedAt).Take(ShellStateBuilder.MaxJobs).Select(job =>
         {
             var steps = _taskRuns.LastOrDefault(r => r.JobId == job.Id)?.Events
                 .Select(e => e.Message).Where(m => !string.IsNullOrWhiteSpace(m)).TakeLast(ShellStateBuilder.MaxBullets).ToList() ?? [];
-            var output = _work.OutputFolder(job);
             if (!_jobOutputs.TryGetValue(job.Id, out var files))
-                _jobOutputs[job.Id] = files = _work.Outputs(job).Take(ShellStateBuilder.MaxFiles).Select(name => Path.Combine(output, name)).ToList();
+                _jobOutputs[job.Id] = files = ShellSource<IReadOnlyList<string>>("job outputs", () =>
+                {
+                    var output = _work.OutputFolder(job);
+                    return _work.Outputs(job).Take(ShellStateBuilder.MaxFiles).Select(name => Path.Combine(output, name)).ToList();
+                }, []);
             return new ShellJobInput(job, files, steps, steps.LastOrDefault(), routines.Any(r => r.JobId == job.Id && RoutineSchedule.IsDue(r, now)));
-        }).ToList();
-        var chat = _shellTurns ??= _settings.PersistConversationHistory ? ConversationHistoryStore.LoadTurns(maxTurns: 100) : [];
-        return new ShellInputs(_settings, jobs, chat, _connectors.List(), CurrentPhase(), now)
+        }).ToList(), []);
+        // History is cached only once it loaded; a failed load is retried on the next push.
+        var chat = _shellTurns ?? ShellSource<IReadOnlyList<ConversationTurn>>("history", () =>
         {
-            Theme = GeneralBehaviour.ReadTheme(),
-            ReducedMotion = GeneralBehaviour.ReducedMotion(),
+            IReadOnlyList<ConversationTurn> turns = _settings.PersistConversationHistory ? ConversationHistoryStore.LoadTurns(maxTurns: 100) : [];
+            _shellTurns = turns;
+            return turns;
+        }, []);
+        return new ShellInputs(_settings, jobs, chat, ShellSource("connectors", _connectors.List, []), CurrentPhase(), now)
+        {
+            Theme = ShellSource("theme", GeneralBehaviour.ReadTheme, ShellTheme.Light),
+            ReducedMotion = ShellSource("reduced motion", GeneralBehaviour.ReducedMotion, false),
             FallbackUserName = Environment.UserName,
             AccountDisplayName = GeneralBehaviour.AccountDisplayName,
             CurrentVersion = CurrentVersion,
         };
+    }
+
+    private static T ShellSource<T>(string name, Func<T> read, T fallback)
+    {
+        try { return read(); }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Log($"shell: input {name} failed: {ex.GetType().Name}");
+            return fallback;
+        }
     }
 
     private ShellPhase CurrentPhase() => _settings.Paused ? ShellPhase.Paused : _talk.State switch
@@ -204,6 +232,7 @@ internal sealed partial class TrayApplicationContext : IShellHost
     void IShellHost.ShowClassic()
     {
         if (_lifetime.IsCancellationRequested) return; // quitting while the shell was still starting
+        ApplyTaskbarPresence(); // the shell is gone: drop its taskbar button
         if (!_background) ShowClassic();
         _tray.ShowBalloonTip(5000, "OpenClicky", _background
             ? "The new shell could not start. Open the classic window from the tray."
@@ -267,24 +296,38 @@ internal sealed partial class TrayApplicationContext : IShellHost
         try { result = await new UpdateChecker(_updateHttp, CurrentVersion).CheckAsync(_lifetime.Token); }
         catch (OperationCanceledException) { return; }
         var state = result is null ? UpdateState.Error : result.Status == UpdateStatus.Available ? UpdateState.Available : UpdateState.UpToDate;
-        var previous = _release?.Version;
         _release = result?.Status == UpdateStatus.Available ? result.Release : null;
-        // Without the shell (classic fallback) a newly found release is announced through the tray.
-        if (state == UpdateState.Available && _release!.Version != previous && _shell is not { IsActive: true }) announce = true;
+        // Each new release is announced through the tray once (shell or classic); clicking the balloon downloads it.
+        if (state == UpdateState.Available && _release!.Version != _announcedRelease) announce = true;
         _shell?.SetUpdate(new ShellUpdate(CurrentVersion, _release?.Version, state, 0));
-        if (announce)
-            _tray.ShowBalloonTip(5000, "OpenClicky updates", state switch
-            {
-                UpdateState.Available => _shell is { IsActive: true }
-                    ? $"OpenClicky {_release!.Version} is available. Install it from the shell's Settings."
-                    : $"OpenClicky {_release!.Version} is available. Use What's new in the tray menu to download it.",
-                UpdateState.UpToDate => $"OpenClicky {CurrentVersion} is up to date.",
-                _ => "Could not reach GitHub to check for updates.",
-            }, ToolTipIcon.Info);
+        if (!announce) return;
+        if (state == UpdateState.Available)
+        {
+            _announcedRelease = _release!.Version;
+            _tray.ShowBalloonTip(5000, UpdateAvailableTitle, $"OpenClicky {_release.Version} is available — click to download.", ToolTipIcon.Info);
+        }
+        else
+            _tray.ShowBalloonTip(5000, "OpenClicky updates", state == UpdateState.UpToDate
+                ? $"OpenClicky {CurrentVersion} is up to date."
+                : "Could not reach GitHub to check for updates.", ToolTipIcon.Info);
     }
 
-    /// <summary>Downloads the portable ZIP to %LOCALAPPDATA%\OpenClicky\updates, then shows it and the release page.</summary>
+    /// <summary>Only the "update available" balloon carries this title, so a click on it (and no other) installs.</summary>
+    private void OnBalloonClicked(object? sender, EventArgs e)
+    {
+        if (_tray.BalloonTipTitle == UpdateAvailableTitle) _ = InstallUpdateAsync();
+    }
+
+    /// <summary>Downloads the portable ZIP to %LOCALAPPDATA%\OpenClicky\updates, then shows it and the release page. A second call while one runs is ignored.</summary>
     private async Task InstallUpdateAsync()
+    {
+        if (_installingUpdate) { Log("update: install already running"); return; }
+        _installingUpdate = true;
+        try { await InstallUpdateCoreAsync(); }
+        finally { _installingUpdate = false; }
+    }
+
+    private async Task InstallUpdateCoreAsync()
     {
         if (_release is not { } release) { await CheckUpdatesAsync(announce: true); return; }
         var folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OpenClicky", "updates");

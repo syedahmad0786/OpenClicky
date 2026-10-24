@@ -101,9 +101,19 @@ export function NotchCards({ cards, active = true, onPointerEnter, onPointerLeav
 
   const dismiss = (id: string) => { setGone((old) => new Set(old).add(id)); postPage({ kind: "card.dismiss", cardId: id }); };
   const visible = cards.filter((c) => !gone.has(c.id)).slice(0, MAX_VISIBLE_CARDS);
-  if (!visible.length) return null;
+
+  // When the last card goes away under the pointer the wrapper unmounts without a pointerleave: report one.
+  const hovered = useRef(false);
+  const leave = useRef(onPointerLeave);
+  leave.current = onPointerLeave;
+  const empty = visible.length === 0;
+  useEffect(() => { if (empty && hovered.current) { hovered.current = false; leave.current?.(); } }, [empty]);
+
+  if (empty) return null;
   return (
-    <div className="notch-cards" aria-live="polite" onPointerEnter={onPointerEnter} onPointerLeave={onPointerLeave}>
+    <div className="notch-cards" aria-live="polite"
+      onPointerEnter={() => { hovered.current = true; onPointerEnter?.(); }}
+      onPointerLeave={() => { hovered.current = false; onPointerLeave?.(); }}>
       {visible.map((card) => <CardView key={card.id} card={card} onDismiss={dismiss} active={active} />)}
     </div>
   );

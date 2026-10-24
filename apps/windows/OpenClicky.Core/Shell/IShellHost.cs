@@ -28,6 +28,8 @@ public interface IShellSurface : IDisposable
 {
     /// <summary>Raised with (kind, raw JSON) for allow-listed page messages.</summary>
     event Action<string, string>? Message;
+    /// <summary>Raised on the UI thread when the surface can no longer show the page (its browser process died).</summary>
+    event Action? Failed;
     /// <summary>Posts a complete host message, already serialized.</summary>
     void Post(string json);
     /// <summary>The notch state the host last pushed or learned from the page.</summary>

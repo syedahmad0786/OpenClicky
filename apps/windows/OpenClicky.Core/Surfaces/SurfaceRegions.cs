@@ -63,14 +63,21 @@ public static class SurfaceRegions
     /// <summary>Share of the client area the page may claim as hit region unless the host allows large regions.</summary>
     public const double MaxAreaFraction = 0.45;
 
+    /// <summary>The settings panel's visual envelope in CSS px: the most a large-region page (settings tab) may claim.</summary>
+    public const double LargeEnvelopeCssWidth = 960, LargeEnvelopeCssHeight = 760;
+
     /// <summary>
-    /// Keeps a page from turning the whole monitor into an input sink: unless <paramref name="allowLarge"/>,
-    /// rects are dropped from the end until their union covers at most <see cref="MaxAreaFraction"/> of the client area.
+    /// Keeps a page from turning the whole monitor into an input sink: rects are dropped from the end until their union
+    /// covers at most <see cref="MaxAreaFraction"/> of the client area. With <paramref name="allowLarge"/> the limit is
+    /// raised to the settings envelope (<see cref="LargeEnvelopeCssWidth"/>×<see cref="LargeEnvelopeCssHeight"/> CSS px
+    /// at <paramref name="scale"/>, clamped to the client area) when that is larger — never to the whole monitor.
     /// </summary>
-    public static IReadOnlyList<DeviceRegionRect> ApplyAreaCap(IReadOnlyList<DeviceRegionRect> rects, int clientWidth, int clientHeight, bool allowLarge)
+    public static IReadOnlyList<DeviceRegionRect> ApplyAreaCap(IReadOnlyList<DeviceRegionRect> rects, int clientWidth, int clientHeight, bool allowLarge, double scale = 1)
     {
-        if (allowLarge) return rects;
-        var limit = MaxAreaFraction * Math.Max(0, clientWidth) * (double)Math.Max(0, clientHeight);
+        double width = Math.Max(0, clientWidth), height = Math.Max(0, clientHeight);
+        var limit = MaxAreaFraction * width * height;
+        if (allowLarge && double.IsFinite(scale) && scale > 0)
+            limit = Math.Max(limit, Math.Min(Math.Ceiling(LargeEnvelopeCssWidth * scale), width) * Math.Min(Math.Ceiling(LargeEnvelopeCssHeight * scale), height));
         var count = rects.Count;
         while (count > 0 && UnionArea(rects.Take(count).ToList()) > limit) count--;
         return count == rects.Count ? rects : rects.Take(count).ToList();
@@ -97,6 +104,21 @@ public static class SurfaceRegions
             area += (double)covered * (right - left);
         }
         return area;
+    }
+
+    /// <summary>
+    /// Reads a page message's string <c>kind</c>. False for a non-object, a missing or non-string kind, or one that
+    /// does not decode (an unpaired surrogate escape makes <see cref="JsonElement.GetString"/> throw).
+    /// </summary>
+    public static bool TryReadKind(JsonElement message, out string kind)
+    {
+        kind = "";
+        if (message.ValueKind != JsonValueKind.Object
+            || !message.TryGetProperty("kind", out var value)
+            || value.ValueKind != JsonValueKind.String) return false;
+        try { kind = value.GetString() ?? ""; }
+        catch (InvalidOperationException) { return false; }
+        return kind.Length > 0;
     }
 
     private static bool TryRead(JsonElement item, string name, out double value)

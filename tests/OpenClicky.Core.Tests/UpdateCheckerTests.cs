@@ -82,10 +82,32 @@ public sealed class UpdateCheckerTests : IDisposable
     [InlineData("not json {")]
     [InlineData("{}")]
     [InlineData("[]")]
-    [InlineData("{\"tag_name\":\"v2.0.0\"}")]
+    [InlineData("{\"html_url\":\"https://github.com/x\"}")]
     public async Task MalformedJsonReturnsNull(string body)
     {
         Assert.Null(await Checker(body, "1.0.0", out _).CheckAsync(CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("http://github.com/syedahmad0786/OpenClicky/releases/tag/v2.0.0")]
+    [InlineData("https://evil.example/releases/tag/v2.0.0")]
+    [InlineData("https://github.com.evil.example/x")]
+    [InlineData("javascript:alert(1)")]
+    [InlineData("not a url")]
+    public async Task UntrustedReleasePageFallsBackToReleasesList(string? htmlUrl)
+    {
+        var body = htmlUrl is null ? "{\"tag_name\":\"v2.0.0\"}" : $"{{\"tag_name\":\"v2.0.0\",\"html_url\":\"{htmlUrl}\"}}";
+        var result = await Checker(body, "1.0.0", out _).CheckAsync(CancellationToken.None);
+        Assert.Equal(UpdateStatus.Available, result!.Status);
+        Assert.Equal(UpdateChecker.ReleasesPageUrl, result.Release.ReleasePage.AbsoluteUri);
+    }
+
+    [Fact]
+    public async Task GithubReleasePageIsKept()
+    {
+        var result = await Checker(ReleaseJson("v1.2.0"), "1.0.0", out _).CheckAsync(CancellationToken.None);
+        Assert.Equal("https://github.com/syedahmad0786/OpenClicky/releases/tag/v1.2.0", result!.Release.ReleasePage.AbsoluteUri);
     }
 
     [Fact]

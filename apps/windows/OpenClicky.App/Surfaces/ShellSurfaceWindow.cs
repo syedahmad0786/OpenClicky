@@ -32,7 +32,8 @@ internal sealed class ShellSurfaceWindow : Form
     private readonly Uri _pageUri;
     private readonly string _sessionToken;
     private readonly HashSet<string> _allowedKinds;
-    private readonly Queue<string> _pendingMessages = new();
+    private const string StateKind = "shell.state";
+    private readonly Queue<(string Json, bool IsState)> _pendingMessages = new();
     private string _screenDeviceName;
     private CoreWebView2CompositionController? _controller;
     private IDCompositionDevice? _device;
@@ -93,7 +94,10 @@ internal sealed class ShellSurfaceWindow : Form
         set { _excludeFromCapture = value; ApplyDisplayAffinity(); }
     }
 
-    /// <summary>Host-only: lifts the 45%-of-monitor cap on the page's hit regions. Default false.</summary>
+    /// <summary>Raised (posted to the UI thread) when the WebView2 browser process is gone; the surface cannot recover and should be disposed.</summary>
+    public event EventHandler? SurfaceFailed;
+
+    /// <summary>Host-only: raises the 45%-of-monitor cap on the page's hit regions to the settings envelope. Default false.</summary>
     public bool AllowLargeRegions
     {
         get => _allowLargeRegions;
@@ -149,28 +153,67 @@ internal sealed class ShellSurfaceWindow : Form
         core.NewWindowRequested += (_, e) => e.Handled = true;
         core.WebMessageReceived += ReceiveWebMessage;
         core.NavigationCompleted += NavigationCompleted;
+        core.ProcessFailed += ProcessFailed;
         core.Navigate(_pageUri.AbsoluteUri);
+    }
+
+    /// <summary>
+    /// A dead page cannot update its regions, so they are cleared at once (else the old ones eat clicks invisibly).
+    /// A renderer failure reloads the page (it re-reports regions and gets state again on <c>ready</c>);
+    /// a browser-process failure kills this WebView2 for good, so <see cref="SurfaceFailed"/> lets the host fall back.
+    /// </summary>
+    private void ProcessFailed(object? sender, CoreWebView2ProcessFailedEventArgs e)
+    {
+        var kind = e.ProcessFailedKind;
+        if (kind is not (CoreWebView2ProcessFailedKind.BrowserProcessExited or CoreWebView2ProcessFailedKind.RenderProcessExited
+            or CoreWebView2ProcessFailedKind.RenderProcessUnresponsive)) return; // GPU/utility processes restart on their own
+        Trace($"webview process failed: {kind}");
+        _frontendReady = false; // queue posts until the reloaded page reports ready
+        ReleaseInput();
+        SetRegions([]);
+        if (kind == CoreWebView2ProcessFailedKind.BrowserProcessExited)
+        {
+            _ready = false;
+            if (IsHandleCreated) BeginInvoke(() => SurfaceFailed?.Invoke(this, EventArgs.Empty));
+            return;
+        }
+        try { _controller?.CoreWebView2.Reload(); }
+        catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException)
+        {
+            Trace($"reload after renderer failure failed: {ex.GetType().Name}");
+            _ready = false;
+            if (IsHandleCreated) BeginInvoke(() => SurfaceFailed?.Invoke(this, EventArgs.Empty));
+        }
     }
 
     /// <summary>Serializes and posts a message to the page; queued (bounded) until the page reports ready.</summary>
     public void Post(object message)
     {
         var json = JsonSerializer.Serialize(message, MessageJson);
+        var isState = message is JsonElement { ValueKind: JsonValueKind.Object } element
+            && SurfaceRegions.TryReadKind(element, out var kind) && kind == StateKind;
         if (IsHandleCreated && InvokeRequired)
         {
-            BeginInvoke(() => PostJson(json));
+            BeginInvoke(() => PostJson(json, isState));
             return;
         }
-        PostJson(json);
+        PostJson(json, isState);
     }
 
-    private void PostJson(string json)
+    private void PostJson(string json, bool isState)
     {
         if (IsDisposed) return;
         if (!IsReady || _controller is null)
         {
+            // A newer full state supersedes any queued one; other kinds (deltas…) keep their order.
+            if (isState && _pendingMessages.Any(p => p.IsState))
+            {
+                var rest = _pendingMessages.Where(p => !p.IsState).ToList();
+                _pendingMessages.Clear();
+                foreach (var p in rest) _pendingMessages.Enqueue(p);
+            }
             while (_pendingMessages.Count >= MaxPendingMessages) _pendingMessages.Dequeue();
-            _pendingMessages.Enqueue(json);
+            _pendingMessages.Enqueue((json, isState));
             return;
         }
         PostNow(json);
@@ -235,8 +278,9 @@ internal sealed class ShellSurfaceWindow : Form
             case WM_DISPLAYCHANGE:
                 FitToScreen();
                 break;
-            case WM_CAPTURECHANGED when _controller is not null && m.LParam != Handle:
-                // Capture was taken away mid-drag: tell WebView2 no button is held any more.
+            case WM_CAPTURECHANGED when _controller is not null && m.LParam != IntPtr.Zero && m.LParam != Handle:
+                // Another window took capture mid-drag: tell WebView2 no button is held any more.
+                // (lParam 0 is our own ReleaseCapture on button-up, which WebView2 already sees as the up.)
                 if (GetCursorPos(out var cursor) && ScreenToClient(Handle, ref cursor))
                     _controller.SendMouseInput(CoreWebView2MouseEventKind.Move, CoreWebView2MouseEventVirtualKeys.None, 0, new Point(cursor.X, cursor.Y));
                 break;
@@ -316,11 +360,7 @@ internal sealed class ShellSurfaceWindow : Form
         {
             using var document = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = MaxMessageDepth });
             var root = document.RootElement;
-            if (root.ValueKind != JsonValueKind.Object
-                || !root.TryGetProperty("kind", out var kindValue)
-                || kindValue.ValueKind != JsonValueKind.String
-                || kindValue.GetString() is not { } kind
-                || !_allowedKinds.Contains(kind)) return;
+            if (!SurfaceRegions.TryReadKind(root, out var kind) || !_allowedKinds.Contains(kind)) return;
             switch (kind)
             {
                 case "bootstrap.request":
@@ -341,13 +381,15 @@ internal sealed class ShellSurfaceWindow : Form
                 case "ready":
                     if (_frontendReady) return;
                     _frontendReady = true;
-                    while (_pendingMessages.TryDequeue(out var pending)) PostNow(pending);
+                    while (_pendingMessages.TryDequeue(out var pending)) PostNow(pending.Json);
                     PageReady?.Invoke(this, EventArgs.Empty);
                     break;
             }
             PageMessage?.Invoke(this, new ShellSurfaceMessageEventArgs(kind, json));
         }
         catch (JsonException ex) { Trace($"dropped page message: invalid or too deep JSON ({ex.Message})"); }
+        // Untrusted strings that do not decode (unpaired surrogates) throw from JsonElement.GetString.
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException) { Trace($"dropped page message: {ex.GetType().Name}"); }
     }
 
     private void SetRegions(IReadOnlyList<CssRegionRect> regions)
@@ -361,7 +403,7 @@ internal sealed class ShellSurfaceWindow : Form
         if (!IsHandleCreated) return;
         var scale = _controller?.RasterizationScale ?? DeviceDpi / 96.0;
         var all = SurfaceRegions.ToDevice(_cssRegions, scale, ClientSize.Width, ClientSize.Height);
-        var rects = SurfaceRegions.ApplyAreaCap(all, ClientSize.Width, ClientSize.Height, _allowLargeRegions);
+        var rects = SurfaceRegions.ApplyAreaCap(all, ClientSize.Width, ClientSize.Height, _allowLargeRegions, scale);
         if (rects.Count != all.Count) Trace($"region area cap: kept {rects.Count} of {all.Count} rects");
         var region = CreateRectRgn(0, 0, 0, 0);
         foreach (var rect in rects)
@@ -409,7 +451,8 @@ internal sealed class ShellSurfaceWindow : Form
         if (disposing)
         {
             SystemEvents.DisplaySettingsChanged -= DisplaySettingsChanged;
-            _controller?.Close();
+            try { _controller?.Close(); }
+            catch (Exception ex) when (ex is InvalidOperationException or System.Runtime.InteropServices.COMException) { } // browser process already gone
             _controller = null;
             foreach (var com in new object?[] { _rootVisual, _target, _device })
                 if (com is not null) System.Runtime.InteropServices.Marshal.ReleaseComObject(com);

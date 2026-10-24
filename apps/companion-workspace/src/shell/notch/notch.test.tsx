@@ -309,3 +309,44 @@ it("the draft survives switching tabs and collapsing", () => {
   fireEvent.pointerEnter(root());
   expect(screen.getByPlaceholderText("Ask OpenClicky…")).toHaveValue("half a thought");
 });
+
+it("dismissing the last hovered card closes the panel after the grace period", () => {
+  vi.useFakeTimers();
+  mockHost();
+  const view = render(<Notch state={closed({ cards: [fixture.cards[0]] })} />);
+  fireEvent.pointerEnter(root());
+  fireEvent.pointerLeave(root());
+  fireEvent.pointerEnter(view.container.querySelector(".notch-cards")!); // the pointer moved onto the card
+  act(() => { vi.advanceTimersByTime(1000); });
+  expect(root()).toHaveClass("notch--open");
+
+  fireEvent.click(screen.getByRole("button", { name: "Dismiss notification" })); // the card unmounts under the pointer
+  expect(view.container.querySelector(".notch-cards")).toBeNull();
+  act(() => { vi.advanceTimersByTime(149); });
+  expect(root()).toHaveClass("notch--open");
+  act(() => { vi.advanceTimersByTime(1); });
+  expect(root()).toHaveClass("notch--closing");
+});
+
+it("a host-opened panel the pointer never enters closes itself after 6 s and tells the host", () => {
+  vi.useFakeTimers();
+  const host = mockHost();
+  const view = render(<Notch state={closed()} />);
+  view.rerender(<Notch state={open()} />);
+  act(() => { vi.advanceTimersByTime(5_999); });
+  expect(root()).toHaveClass("notch--open");
+  act(() => { vi.advanceTimersByTime(1); });
+  expect(root()).toHaveClass("notch--closing");
+  expect(host.posts("notch.open")).toEqual([{ kind: "notch.open", open: false }]);
+});
+
+it("a host-opened panel stays open once the pointer enters it", () => {
+  vi.useFakeTimers();
+  mockHost();
+  const view = render(<Notch state={closed()} />);
+  view.rerender(<Notch state={open()} />);
+  act(() => { vi.advanceTimersByTime(3_000); });
+  fireEvent.pointerEnter(root());
+  act(() => { vi.advanceTimersByTime(60_000); });
+  expect(root()).toHaveClass("notch--open");
+});

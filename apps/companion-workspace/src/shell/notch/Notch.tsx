@@ -9,6 +9,8 @@ import "./notch.css";
 
 /** Timing from the design spec (milliseconds). The same numbers are in notch.css. */
 export const NOTCH_TIMING = { graceMs: 150, closeMs: 300, reducedMs: 120 } as const;
+/** A panel the host opened (tray, second instance) closes after this long if the pointer never enters it. */
+export const HOST_OPEN_IDLE_MS = 6_000;
 
 type Phase = "collapsed" | "open" | "closing";
 
@@ -26,11 +28,15 @@ export function Notch({ state }: { state: ShellState }) {
   const phaseRef = useRef(phase);
   const grace = useRef<number>(undefined);
   const finish = useRef<number>(undefined);
+  const idle = useRef<number>(undefined);
   const inside = useRef(false);
   const closeMs = state.reducedMotion ? NOTCH_TIMING.reducedMs : NOTCH_TIMING.closeMs;
 
   const setPhase = (next: Phase) => { phaseRef.current = next; setPhaseState(next); };
-  const cancelClose = () => { window.clearTimeout(grace.current); grace.current = undefined; };
+  const cancelClose = () => {
+    window.clearTimeout(grace.current); grace.current = undefined;
+    window.clearTimeout(idle.current); idle.current = undefined;
+  };
   /** Read live from the document, so it cannot go stale when the focused field unmounts. */
   const composerFocused = () => document.activeElement instanceof HTMLTextAreaElement && !!root.current?.contains(document.activeElement);
 
@@ -59,9 +65,18 @@ export function Notch({ state }: { state: ShellState }) {
   const hostOpen = state.notch.open;
   const hostHandlers = useRef({ openPanel, closePanel });
   hostHandlers.current = { openPanel, closePanel };
-  useEffect(() => { (hostOpen ? hostHandlers.current.openPanel : hostHandlers.current.closePanel)(false); }, [hostOpen]);
+  useEffect(() => {
+    if (!hostOpen) { hostHandlers.current.closePanel(false); return; }
+    hostHandlers.current.openPanel(false);
+    if (inside.current) return;
+    // Nobody is pointing at it: do not leave an open panel (and its click-eating region) up forever.
+    idle.current = window.setTimeout(() => {
+      idle.current = undefined;
+      if (!inside.current && !composerFocused()) hostHandlers.current.closePanel(true);
+    }, HOST_OPEN_IDLE_MS);
+  }, [hostOpen]);
   useEffect(() => setTab(state.notch.tab), [state.notch.tab]);
-  useEffect(() => () => { window.clearTimeout(grace.current); window.clearTimeout(finish.current); }, []);
+  useEffect(() => () => { window.clearTimeout(grace.current); window.clearTimeout(finish.current); window.clearTimeout(idle.current); }, []);
 
   const changeTab = useCallback((next: NotchTab) => { setTab(next); postPage({ kind: "notch.tab", tab: next }); }, []);
 

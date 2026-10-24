@@ -37,15 +37,34 @@ internal static class GeneralBehaviour
         return SystemParametersInfo(SpiGetClientAreaAnimation, 0, out var animate, 0) && !animate;
     }
 
-    /// <summary>The signed-in account's full name (GetUserNameExW NameDisplay); empty for local accounts without one. Read once.</summary>
-    public static string AccountDisplayName => _accountName.Value;
-    private static readonly Lazy<string> _accountName = new(() =>
+    /// <summary>
+    /// The signed-in account's full name (GetUserNameExW NameDisplay); empty for local accounts without one, and
+    /// until <see cref="WarmAccountDisplayName"/> has read it. Never blocks.
+    /// </summary>
+    public static string AccountDisplayName => _accountName ?? "";
+    private static volatile string? _accountName;
+
+    /// <summary>Reads the account name once on a background thread (it can block on a domain controller), then calls <paramref name="ready"/>.</summary>
+    public static void WarmAccountDisplayName(Action ready) => Task.Run(() =>
     {
-        const int NameDisplay = 3;
-        uint size = 256;
-        var buffer = new System.Text.StringBuilder((int)size);
-        return GetUserNameExW(NameDisplay, buffer, ref size) ? buffer.ToString() : "";
+        _accountName = ReadAccountDisplayName();
+        ready();
     });
+
+    private static string ReadAccountDisplayName()
+    {
+        const int NameDisplay = 3, ErrorMoreData = 234;
+        try
+        {
+            uint size = 256;
+            var buffer = new System.Text.StringBuilder((int)size);
+            if (GetUserNameExW(NameDisplay, buffer, ref size)) return buffer.ToString();
+            if (Marshal.GetLastWin32Error() != ErrorMoreData || size is 0 or > 32_768) return "";
+            buffer = new System.Text.StringBuilder((int)size); // size now includes the terminator
+            return GetUserNameExW(NameDisplay, buffer, ref size) ? buffer.ToString() : "";
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or ArgumentException) { return ""; }
+    }
 
     [DllImport("secur32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern bool GetUserNameExW(int nameFormat, System.Text.StringBuilder name, ref uint size);

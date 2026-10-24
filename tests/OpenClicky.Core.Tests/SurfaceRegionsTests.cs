@@ -113,6 +113,37 @@ public class SurfaceRegionsTests
         Assert.Equal(2, SurfaceRegions.ApplyAreaCap([new(0, 0, 40, 100, 0), new(0, 0, 40, 100, 0)], 100, 100, false).Count);
     }
 
+    [Fact]
+    public void ApplyAreaCap_LargeModeIsCappedAtTheSettingsEnvelope()
+    {
+        // 1920x1080 at scale 1.5: envelope 1440x1140 clamped to 1440x1080 = 1,555,200 px (45% would be 933,120).
+        DeviceRegionRect panel = new(240, 0, 1440, 1080, 0), extra = new(0, 0, 240, 1080, 0);
+        Assert.Equal([panel], SurfaceRegions.ApplyAreaCap([panel, extra], 1920, 1080, allowLarge: true, scale: 1.5));
+        Assert.Empty(SurfaceRegions.ApplyAreaCap([panel], 1920, 1080, allowLarge: false, scale: 1.5));
+        // A whole-monitor rect is refused even in large mode.
+        Assert.Empty(SurfaceRegions.ApplyAreaCap([new(0, 0, 1920, 1080, 0)], 1920, 1080, allowLarge: true, scale: 1.5));
+        // On a big monitor large mode never allows less than the normal 45%.
+        DeviceRegionRect wide = new(0, 0, 3840, 900, 0); // 3,456,000 px < 45% of 3840x2160 (3,732,480)
+        Assert.Equal([wide], SurfaceRegions.ApplyAreaCap([wide], 3840, 2160, allowLarge: true, scale: 1));
+        // A bad scale falls back to the normal cap.
+        Assert.Empty(SurfaceRegions.ApplyAreaCap([panel], 1920, 1080, allowLarge: true, scale: double.NaN));
+    }
+
+    [Theory]
+    [InlineData("""{"kind":"ready"}""", true, "ready")]
+    [InlineData("""{"kind":"\ud800"}""", false, "")]
+    [InlineData("""{"kind":"a\udc00b"}""", false, "")]
+    [InlineData("""{"kind":""}""", false, "")]
+    [InlineData("""{"kind":5}""", false, "")]
+    [InlineData("""{"other":"ready"}""", false, "")]
+    [InlineData("""["ready"]""", false, "")]
+    public void TryReadKind_RejectsMissingNonStringAndUndecodableKinds(string json, bool ok, string expected)
+    {
+        using var document = JsonDocument.Parse(json);
+        Assert.Equal(ok, SurfaceRegions.TryReadKind(document.RootElement, out var kind));
+        Assert.Equal(expected, kind);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]

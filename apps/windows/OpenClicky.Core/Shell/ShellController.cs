@@ -12,14 +12,22 @@ public sealed class ShellController : IDisposable
     public const string BugUrl = "https://github.com/syedahmad0786/OpenClicky/issues/new";
     public const string FeatureUrl = "https://github.com/syedahmad0786/OpenClicky/discussions/new?category=ideas";
     private const int MaxDelta = 8_000, MaxLiveRows = 40, MaxCards = 12, ToastMs = 6_000;
+    /// <summary>link.open and update.check from the page are ignored when repeated sooner than this.</summary>
+    public const long IntentCooldownMs = 2_000;
 
-    /// <summary>Opening these runs code; file.open reveals them in Explorer instead.</summary>
-    private static readonly HashSet<string> RevealOnly = new(StringComparer.OrdinalIgnoreCase)
-        { ".exe", ".bat", ".cmd", ".com", ".ps1", ".vbs", ".js", ".msi", ".lnk", ".url", ".scr", ".hta", ".jar", ".reg" };
+    /// <summary>Documents and media file.open may open; every other extension (scripts, executables, shortcuts…) is revealed in Explorer.</summary>
+    private static readonly HashSet<string> OpenAllowed = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".doc", ".docx", ".pdf", ".xls", ".xlsx", ".csv", ".ppt", ".pptx", ".txt", ".md", ".rtf", ".json",
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".mp3", ".wav", ".m4a", ".ogg", ".mp4", ".mov", ".webm",
+        ".html", ".htm",
+    };
 
     private readonly IShellHost _host;
     private readonly Func<Task<IShellSurface>> _surfaceFactory;
     private readonly Action<Action> _schedule;
+    private readonly Func<long> _clock;
+    private readonly Dictionary<string, long> _lastIntentAt = new(StringComparer.Ordinal);
     private readonly HashSet<string> _dismissed = new(StringComparer.Ordinal);
     private readonly List<ChatRow> _liveRows = [];
     private readonly List<(NotchCard Card, DateTimeOffset? Expires)> _cards = [];
@@ -33,11 +41,13 @@ public sealed class ShellController : IDisposable
     private bool _pushPending;
 
     /// <param name="schedulePush">Runs the given push later on the UI thread; called at most once per pending push.</param>
-    public ShellController(IShellHost host, Func<Task<IShellSurface>> surfaceFactory, Action<Action> schedulePush)
+    /// <param name="clock">Monotonic milliseconds (tests); defaults to <see cref="Environment.TickCount64"/>.</param>
+    public ShellController(IShellHost host, Func<Task<IShellSurface>> surfaceFactory, Action<Action> schedulePush, Func<long>? clock = null)
     {
         _host = host;
         _surfaceFactory = surfaceFactory;
         _schedule = schedulePush;
+        _clock = clock ?? (() => Environment.TickCount64);
     }
 
     public bool IsActive => _surface is not null;
@@ -60,9 +70,32 @@ public sealed class ShellController : IDisposable
             return false;
         }
         _surface.Message += OnMessage;
+        _surface.Failed += OnSurfaceFailed;
         _surface.SetNotch(_notch);
-        PushNow();
-        return true;
+        if (PushNow()) return true;
+        // Without a first state the page stays blank (and invisible): use the classic window instead.
+        TearDownSurface();
+        _host.ShowClassic();
+        return false;
+    }
+
+    /// <summary>The surface died (WebView2 browser process gone): drop it and fall back to the classic window.</summary>
+    private void OnSurfaceFailed()
+    {
+        if (_surface is null || _disposed) return;
+        _host.Trace("shell_surface_failed");
+        TearDownSurface();
+        _host.ShowClassic();
+    }
+
+    private void TearDownSurface()
+    {
+        if (_surface is not { } surface) return;
+        _surface = null;
+        _pushPending = false;
+        surface.Message -= OnMessage;
+        surface.Failed -= OnSurfaceFailed;
+        surface.Dispose();
     }
 
     /// <summary>Opens the notch peek (tray, second instance, taskbar button).</summary>
@@ -127,8 +160,17 @@ public sealed class ShellController : IDisposable
         if (text == row.Text) return;
         _liveRows[index] = row with { Text = text };
         if (_surface is not null && !_pushPending && text.Length <= ShellStateBuilder.MaxRowText && text.StartsWith(row.Text, StringComparison.Ordinal))
-            for (var at = row.Text.Length; at < text.Length; at += MaxDelta)
-                _surface.Post(JsonSerializer.Serialize(new { kind = "chat.delta", rowId = row.Id, text = text[at..Math.Min(text.Length, at + MaxDelta)] }, ShellContract.Options));
+        {
+            try
+            {
+                for (var at = row.Text.Length; at < text.Length; at += MaxDelta)
+                    _surface.Post(JsonSerializer.Serialize(new { kind = "chat.delta", rowId = row.Id, text = text[at..Math.Min(text.Length, at + MaxDelta)] }, ShellContract.Options));
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                _host.Trace("shell_delta_error=" + ex.GetType().Name);
+            }
+        }
         else RequestPush();
     }
 
@@ -158,9 +200,10 @@ public sealed class ShellController : IDisposable
         _surface?.SetNotch(notch);
     }
 
-    private void PushNow()
+    /// <summary>Builds and posts the state; false (traced) when collecting, building or posting failed.</summary>
+    private bool PushNow()
     {
-        if (_surface is null) return;
+        if (_surface is null) return false;
         try
         {
             var now = DateTimeOffset.UtcNow;
@@ -176,11 +219,26 @@ public sealed class ShellController : IDisposable
             };
             _last = ShellStateBuilder.Build(inputs);
             _surface.Post(JsonSerializer.Serialize(new { kind = "shell.state", state = _last }, ShellContract.Options));
+            return true;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _host.Trace("shell_push_error=" + ex.GetType().Name);
+            return false;
         }
+    }
+
+    /// <summary>False (traced) when the same intent kind arrived less than <see cref="IntentCooldownMs"/> ago.</summary>
+    private bool CooledDown(string kind)
+    {
+        var now = _clock();
+        if (_lastIntentAt.TryGetValue(kind, out var last) && now - last < IntentCooldownMs)
+        {
+            _host.Trace("shell intent rate-limited: " + kind);
+            return false;
+        }
+        _lastIntentAt[kind] = now;
+        return true;
     }
 
     private void OnMessage(string kind, string json)
@@ -193,7 +251,7 @@ public sealed class ShellController : IDisposable
         var id = intent.GetString("id");
         switch (intent.Kind)
         {
-            case "ready": PushNow(); break;
+            case "ready": _ = PushNow(); break;
             case "talk.toggle": _host.ToggleTalk(); break;
             case "text.submit": _host.SubmitText(intent.GetString("text")!); break;
             case "notch.tab":
@@ -224,12 +282,13 @@ public sealed class ShellController : IDisposable
             case "file.open" or "file.reveal":
                 var path = intent.GetString("path")!;
                 if (!InLastState(path)) { _host.Trace("shell file intent refused: path not in the current state"); break; }
-                if (intent.Kind == "file.open" && !RevealOnly.Contains(Path.GetExtension(path))) _host.OpenFile(path);
+                if (intent.Kind == "file.open" && OpenAllowed.Contains(Path.GetExtension(path))) _host.OpenFile(path);
                 else _host.RevealFile(path);
                 break;
-            case "update.check": _host.CheckForUpdates(); break;
+            case "update.check": if (CooledDown(intent.Kind)) _host.CheckForUpdates(); break;
             case "update.install": _host.InstallUpdate(); break;
             case "link.open":
+                if (!CooledDown(intent.Kind)) break;
                 _host.OpenUrl(intent.GetString("target") switch { "whatsNew" => WhatsNewUrl, "bug" => BugUrl, _ => FeatureUrl });
                 break;
             case "app.quit": _host.Quit(); break;
@@ -254,9 +313,6 @@ public sealed class ShellController : IDisposable
     public void Dispose()
     {
         _disposed = true;
-        if (_surface is null) return;
-        _surface.Message -= OnMessage;
-        _surface.Dispose();
-        _surface = null;
+        TearDownSurface();
     }
 }

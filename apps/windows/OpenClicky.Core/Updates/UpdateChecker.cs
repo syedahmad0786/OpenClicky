@@ -49,7 +49,11 @@ public sealed class UpdateChecker
         var root = doc.RootElement;
         if (root.ValueKind != JsonValueKind.Object) return null;
         var tag = Str(root, "tag_name");
-        if (string.IsNullOrWhiteSpace(tag) || !Uri.TryCreate(Str(root, "html_url"), UriKind.Absolute, out var page)) return null;
+        if (string.IsNullOrWhiteSpace(tag)) return null;
+        // The release page is opened in the browser: only a github.com https page is trusted, anything else gets the releases list.
+        var page = Uri.TryCreate(Str(root, "html_url"), UriKind.Absolute, out var html)
+            && html.Scheme == Uri.UriSchemeHttps && html.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase)
+                ? html : new Uri(ReleasesPageUrl);
         var version = StripV(tag.Trim());
         if (ParseSemVer(version) is not { } latest) return null;
 
