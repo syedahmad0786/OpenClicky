@@ -90,6 +90,7 @@ internal sealed partial class TrayApplicationContext : IShellHost
         _talk.AssistantResponseChanged += (text, complete) => OnUi(() => { if (_shell is { IsActive: true }) _shell.StreamAssistant(text, complete); });
         Microsoft.Win32.SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
         WireTalkFeedback();
+        WireTalkActions();
     }
 
     private void OnUserPreferenceChanged(object? sender, Microsoft.Win32.UserPreferenceChangedEventArgs e) => OnUi(RequestShellPush);

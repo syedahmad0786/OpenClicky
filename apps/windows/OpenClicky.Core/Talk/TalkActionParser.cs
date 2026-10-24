@@ -47,9 +47,10 @@ public static class TalkActionParser
             var end = FindClose(reply, i + Tags[tag].Prefix.Length, out var value);
             if (end < 0)
             {
-                if (partial) { removed = true; break; }
-                text.Append(reply[i++]);
-                continue;
+                // No later tag can close either (its value scan is a suffix of this one), so stop: the scan stays linear.
+                if (partial) removed = true;
+                else text.Append(reply, i, reply.Length - i);
+                break;
             }
             removed = true;
             if (actions.Count < MaxActions && Validate(Tags[tag].Kind, value.Trim()) is { } action) actions.Add(action);
@@ -63,13 +64,13 @@ public static class TalkActionParser
         return new(removed ? text.ToString().Trim() : reply, actions);
     }
 
-    /// <summary>Index just past the closing ']' (a backslash-escaped \] stays in the value), or -1 when unclosed.</summary>
+    /// <summary>Index just past the closing ']', or -1 when unclosed. In the value \] is a literal ']' and \\ a literal backslash.</summary>
     private static int FindClose(string s, int start, out string value)
     {
         var sb = new StringBuilder();
         for (var j = start; j < s.Length; j++)
         {
-            if (s[j] == '\\' && j + 1 < s.Length && s[j + 1] == ']') { sb.Append(']'); j++; }
+            if (s[j] == '\\' && j + 1 < s.Length && s[j + 1] is ']' or '\\') sb.Append(s[++j]);
             else if (s[j] == ']') { value = sb.ToString(); return j + 1; }
             else sb.Append(s[j]);
         }
@@ -82,7 +83,7 @@ public static class TalkActionParser
         if (value.Length == 0) return null;
         if (kind != TalkActionKind.Open) return value.Length <= MaxTextLength ? new(kind, value) : null;
         return Uri.TryCreate(value, UriKind.Absolute, out var uri)
-            && uri.Scheme is "http" or "https" && uri.UserInfo.Length == 0
-            ? new(kind, value) : null;
+            && uri.Scheme is "http" or "https" && uri.UserInfo.Length == 0 && uri.AbsoluteUri.Length <= MaxTextLength
+            ? new(kind, uri.AbsoluteUri) : null;
     }
 }

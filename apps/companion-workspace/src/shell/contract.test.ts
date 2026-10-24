@@ -103,6 +103,12 @@ describe("shell contract", () => {
     expect(parseShellState(deny("x".repeat(2_001)))).toBeNull();
   });
 
+  it("card bodies hold a full 2,000-char talk action", () => {
+    const card = (body: string) => ({ ...fixture, cards: [{ id: "c", kind: "textResponse", title: "t", body, actions: [] }] });
+    expect(parseShellState(card("x".repeat(2_000)))).not.toBeNull();
+    expect(parseShellState(card("x".repeat(2_001)))).toBeNull();
+  });
+
   it("enum values match the shared list (drift guard; C# checks the same file)", () => {
     const top = shellStateSchema.shape;
     const settings = top.settings.shape;

@@ -116,6 +116,9 @@ internal sealed partial class TrayApplicationContext
             case (TalkCards.MicTroubleId, TalkCards.MicSettingsAction):
                 _shell?.OpenNotch(NotchTab.Settings, "microphone");
                 return false;
+            case (TalkActionText.CopyCardId, TalkActionText.UndoAction):
+                UndoTalkCopy();
+                return false;
             default:
                 Log("shell: card action not handled: " + actionId);
                 return false;

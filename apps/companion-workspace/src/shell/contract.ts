@@ -59,7 +59,7 @@ const notchCardSchema = z.object({
   id,
   kind: z.enum(cardKinds),
   title: text(160),
-  body: text(1_000).optional(),
+  body: text(2_000).optional(),
   actions: z.array(z.object({ id, label, style: z.enum(["primary", "secondary", "danger"]) }).strict()).max(3),
   autoDismissMs: z.number().int().min(0).max(600_000).optional(),
 }).strict();

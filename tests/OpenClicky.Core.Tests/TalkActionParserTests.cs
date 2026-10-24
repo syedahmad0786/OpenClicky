@@ -92,6 +92,48 @@ public class TalkActionParserTests
     }
 
     [Fact]
+    public void DoubleBackslashIsALiteralBackslash()
+    {
+        var r = TalkActionParser.Parse(@"path [TYPE:C:\\Users\\me] then [COPY:ends with \\] and [COPY:a\b \] c]");
+        Assert.Equal("path then and", r.Text);
+        Assert.Equal([@"C:\Users\me", @"ends with \", @"a\b ] c"], r.Actions.Select(a => a.Value));
+    }
+
+    [Fact]
+    public void OpenStoresTheNormalisedAddressAndCapsItsLength()
+    {
+        Assert.Equal("https://example.com/a%20b", Assert.Single(TalkActionParser.Parse("[OPEN:HTTPS://Example.COM/a b]").Actions).Value);
+        Assert.Empty(TalkActionParser.Parse($"[OPEN:https://example.com/{new string('a', 2000)}]").Actions);
+    }
+
+    [Fact]
+    public void MarkLabelsThatLookLikeActionsAreLeftAlone()
+    {
+        const string reply = "here [MARK:text:10,20:OPEN:https://example.com:screen1] and [MARK:rect:1,2,3,4:COPY: TYPE:x:screen1]";
+        var r = TalkActionParser.Parse(reply);
+        Assert.Empty(r.Actions);
+        Assert.Equal(reply, r.Text);
+    }
+
+    [Fact]
+    public void ManyUnclosedTagsScanInLinearTime()
+    {
+        var reply = "a [COPY:x] b " + string.Concat(Enumerable.Repeat("[COPY:", 50_000));
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var r = TalkActionParser.Parse(reply);
+        Assert.True(clock.ElapsedMilliseconds < 1_000, $"took {clock.ElapsedMilliseconds} ms");
+        Assert.Equal("a b " + reply[13..], r.Text);
+        Assert.Equal("x", Assert.Single(r.Actions).Value);
+    }
+
+    [Theory]
+    [InlineData("opening [OPEN:http", "opening")]
+    [InlineData("typing [TYPE:", "typing")]
+    [InlineData(@"typing [TYPE:C:\\Us", "typing")]
+    public void PartialModeCutsSplitOpenAndTypeTags(string partial, string expected) =>
+        Assert.Equal(expected, TalkActionParser.Parse(partial, partial: true).Text);
+
+    [Fact]
     public void CoexistsWithTrailingPoint()
     {
         var r = TalkActionParser.Parse("opening it [OPEN:https://example.com] [POINT:10,20:button]");

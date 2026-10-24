@@ -27,7 +27,7 @@ public class CompanionWorkflowTests
             Assert.Equal(["Opening it now. Copied."], messages);
             Assert.Equal("Opening it now. Copied.", string.Join(" ", tts.Spoken));
             var actions = Assert.Single(raised);
-            Assert.Equal([new TalkAction(TalkActionKind.Open, "https://example.com"), new TalkAction(TalkActionKind.Copy, "hi there")], actions);
+            Assert.Equal([new TalkAction(TalkActionKind.Open, "https://example.com/"), new TalkAction(TalkActionKind.Copy, "hi there")], actions);
         }
         finally { ConversationHistoryStore.Clear(historyPath); }
     }
@@ -735,6 +735,27 @@ public class CompanionWorkflowTests
         Assert.Equal(["Done.", "Next."], tts.Spoken);
         Assert.All(partials, text => Assert.DoesNotContain("COPY", text));
         Assert.Equal(1, raised);
+    }
+
+    [Fact]
+    public async Task StreamingReply_SplitOpenAndTypeTagsNeverLeak()
+    {
+        var tts = new RecordingTts();
+        var partials = new List<string>();
+        const string open = "Opening it. [OPEN:https://example.com/a]";
+        using var talk = new TalkOrchestrator(new Hotkey(), new Overlay(), new Capture(), new Mic(), () => null,
+            () => new StreamingTalk(["Opening it. [OPEN:http", open + " Typing. [TY", open + " Typing. [TYPE:", open + " Typing. [TYPE:hi",
+                open + " Typing. [TYPE:hi] Done.", open + " Typing. [TYPE:hi] Done."]),
+            tts, () => new AppSettings { PersistConversationHistory = false, SpeakReplies = true }, log: _ => { });
+        talk.AssistantResponseChanged += (text, complete) => { if (!complete) partials.Add(text); };
+        IReadOnlyList<TalkAction>? actions = null;
+        talk.ActionsRequested += a => actions = a;
+
+        await talk.SubmitTextAsync("open and type", false);
+
+        Assert.All(tts.Spoken.Concat(partials), text => { Assert.DoesNotContain("[", text); Assert.DoesNotContain("http", text); });
+        Assert.Equal("Opening it. Typing. Done.", string.Join(" ", tts.Spoken));
+        Assert.Equal([new TalkAction(TalkActionKind.Open, "https://example.com/a"), new TalkAction(TalkActionKind.Type, "hi")], actions);
     }
 
     [Fact]

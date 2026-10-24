@@ -24,7 +24,7 @@
 
 .notch-card__main { flex: 1; min-width: 0; }
 .notch-card__title { margin: 0; font-size: 13px; font-weight: 600; line-height: 18px; overflow-wrap: anywhere; }
-.notch-card__body { margin: 2px 0 0; font-size: 12px; line-height: 1.4; color: var(--text-2); overflow-wrap: anywhere; }
+.notch-card__body { margin: 2px 0 0; max-height: 9.8em; overflow-y: auto; font-size: 12px; line-height: 1.4; color: var(--text-2); overflow-wrap: anywhere; white-space: pre-wrap; }
 .notch-card__actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .notch-card__close {
   position: absolute; top: 8px; right: 8px; display: grid; place-items: center; width: 22px; height: 22px; padding: 0;
