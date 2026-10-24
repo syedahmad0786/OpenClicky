@@ -27,6 +27,9 @@ internal sealed class ShellSurfaceAdapter : IShellSurface
         Window = window;
         window.PageMessage += (_, e) => Message?.Invoke(e.Kind, e.Json);
         window.SurfaceFailed += (_, _) => Failed?.Invoke();
+        // Any move or resize of the surface (following the cursor, a display, DPI or layout change refit) moves the notch.
+        window.LocationChanged += (_, _) => ScreenChanged?.Invoke();
+        window.SizeChanged += (_, _) => ScreenChanged?.Invoke();
         _follow.Tick += (_, _) => FollowCursor();
         _follow.Start();
     }
@@ -34,7 +37,7 @@ internal sealed class ShellSurfaceAdapter : IShellSurface
     public ShellSurfaceWindow Window { get; }
     public event Action<string, string>? Message;
     public event Action? Failed;
-    /// <summary>The surface moved to another monitor (the companion docks at its top centre).</summary>
+    /// <summary>The surface moved or was resized (another monitor, or a display / DPI / layout change): the notch point moved.</summary>
     public event Action? ScreenChanged;
 
     public static async Task<ShellSurfaceAdapter> CreateAsync(Uri origin, string token, string userDataFolder, bool excludeFromCapture)
@@ -70,9 +73,7 @@ internal sealed class ShellSurfaceAdapter : IShellSurface
     {
         if (_notch.Open || Window.IsDisposed) return;
         var screen = Screen.FromPoint(Cursor.Position);
-        if (Window.Bounds.Equals(screen.Bounds)) return;
-        Window.MoveToScreen(screen);
-        ScreenChanged?.Invoke();
+        if (!Window.Bounds.Equals(screen.Bounds)) Window.MoveToScreen(screen); // raises LocationChanged / SizeChanged
     }
 
     public void Dispose()

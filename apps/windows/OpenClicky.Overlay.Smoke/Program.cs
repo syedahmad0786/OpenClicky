@@ -235,7 +235,7 @@ internal static class Program
             return 25;
         }
 
-        var dockFailure = ValidateDockAndDetach(overlay, vs, targetX, targetY);
+        var dockFailure = ValidateDockAndDetach(overlay, fixture, vs, targetX, targetY);
         if (dockFailure is not null)
         {
             Console.Error.WriteLine("FAIL: dock / detach " + dockFailure);
@@ -329,7 +329,7 @@ internal static class Program
     /// (the cursor is moved, never clicked) detaches the companion under a 36 DIP click target that really receives the
     /// click, and it reattaches after 3 s. Restores the cursor position.
     /// </summary>
-    private static string? ValidateDockAndDetach(BuddyOverlayController overlay, Rectangle vs, int targetX, int targetY)
+    private static string? ValidateDockAndDetach(BuddyOverlayController overlay, Form fixture, Rectangle vs, int targetX, int targetY)
     {
         var cursorWindow = overlay.WindowHandle;
         var catcher = overlay.WindowHandles[2];
@@ -380,14 +380,15 @@ internal static class Program
         var home = new Point(vs.Left + vs.Width / 2, vs.Top + vs.Height / 2);
         var clicks = 0;
         overlay.DetachedClicked += () => clicks++;
-        void Shake()
+        void ShakeAt(Point at)
         {
             for (var i = 0; i < 16; i++)
             {
-                Cursor.Position = new Point(home.X + (i % 2 == 0 ? 40 : -40), home.Y);
+                Cursor.Position = new Point(at.X + (i % 2 == 0 ? 40 : -40), at.Y);
                 Pump(25);
             }
         }
+        void Shake() => ShakeAt(home);
         try
         {
             Shake();
@@ -395,6 +396,14 @@ internal static class Program
             NativeMethods.GetWindowRect(catcher, out var box);
             var middle = new Point((box.Left + box.Right) / 2, (box.Top + box.Bottom) / 2);
             if (NativeMethods.WindowFromPoint(middle) != catcher) return "the click target is not what Windows hit-tests at the companion";
+            // Press, drag away, release elsewhere: not a click, and it must not arm the next one.
+            NativeMethods.SendMessage(catcher, 0x201, IntPtr.Zero, IntPtr.Zero);
+            NativeMethods.SendMessage(catcher, 0x202, IntPtr.Zero, (IntPtr)((500 << 16) | 500));
+            Pump(100);
+            if (clicks != 0 || !Visible(catcher)) return "a press dragged off the click target counted as a click";
+            NativeMethods.SendMessage(catcher, 0x202, IntPtr.Zero, IntPtr.Zero);
+            Pump(100);
+            if (clicks != 0) return "a stray release armed a click";
             NativeMethods.SendMessage(catcher, 0x201, IntPtr.Zero, IntPtr.Zero);
             NativeMethods.SendMessage(catcher, 0x202, IntPtr.Zero, IntPtr.Zero);
             if (!PumpUntil(() => clicks == 1 && !Visible(catcher), TimeSpan.FromSeconds(1))) return $"the click did not raise DetachedClicked once (clicks={clicks})";
@@ -412,8 +421,55 @@ internal static class Program
 
             overlay.ApplyStyle(Style(CursorPresence.Following));
             Pump(1100);
+
+            // A drag with the button held (over our own fixture) is a scribble, not a shake.
+            var drag = new Point(fixture.Left + fixture.Width / 2, fixture.Top + fixture.Height / 2);
+            Cursor.Position = drag;
+            Pump(100);
+            NativeMethods.mouse_event(0x0002, 0, 0, 0, 0);
+            try
+            {
+                ShakeAt(drag);
+                Pump(300);
+                if (Visible(catcher)) return "a drag with the button held detached the companion";
+            }
+            finally
+            {
+                NativeMethods.mouse_event(0x0004, 0, 0, 0, 0);
+                Pump(50);
+            }
+
+            // A running agent task injects input: no detaching, and a detached companion is dropped when one starts.
+            var taskRunning = true;
+            overlay.DetachSuppressed = () => taskRunning;
+            Pump(1100);
             Shake();
-            if (!PumpUntil(() => Visible(catcher), TimeSpan.FromSeconds(2))) return "a shake did not detach after re-enabling";
+            Pump(300);
+            if (Visible(catcher)) return "a shake detached the companion while an agent task was running";
+            taskRunning = false;
+            Pump(1100);
+            Shake();
+            if (!PumpUntil(() => Visible(catcher), TimeSpan.FromSeconds(2))) return "a shake did not detach once the task stopped";
+            taskRunning = true;
+            if (!PumpUntil(() => !Visible(catcher), TimeSpan.FromSeconds(1))) return "a starting task left the click target up";
+            overlay.DetachSuppressed = null;
+
+            // A full-screen foreground window (a game, F11 video) owns the mouse.
+            var monitor = Screen.FromPoint(home).Bounds;
+            using (var full = new Form { FormBorderStyle = FormBorderStyle.None, StartPosition = FormStartPosition.Manual, Bounds = monitor, Text = "OpenClicky full-screen fixture" })
+            {
+                full.Show();
+                full.Activate();
+                if (!PumpUntil(() => NativeMethods.GetForegroundWindow() == full.Handle, TimeSpan.FromSeconds(5))) return "the full-screen fixture did not become foreground";
+                Pump(400);
+                Shake();
+                Pump(300);
+                if (Visible(catcher)) return "a shake detached the companion over a full-screen window";
+            }
+            fixture.Activate();
+            Pump(1100);
+            Shake();
+            if (!PumpUntil(() => Visible(catcher), TimeSpan.FromSeconds(2))) return "a shake did not detach after the full-screen window closed";
             overlay.Hide();
             if (overlay.WindowHandles.Any(Visible)) return "Hide left an overlay window (the click target?) visible";
         }
@@ -469,6 +525,9 @@ internal static class Program
 
         [DllImport("user32.dll")]
         public static extern IntPtr WindowFromPoint(Point point);
+
+        [DllImport("user32.dll")]
+        public static extern void mouse_event(int flags, int dx, int dy, int data, IntPtr extraInfo);
 
         [DllImport("user32.dll")]
         public static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);

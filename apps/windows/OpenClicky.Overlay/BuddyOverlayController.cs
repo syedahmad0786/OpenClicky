@@ -72,7 +72,6 @@ public sealed class BuddyOverlayController : IOverlayController
     private const double WordSeconds = 0.06, HoldSeconds = 4, FadeSeconds = 0.4, ReducedFadeSeconds = 0.12, MarkSeconds = 0.35;
     private const float BarEase = 0.35f, ListeningBubbleShiftDip = 16;
     private const int MaxLabelChars = 120;
-    private const double DockBubbleSeconds = 1.1, DockShrinkSeconds = 0.6, DockGrowSeconds = 0.3, DockReducedSeconds = 0.12;
     private const float CatcherDip = 36;
     private const string DockBubbleText = "i'll wait up here";
 
@@ -114,10 +113,9 @@ public sealed class BuddyOverlayController : IOverlayController
     private readonly ShakeDetector _shake = new();
     private readonly DetachState _detach = new();
     private Pt? _notchPoint;
-    private DockPhase _dock = DockPhase.None;
-    private double _dockStart;
-    private FlightPath? _dockFlight;
-    private bool _dockBubbleNext;
+    private readonly DockMachine _dock = new();
+    private double _lastFullscreenCheck = double.NegativeInfinity;
+    private bool _foregroundFullscreen;
     private Rectangle? _catcherRect;
 
     /// <param name="log">Diagnostics (window names and Win32 codes only).</param>
@@ -140,6 +138,12 @@ public sealed class BuddyOverlayController : IOverlayController
 
     /// <summary>Raised (UI thread) when the detached companion is clicked; it has already reattached.</summary>
     public event Action? DetachedClicked;
+
+    /// <summary>
+    /// Asked every frame (UI thread): true while an agent task is running unpaused or driving. Then shake detection is off
+    /// and any detached state and click target are dropped, so injected zig-zags and clicks cannot detach or be swallowed.
+    /// </summary>
+    public Func<bool>? DetachSuppressed { get; set; }
 
     /// <summary>Every overlay window exists from construction until disposal.</summary>
     public IReadOnlyList<nint> WindowHandles => _disposed ? [] : [_cursorWindow.Handle, _drawingWindow.Handle, _catcher.Handle];
@@ -227,7 +231,7 @@ public sealed class BuddyOverlayController : IOverlayController
     public void ApplyStyle(CompanionStyle style) => Post(() =>
     {
         // A visible companion that is told to dock says so before it goes; one that was never shown just stays away.
-        if (_style.Presence == CursorPresence.Following && style.Presence == CursorPresence.Docked && _cursorShown) _dockBubbleNext = true;
+        _dock.PresenceChanged(_style.Presence, style.Presence, _cursorShown);
         _style = style;
         _accent = ParseAccent(style.AccentHex);
         _drawingDirty = true;
@@ -295,11 +299,8 @@ public sealed class BuddyOverlayController : IOverlayController
             _drawingWindow.HideWindow();
             HideCatcher();
             _cursorShown = false;
-            if (_dock is DockPhase.Bubble or DockPhase.FlyIn or DockPhase.Shrink)
-            {
-                ClearDockBubble();
-                _dock = DockPhase.Gone; // docking was interrupted; the next appearance grows out of the notch
-            }
+            ApplyDockEffect(_dock.Interrupt()); // docking is abandoned; the next appearance grows out of the notch
+            DropDetach();
         }
         if (_ui.InvokeRequired) _ui.Invoke(HideNow);
         else HideNow();
@@ -339,14 +340,14 @@ public sealed class BuddyOverlayController : IOverlayController
 
     private double Now => _clock.Elapsed.TotalSeconds;
 
-    private bool CursorVisible => !_hidden && _style.Presence != CursorPresence.Off && _dock != DockPhase.Gone;
+    private bool CursorVisible => !_hidden && _style.Presence != CursorPresence.Off && _dock.Visible;
 
     /// <summary>While docked, only a POINT (or marks being drawn) brings the companion out of the notch.</summary>
     private bool WantsCursorOut => _mode == Mode.Pointing || (_mode == Mode.Responding && _marks.Count > 0);
 
-    private Pt Notch => _notchPoint ?? (Screen.PrimaryScreen is { } primary
-        ? new Pt(primary.Bounds.Left + primary.Bounds.Width / 2f, primary.Bounds.Top + 4)
-        : new Pt(0, 4));
+    /// <summary>The stored notch point if a live monitor holds it, else the nearest live monitor's top centre.</summary>
+    private Pt Notch => NotchPoint.Resolve(_notchPoint,
+        Screen.AllScreens.Select(screen => new Box(screen.Bounds.X, screen.Bounds.Y, screen.Bounds.Width, screen.Bounds.Height)).ToArray());
 
     /// <summary>Ends any <see cref="Hide"/> and renders a frame now, so visibility changes before the call returns.</summary>
     private void Show()
@@ -404,7 +405,8 @@ public sealed class BuddyOverlayController : IOverlayController
         var cursorScale = DpiScale.ForPoint(cursor);
         var follow = new Pt(cursor.X + CursorConstants.TipOffsetX * cursorScale, cursor.Y + CursorConstants.TipOffsetY * cursorScale);
         var spring = _spring ??= new CursorSpring(follow);
-        StepDock(now, spring);
+        var notch = _style.Presence == CursorPresence.Docked || _dock.Phase != DockPhase.None ? Notch : default;
+        ApplyDockEffect(_dock.Step(now, new DockInput(_style.Presence, WantsCursorOut, _cursorShown, _style.ReducedMotion, spring.Position, notch)), spring);
         if (!CursorVisible)
         {
             _cursorWindow.HideWindow();
@@ -413,22 +415,22 @@ public sealed class BuddyOverlayController : IOverlayController
             return;
         }
 
-        StepDetach(cursor, (long)(now * 1000), spring.Position);
+        StepDetach(cursor, now, spring.Position);
         var target = _mode == Mode.Pointing && _pointTarget is { } point ? new Pt(point.X, point.Y) : _detach.Detached ? _detach.At : follow;
-        if (!_cursorShown && _dock != DockPhase.Grow) spring.Snap(follow); // reappearing: start beside the real cursor, not where it was last seen
-        if (_dock == DockPhase.FlyIn && _dockFlight is { } flight) spring.Snap(flight.At(now - _dockStart));
-        else if (_dock == DockPhase.Shrink) { if (!_style.ReducedMotion) spring.Snap(Notch); }
+        if (!_cursorShown && _dock.Phase != DockPhase.Grow) spring.Snap(follow); // reappearing: start beside the real cursor, not where it was last seen
+        if (_dock.FlightAt(now) is { } flying) spring.Snap(flying);
+        else if (_dock.Phase == DockPhase.Shrink) { if (!_style.ReducedMotion) spring.Snap(Notch); }
         else if (_style.ReducedMotion) spring.Snap(target);
         else spring.Step(target, dt);
 
-        var (dockScale, dockAlpha) = DockLook(now);
+        var (dockScale, dockAlpha) = _dock.Look(now, _style.ReducedMotion);
         var tip = new PointF(spring.Position.X, spring.Position.Y);
         var s = DpiScale.ForPoint(Point.Round(tip));
         UpdateCatcher(tip, s);
         var still = (spring.Position, s, _mode, _pointLabel, _accent, dockScale, dockAlpha);
         if (_mode is not (Mode.Listening or Mode.Processing) && _line is null && _cursorShown && still == _lastStill) return;
         _lastStill = still;
-        var chrome = _dock is not (DockPhase.FlyIn or DockPhase.Shrink); // bars, dots and bubbles stay behind as it flies into the notch
+        var chrome = _dock.Chrome; // bars, dots and bubbles stay behind as it flies into the notch
         var cs = s * dockScale;
         var triangle = CursorRenderer.Triangle(tip, cs);
         var bounds = CursorRenderer.CompanionBounds(triangle, cs);
@@ -483,101 +485,45 @@ public sealed class BuddyOverlayController : IOverlayController
         _cursorShown = true;
     }
 
+    /// <summary>Acts on what the dock machine changed: the bubble, and growing out of the notch.</summary>
+    private void ApplyDockEffect(DockEffect effect, CursorSpring? spring = null)
+    {
+        if (effect.HasFlag(DockEffect.BubbleEnded) && _line == DockBubbleText) SetLine(null, false); // a POINT's own line is not ours to clear
+        if (effect.HasFlag(DockEffect.BubbleStarted)) SetLine(DockBubbleText, false);
+        if (effect.HasFlag(DockEffect.GrowStarted)) spring?.Snap(Notch);
+    }
+
     /// <summary>
-    /// Advances the dock: a companion with nothing to point at says it will wait, flies to the notch point, shrinks away and
-    /// stays hidden (Gone); a POINT or marks, or leaving Docked, grows it back out of the notch.
+    /// Feeds the shake detector while the companion could detach. A held mouse button (a drag or scribble), a full-screen
+    /// foreground window and a running agent task all keep it from firing; a detached companion that no longer may stay put
+    /// follows again.
     /// </summary>
-    private void StepDock(double now, CursorSpring spring)
-    {
-        if (_style.Presence == CursorPresence.Off)
-        {
-            _dock = DockPhase.None;
-            _dockBubbleNext = false;
-            return;
-        }
-
-        var docked = _style.Presence == CursorPresence.Docked;
-        var wantOut = !docked || WantsCursorOut;
-        switch (_dock)
-        {
-            case DockPhase.None when !wantOut:
-                if (!_cursorShown) _dock = DockPhase.Gone;
-                else if (_dockBubbleNext)
-                {
-                    _dockBubbleNext = false;
-                    SetLine(DockBubbleText, false);
-                    BeginDock(DockPhase.Bubble, now);
-                }
-                else StartFlyIn(now, spring);
-                break;
-            case DockPhase.None when !_cursorShown && docked:
-                StartGrow(now, spring);
-                break;
-            case DockPhase.Bubble:
-                if (wantOut) { ClearDockBubble(); _dock = DockPhase.None; }
-                else if (now - _dockStart >= DockBubbleSeconds) { ClearDockBubble(); StartFlyIn(now, spring); }
-                break;
-            case DockPhase.FlyIn:
-                if (wantOut) _dock = DockPhase.None;
-                else if (_dockFlight is null || now - _dockStart >= _dockFlight.DurationSeconds) BeginDock(DockPhase.Shrink, now);
-                break;
-            case DockPhase.Shrink:
-                if (wantOut) StartGrow(now, spring);
-                else if (now - _dockStart >= (_style.ReducedMotion ? DockReducedSeconds : DockShrinkSeconds)) _dock = DockPhase.Gone;
-                break;
-            case DockPhase.Gone:
-                if (wantOut) StartGrow(now, spring);
-                break;
-            case DockPhase.Grow:
-                if (now - _dockStart >= (_style.ReducedMotion ? DockReducedSeconds : DockGrowSeconds)) _dock = DockPhase.None;
-                break;
-        }
-    }
-
-    private void BeginDock(DockPhase phase, double now)
-    {
-        _dock = phase;
-        _dockStart = now;
-    }
-
-    private void StartFlyIn(double now, CursorSpring spring)
-    {
-        if (_style.ReducedMotion) { BeginDock(DockPhase.Shrink, now); return; } // no flight: it fades where it is
-        _dockFlight = new FlightPath(spring.Position, Notch);
-        BeginDock(DockPhase.FlyIn, now);
-    }
-
-    private void StartGrow(double now, CursorSpring spring)
-    {
-        spring.Snap(Notch);
-        BeginDock(DockPhase.Grow, now);
-    }
-
-    private void ClearDockBubble()
-    {
-        if (_line == DockBubbleText) SetLine(null, false); // a POINT's own line is not ours to clear
-    }
-
-    /// <summary>Triangle scale and window opacity for the dock phase; reduced motion only fades (120 ms).</summary>
-    private (float Scale, float Alpha) DockLook(double now)
-    {
-        if (_dock is not (DockPhase.Shrink or DockPhase.Grow)) return (1, 1);
-        var shrinking = _dock == DockPhase.Shrink;
-        var seconds = _style.ReducedMotion ? DockReducedSeconds : shrinking ? DockShrinkSeconds : DockGrowSeconds;
-        var p = (float)Math.Clamp((now - _dockStart) / seconds, 0, 1);
-        if (_style.ReducedMotion) return (1, shrinking ? 1 - p : p);
-        var eased = p * p * (3 - 2 * p);
-        return shrinking ? (Math.Max(0.02f, 1 - eased), 1 - p) : (Math.Max(0.02f, eased), 1);
-    }
-
-    /// <summary>Feeds the shake detector while the companion could detach; a detached companion that no longer may stay put follows again.</summary>
-    private void StepDetach(Point cursor, long ms, Pt tip)
+    private void StepDetach(Point cursor, double now, Pt tip)
     {
         _detach.Presence = _style.Presence;
-        var eligible = _style.ShakeToDetach && _dock == DockPhase.None && _mode is Mode.Idle or Mode.Listening;
-        if (_detach.Detached && !eligible) _detach.Clicked();
+        var ms = (long)(now * 1000);
+        var eligible = _style.ShakeToDetach && _dock.Phase == DockPhase.None && (_mode is Mode.Idle or Mode.Listening)
+            && DetachSuppressed?.Invoke() != true;
+        if (_detach.Detached && !eligible) DropDetach();
         else _detach.Tick(ms); // after 3 s the spring carries it back to the cursor
-        if (!_detach.Detached && eligible && _shake.Add(new Pt(cursor.X, cursor.Y), ms)) _detach.Shake(tip, ms);
+        if (_detach.Detached || !eligible) return;
+        if (Control.MouseButtons != MouseButtons.None || ForegroundIsFullscreen(now)) _shake.Reset();
+        else if (_shake.Add(new Pt(cursor.X, cursor.Y), ms)) _detach.Shake(tip, ms);
+    }
+
+    private void DropDetach()
+    {
+        _detach.Clicked();
+        _shake.Reset();
+        HideCatcher();
+    }
+
+    /// <summary>Checked at most every 250 ms: it is a window and monitor query.</summary>
+    private bool ForegroundIsFullscreen(double now)
+    {
+        if (now - _lastFullscreenCheck < 0.25) return _foregroundFullscreen;
+        _lastFullscreenCheck = now;
+        return _foregroundFullscreen = ForegroundFullscreen.IsActive();
     }
 
     /// <summary>A 36 DIP click target over the detached companion, wherever it rests.</summary>
@@ -794,18 +740,6 @@ public sealed class BuddyOverlayController : IOverlayController
             remaining -= length;
         }
         return visible;
-    }
-
-    private enum DockPhase
-    {
-        /// <summary>Out and visible (Following, or pointing while docked).</summary>
-        None,
-        Bubble,
-        FlyIn,
-        Shrink,
-        /// <summary>Docked and invisible.</summary>
-        Gone,
-        Grow,
     }
 
     private enum Mode

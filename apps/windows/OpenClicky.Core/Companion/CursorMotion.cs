@@ -141,6 +141,9 @@ public sealed class ShakeDetector
         return true;
     }
 
+    /// <summary>Forgets the samples (a mouse button went down: that is a drag, not a shake).</summary>
+    public void Reset() => _samples.Clear();
+
     /// <summary>Direction flips on one axis, ignoring wiggles shorter than <see cref="MinSegment"/>.</summary>
     int Reversals(bool xAxis)
     {

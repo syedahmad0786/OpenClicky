@@ -17,6 +17,8 @@ internal sealed partial class TrayApplicationContext
     private void WireCompanion()
     {
         _overlay.DetachedClicked += ToggleConversation;
+        // An agent task that is running (not paused) injects input: it must not detach the companion or have a click swallowed.
+        _overlay.DetachSuppressed = () => _taskCts is not null && !_taskControl.IsPaused;
         _talk.StateChanged += state => OnUi(() => { if (state == CompanionVoiceState.Listening && _micWatch is null) WatchMicLevels(); });
     }
 
