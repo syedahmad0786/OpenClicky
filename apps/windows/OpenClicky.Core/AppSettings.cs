@@ -61,6 +61,19 @@ public sealed class AppSettings
     /// <summary>True after first-run tip has been shown.</summary>
     public bool FirstRunCompleted { get; set; }
 
+    /// <summary>Shell accent, #RRGGBB. Alternatives offered: #FF4C4C, #D4A017, #26C281.</summary>
+    public string AccentColor { get; set; } = "#3380FF";
+
+    /// <summary>Name shown in the shell; empty falls back to the ChatGPT account or Windows user name.</summary>
+    public string? DisplayName { get; set; }
+
+    public bool ShowInTaskbar { get; set; }
+    public bool ShowInScreenRecordings { get; set; } = true;
+    public bool LaunchAtLogin { get; set; }
+
+    /// <summary>While paused the talk hotkey is ignored.</summary>
+    public bool Paused { get; set; }
+
     public string ResolveVisionModel() =>
         AuthProvider == AuthProvider.ChatGPT
             ? ChatGptModel.Trim()

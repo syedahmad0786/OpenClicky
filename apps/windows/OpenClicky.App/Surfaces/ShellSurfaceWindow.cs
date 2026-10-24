@@ -29,6 +29,7 @@ internal sealed class ShellSurfaceWindow : Form
     private static readonly string[] BuiltInKinds = ["bootstrap.request", "ready", "surface.regions", "surface.focus"];
 
     private readonly Uri _origin;
+    private readonly Uri _pageUri;
     private readonly string _sessionToken;
     private readonly HashSet<string> _allowedKinds;
     private readonly Queue<string> _pendingMessages = new();
@@ -51,7 +52,8 @@ internal sealed class ShellSurfaceWindow : Form
     /// <param name="sessionToken">Bootstrap token posted to the page after each trusted navigation (min 32 chars).</param>
     /// <param name="screen">Monitor to cover; defaults to the primary screen.</param>
     /// <param name="pageMessageKinds">Extra message kinds (besides the built-in surface ones) raised through <see cref="PageMessage"/>.</param>
-    public ShellSurfaceWindow(Uri origin, string sessionToken, Screen? screen = null, IEnumerable<string>? pageMessageKinds = null)
+    /// <param name="pagePath">Page under the origin to load, e.g. <c>shell.html</c>; empty loads the origin root.</param>
+    public ShellSurfaceWindow(Uri origin, string sessionToken, Screen? screen = null, IEnumerable<string>? pageMessageKinds = null, string pagePath = "")
     {
         ArgumentNullException.ThrowIfNull(origin);
         if (!origin.IsLoopback || origin.Scheme != Uri.UriSchemeHttp || origin.AbsolutePath != "/")
@@ -59,6 +61,8 @@ internal sealed class ShellSurfaceWindow : Form
         ArgumentNullException.ThrowIfNull(sessionToken);
         if (sessionToken.Length < 32) throw new ArgumentException("The surface session token is too short.", nameof(sessionToken));
         _origin = origin;
+        _pageUri = new Uri(origin, pagePath);
+        if (!SameOrigin(_pageUri, origin)) throw new ArgumentException("The page must be under the surface origin.", nameof(pagePath));
         _sessionToken = sessionToken;
         _allowedKinds = new HashSet<string>(BuiltInKinds, StringComparer.Ordinal);
         foreach (var kind in pageMessageKinds ?? []) _allowedKinds.Add(kind);
@@ -109,7 +113,7 @@ internal sealed class ShellSurfaceWindow : Form
         }
     }
 
-    /// <summary>Creates the WebView2 and navigates to the origin. Overlapping calls share one initialization.</summary>
+    /// <summary>Creates the WebView2 and navigates to the page. Overlapping calls share one initialization.</summary>
     public Task InitializeAsync(string? userDataFolder = null) => _initTask ??= InitializeCoreAsync(userDataFolder);
 
     private async Task InitializeCoreAsync(string? userDataFolder)
@@ -145,7 +149,7 @@ internal sealed class ShellSurfaceWindow : Form
         core.NewWindowRequested += (_, e) => e.Handled = true;
         core.WebMessageReceived += ReceiveWebMessage;
         core.NavigationCompleted += NavigationCompleted;
-        core.Navigate(_origin.AbsoluteUri);
+        core.Navigate(_pageUri.AbsoluteUri);
     }
 
     /// <summary>Serializes and posts a message to the page; queued (bounded) until the page reports ready.</summary>

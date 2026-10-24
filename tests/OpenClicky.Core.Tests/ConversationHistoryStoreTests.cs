@@ -1,5 +1,19 @@
 namespace OpenClicky.Core.Tests;
 
+public class ConversationHistoryTurnsTests
+{
+    [Fact]
+    public void LoadTurnsReturnsNewestWithTimesOldestFirst()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "oc-turns-" + Guid.NewGuid().ToString("N"), "history.json");
+        for (var i = 1; i <= 3; i++) ConversationHistoryStore.Append("u" + i, "a" + i, path);
+        var turns = ConversationHistoryStore.LoadTurns(path, maxTurns: 2);
+        Assert.Equal(["u2", "u3"], turns.Select(t => t.User));
+        Assert.True(turns[0].Id < turns[1].Id);
+        Assert.True(turns[1].CreatedAtUtc > DateTimeOffset.UtcNow.AddMinutes(-5));
+    }
+}
+
 public class ConversationHistoryStoreTests
 {
     [Fact]

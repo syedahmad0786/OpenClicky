@@ -1,0 +1,77 @@
+using System.Text.Json;
+using OpenClicky.App.Surfaces;
+using OpenClicky.Core.Shell;
+
+namespace OpenClicky.App.Shell;
+
+/// <summary>
+/// <see cref="IShellSurface"/> over the WebView2 <see cref="ShellSurfaceWindow"/> showing <c>shell.html</c>.
+/// While the notch is collapsed it follows the cursor's monitor (checked every 500 ms); the settings tab lifts
+/// the region area cap because its 920×720 panel exceeds 45% of small monitors.
+/// </summary>
+internal sealed class ShellSurfaceAdapter : IShellSurface
+{
+    /// <summary>Page intents forwarded to the controller (the window handles bootstrap/regions/focus itself).</summary>
+    private static readonly string[] PageKinds =
+    [
+        "talk.toggle", "update.check", "update.install", "app.quit", "notch.tab", "notch.open", "text.submit",
+        "general.set", "job.open", "job.stop", "job.dismiss", "file.open", "file.reveal", "card.action",
+        "card.dismiss", "link.open",
+    ];
+
+    private readonly System.Windows.Forms.Timer _follow = new() { Interval = 500 };
+    private ShellNotch _notch = new(NotchTab.Home, false);
+
+    private ShellSurfaceAdapter(ShellSurfaceWindow window)
+    {
+        Window = window;
+        window.PageMessage += (_, e) => Message?.Invoke(e.Kind, e.Json);
+        _follow.Tick += (_, _) => FollowCursor();
+        _follow.Start();
+    }
+
+    public ShellSurfaceWindow Window { get; }
+    public event Action<string, string>? Message;
+
+    public static async Task<ShellSurfaceAdapter> CreateAsync(Uri origin, string token, string userDataFolder, bool excludeFromCapture)
+    {
+        var window = new ShellSurfaceWindow(origin, token, Screen.PrimaryScreen, PageKinds, "shell.html");
+        try
+        {
+            window.Show();
+            window.ExcludeFromCapture = excludeFromCapture;
+            await window.InitializeAsync(userDataFolder);
+            return new ShellSurfaceAdapter(window);
+        }
+        catch
+        {
+            window.Dispose();
+            throw;
+        }
+    }
+
+    public void Post(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        Window.Post(document.RootElement.Clone());
+    }
+
+    public void SetNotch(ShellNotch notch)
+    {
+        _notch = notch;
+        Window.AllowLargeRegions = notch.Open && notch.Tab == NotchTab.Settings;
+    }
+
+    private void FollowCursor()
+    {
+        if (_notch.Open || Window.IsDisposed) return;
+        var screen = Screen.FromPoint(Cursor.Position);
+        if (!Window.Bounds.Equals(screen.Bounds)) Window.MoveToScreen(screen);
+    }
+
+    public void Dispose()
+    {
+        _follow.Dispose();
+        Window.Dispose();
+    }
+}

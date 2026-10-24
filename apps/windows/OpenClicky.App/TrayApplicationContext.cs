@@ -9,7 +9,7 @@ using System.Text.Json;
 
 namespace OpenClicky.App;
 
-internal sealed class TrayApplicationContext : ApplicationContext
+internal sealed partial class TrayApplicationContext : ApplicationContext
 {
     private readonly NotifyIcon _tray;
     private AppSettings _settings;
@@ -74,8 +74,10 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly System.Windows.Forms.Timer _routineTimer = new() { Interval = 60_000 };
     private JobRun? _activeJob;
 
-    public TrayApplicationContext()
+    /// <param name="background">Started at login (--background): open nothing, even on shell failure.</param>
+    public TrayApplicationContext(bool background = false)
     {
+        _background = background;
         _uiContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
         SynchronizationContext.SetSynchronizationContext(_uiContext);
         // The built-in sandbox is the only trusted input target inside this process.
@@ -160,6 +162,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             _talk.ClearHistory();
             _home.ClearConversation();
             ClearTasks();
+            _shell?.EndTurn();
         });
         _companionDock = new CompanionDockForm(ToggleConversation, ShowHome,
             () => _ = SelectScreenAreaAsync(), ShowClipboardShelf, _talk.StopConversation,
@@ -236,7 +239,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         };
         visualGuard.Start();
         _home.Disposed += (_, _) => visualGuard.Dispose();
-        _routineTimer.Tick += (_, _) => RunDueRoutine();
+        _routineTimer.Tick += (_, _) => { RunDueRoutine(); RequestShellPush(); };
         _routineTimer.Start();
         _home.Disposed += (_, _) => _routineTimer.Dispose();
         _hotkey.Cancelled += (_, _) => Stop();
@@ -250,21 +253,13 @@ internal sealed class TrayApplicationContext : ApplicationContext
             Text = $"OpenClicky — hold {_settings.PushToTalk.DisplayName}",
         };
 
-        var menu = new ContextMenuStrip();
-        menu.Items.Add("Open OpenClicky", null, (_, _) => ShowHome());
-        menu.Items.Add("Settings…", null, (_, _) => ShowSettings());
-        menu.Items.Add("Clipboard shelf", null, (_, _) => ShowClipboardShelf());
-        menu.Items.Add("Dictate into focused field", null, (_, _) => BeginDictationAtCurrentTarget());
-        menu.Items.Add("Start / stop conversation", null, (_, _) => ToggleConversation());
-        menu.Items.Add("Stop current task", null, (_, _) => Stop());
-        menu.Items.Add("Test capture once", null, async (_, _) => await TestCaptureAsync());
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Quit", null, (_, _) => ExitThread());
-        _tray.ContextMenuStrip = menu;
-        _home.SetToolsMenu(menu);
+        _tray.ContextMenuStrip = BuildTrayMenu();
+        _home.SetToolsMenu(BuildClassicToolsMenu());
         _tray.DoubleClick += (_, _) => ShowHome();
+        WireShellEvents();
 
         _talk.Start();
+        if (_settings.Paused) _hotkey.Stop();
         if (LocalWhisperModel.IsAvailable) _ = Task.Run(async () =>
         {
             try { await _whisperRuntime.WarmAsync(_lifetime.Token).ConfigureAwait(false); }
@@ -291,7 +286,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
         MaybeShowFirstRunTip();
         RefreshConnection();
-        _uiContext.Post(_ => ShowHome(), null);
+        // The notch replaces the startup window; StartShellAsync falls back to the classic window on failure.
+        _ = StartShellAsync();
         _ = InitializeWorkspaceAsync();
         _ = ConnectChromeAsync();
     }
@@ -306,7 +302,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
             _agUi = new CompanionAgUiServer(RunVisualRequestAsync);
             _agUi.Start();
             _workspaceRuntime = await CompanionWorkspaceRuntime.StartAsync(RuntimePath("workspace"), Path.Combine(RuntimePath("openwork"), "node.exe"), _agUi.Endpoint, _agUi.Token, _lifetime.Token);
-            if (_lifetime.IsCancellationRequested) { await _workspaceRuntime.DisposeAsync(); _workspaceRuntime = null; return; }
+            if (_lifetime.IsCancellationRequested) { await _workspaceRuntime.DisposeAsync(); _workspaceRuntime = null; _workspaceReady.TrySetCanceled(); return; }
+            _workspaceReady.TrySetResult(_workspaceRuntime);
             var panel = new VisualWorkspacePanel(_workspaceRuntime.Origin, _workspaceRuntime.SessionToken);
             _visualWorkspace = panel;
             void RestoreWorkspace()
@@ -347,6 +344,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             Log("workspace_start_error=" + ex.GetType().Name);
+            _workspaceReady.TrySetException(ex);
             if (_visualWorkspace is not null) { _home.DetachVisualWorkspace(); _visualWorkspace = null; }
             _home.AddMessage("OpenClicky", "The interactive workspace could not start. The native conversation remains available.");
         }
@@ -442,7 +440,18 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     internal void RequestShowHome() => OnUi(ShowHome);
 
+    /// <summary>Opens the notch peek once the shell runs; the classic window while it is in use or the shell is unavailable.</summary>
     private void ShowHome()
+    {
+        if (_shell is { IsActive: true } && !_home.Visible)
+        {
+            _shell.OpenNotch();
+            return;
+        }
+        ShowClassic();
+    }
+
+    private void ShowClassic()
     {
         PauseTask();
         _home.Show();
@@ -696,6 +705,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
         if (routineId is not null) KeepAwake(true);
         _home.RefreshWork();
+        RequestShellPush();
         return true;
     }
 
@@ -726,6 +736,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         {
             if (work.RoutineId is not null) KeepAwake(false);
             _home.RefreshWork();
+            RequestShellPush();
         });
     }
 
@@ -867,7 +878,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             _activeTaskGoal = "";
             _activeJob = null;
             job.Dispose();
-            OnUi(() => { _home.SetTaskRunning(false); if (_talk.State == CompanionVoiceState.Idle) _overlay.Hide(); SaveTasks(); });
+            OnUi(() => { _home.SetTaskRunning(false); if (_talk.State == CompanionVoiceState.Idle) _overlay.Hide(); SaveTasks(); RequestShellPush(); });
             _talk.ResumeConversation();
         }
     }
@@ -886,6 +897,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _companionDock.SetTaskState(progress.Status);
         if (progress.Status == "executing") _home.AddMessage("Task", progress.Message);
         SaveTasks();
+        RequestShellPush();
     });
 
     private bool SaveTasks()
@@ -1288,6 +1300,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _tray.Text = $"OpenClicky — hold {_settings.PushToTalk.DisplayName}";
         _home.RefreshShortcut();
         RefreshConnection();
+        RequestShellPush();
         Log(
             $"settings_applied hotkey={_settings.PushToTalk.DisplayName} provider={_settings.AuthProvider} " +
             $"openrouter_key={(string.IsNullOrEmpty(_settings.OpenRouterApiKey) ? "missing" : "set")} " +
@@ -1343,6 +1356,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     protected override void ExitThreadCore()
     {
         _lifetime.Cancel();
+        DisposeShell();
         CancelTask();
         _taskControl.Resume();
         _talk.Dispose();

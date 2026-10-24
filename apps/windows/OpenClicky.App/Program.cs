@@ -27,7 +27,8 @@ internal static class Program
         {
             ApplicationConfiguration.Initialize();
             Application.ApplicationExit += (_, _) => ReleaseMutex();
-            using var context = new TrayApplicationContext();
+            // --background (launch at login): start in the tray and open nothing.
+            using var context = new TrayApplicationContext(background: args.Contains("--background"));
             var reopenWait = RegisterReopenRequest(reopenRequest, context.RequestShowHome);
             try { Application.Run(context); }
             finally { reopenWait.Unregister(null); }

@@ -32,6 +32,25 @@ public static class ConversationHistoryStore
         }
     }
 
+    /// <summary>The newest <paramref name="maxTurns"/> turns with ids and times, oldest first.</summary>
+    public static IReadOnlyList<ConversationTurn> LoadTurns(string? path = null, int maxTurns = 100)
+    {
+        if (maxTurns < 0) throw new ArgumentOutOfRangeException(nameof(maxTurns));
+        path ??= DefaultPath;
+        lock (SyncRoot)
+        {
+            using var connection = OpenAndImport(path);
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT id,user_text,assistant_text,created_at_utc FROM conversations ORDER BY id DESC LIMIT $limit";
+            command.Parameters.AddWithValue("$limit", maxTurns);
+            using var reader = command.ExecuteReader();
+            var result = new List<ConversationTurn>();
+            while (reader.Read()) result.Add(new(reader.GetInt64(0), reader.GetString(1), reader.GetString(2), DateTimeOffset.Parse(reader.GetString(3))));
+            result.Reverse();
+            return result;
+        }
+    }
+
     public static ConversationTurn Append(string user, string assistant, string? path = null)
     {
         ArgumentNullException.ThrowIfNull(user);
