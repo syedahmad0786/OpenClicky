@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, type KeyboardEvent } from "react";
 import { postPage } from "../bridge";
 import type { ShellState } from "../contract";
 import { PillButton } from "../ui";
@@ -6,20 +6,22 @@ import { MicIcon } from "./icons";
 
 const MAX_TEXT = 8_000; // host limit for text.submit
 
-export function ChatTab({ state }: { state: ShellState }) {
+export function ChatTab({ state, draft, onDraft }: { state: ShellState; draft: string; onDraft: (text: string) => void }) {
   const { rows } = state.chat;
   const talk = state.hotkeys.talk;
-  const [draft, setDraft] = useState("");
   const list = useRef<HTMLDivElement>(null);
+  const focused = useRef(false);
   const tail = rows.at(-1);
 
+  // A field that unmounts while focused (tab switch, collapse) fires no blur: hand the keyboard focus back here.
+  useEffect(() => () => { if (focused.current) postPage({ kind: "surface.focus", wanted: false }); }, []);
   useEffect(() => { if (list.current) list.current.scrollTop = list.current.scrollHeight; }, [rows.length, tail?.text]);
 
   const submit = () => {
     const text = draft.trim();
     if (!text) return;
     postPage({ kind: "text.submit", text });
-    setDraft("");
+    onDraft("");
   };
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -46,10 +48,10 @@ export function ChatTab({ state }: { state: ShellState }) {
         </PillButton>
         <textarea
           className="notch-chat__input" rows={1} maxLength={MAX_TEXT} placeholder="Ask OpenClicky…" aria-label="Message OpenClicky"
-          value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKeyDown}
+          value={draft} onChange={(e) => onDraft(e.target.value)} onKeyDown={onKeyDown}
           onPointerDown={() => postPage({ kind: "surface.focus", wanted: true })}
-          onFocus={() => postPage({ kind: "surface.focus", wanted: true })}
-          onBlur={() => postPage({ kind: "surface.focus", wanted: false })}
+          onFocus={() => { focused.current = true; postPage({ kind: "surface.focus", wanted: true }); }}
+          onBlur={() => { focused.current = false; postPage({ kind: "surface.focus", wanted: false }); }}
         />
       </div>
     </>

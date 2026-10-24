@@ -220,10 +220,13 @@ it("posts surface.regions, debounced 16 ms, containing the panel rect, and re-po
   vi.useFakeTimers();
   vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
     const make = (left: number, top: number, width: number, height: number) => ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON() {} }) as DOMRect;
-    if (this.classList.contains("notch__halo")) return make(666, 0, 588, 368);
-    if (this.getAttribute("aria-label") === "OpenClicky") return this.classList.contains("notch--settings") ? make(500, 0, 920, 720) : make(694, 0, 532, 340);
+    if (this.classList.contains("notch__panel")) return this.parentElement!.classList.contains("notch--settings") ? make(500, 0, 920, 720) : make(694, 0, 532, 340);
     return make(0, 0, 0, 0);
   });
+  const style = getComputedStyle.bind(window);
+  vi.spyOn(window, "getComputedStyle").mockImplementation((el: Element) => (el.classList.contains("notch__panel")
+    ? ({ borderTopLeftRadius: "10px", borderTopRightRadius: "10px", borderBottomLeftRadius: "26px", borderBottomRightRadius: "26px" } as CSSStyleDeclaration)
+    : style(el)));
   const host = mockHost();
   render(<ShellApp />);
   host.send({ kind: "shell.state", state: open() });
@@ -232,12 +235,71 @@ it("posts surface.regions, debounced 16 ms, containing the panel rect, and re-po
   act(() => { vi.advanceTimersByTime(16); });
   const first = host.posts("surface.regions");
   expect(first).toHaveLength(1);
-  expect(first[0].rects).toContainEqual({ x: 694, y: 0, w: 532, h: 340, r: expect.any(Number) });
-  expect(first[0].rects).toContainEqual({ x: 666, y: 0, w: 588, h: 368, r: expect.any(Number) });
-  expect(first[0].rects[0].x).toBe(694); // panel first so the host's area cap drops the halo before the panel
+  expect(first[0].rects).toEqual([{ x: 694, y: 0, w: 532, h: 340, r: 26 }]); // the panel only, with the 26 px sheet radius
 
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
   await act(async () => {});
   act(() => { vi.advanceTimersByTime(16); });
-  expect(host.posts("surface.regions").at(-1).rects).toContainEqual({ x: 500, y: 0, w: 920, h: 720, r: expect.any(Number) });
+  expect(host.posts("surface.regions").at(-1).rects).toContainEqual({ x: 500, y: 0, w: 920, h: 720, r: 26 });
+});
+
+it("a composer that unmounts while focused (tab switch) gives the keyboard focus back, and auto-close still works", () => {
+  vi.useFakeTimers();
+  const host = mockHost();
+  render(<Notch state={open("chat")} />);
+  const input = screen.getByPlaceholderText("Ask OpenClicky…");
+  input.focus();
+  expect(host.posts("surface.focus").at(-1)).toEqual({ kind: "surface.focus", wanted: true });
+  fireEvent.click(screen.getByRole("button", { name: "Home" }));
+  expect(screen.queryByPlaceholderText("Ask OpenClicky…")).toBeNull();
+  expect(host.posts("surface.focus").at(-1)).toEqual({ kind: "surface.focus", wanted: false });
+
+  fireEvent.pointerLeave(root());
+  act(() => { vi.advanceTimersByTime(150); });
+  expect(root()).toHaveClass("notch--closing");
+});
+
+it("the host closing the notch while the composer is focused releases the focus and blocks nothing", () => {
+  vi.useFakeTimers();
+  const host = mockHost();
+  const view = render(<Notch state={open("chat")} />);
+  screen.getByPlaceholderText("Ask OpenClicky…").focus();
+  view.rerender(<Notch state={closed({ notch: { tab: "chat", open: false } })} />);
+  expect(root()).toHaveClass("notch--closing");
+  expect(host.posts("surface.focus").at(-1)).toEqual({ kind: "surface.focus", wanted: false });
+  act(() => { vi.advanceTimersByTime(300); });
+  expect(root()).toHaveClass("notch--collapsed");
+  fireEvent.pointerEnter(root());
+  fireEvent.pointerLeave(root());
+  act(() => { vi.advanceTimersByTime(150); });
+  expect(root()).toHaveClass("notch--closing");
+});
+
+it("a focused composer keeps the panel open until it blurs", () => {
+  vi.useFakeTimers();
+  mockHost();
+  render(<Notch state={open("chat")} />);
+  const input = screen.getByPlaceholderText("Ask OpenClicky…");
+  input.focus();
+  fireEvent.pointerLeave(root());
+  act(() => { vi.advanceTimersByTime(1000); });
+  expect(root()).toHaveClass("notch--open");
+  input.blur();
+  act(() => { vi.advanceTimersByTime(150); });
+  expect(root()).toHaveClass("notch--closing");
+});
+
+it("the draft survives switching tabs and collapsing", () => {
+  vi.useFakeTimers();
+  mockHost();
+  render(<Notch state={open("chat")} />);
+  fireEvent.change(screen.getByPlaceholderText("Ask OpenClicky…"), { target: { value: "half a thought" } });
+  fireEvent.click(screen.getByRole("button", { name: "Home" }));
+  fireEvent.click(screen.getByRole("button", { name: "Chat" }));
+  expect(screen.getByPlaceholderText("Ask OpenClicky…")).toHaveValue("half a thought");
+  fireEvent.pointerLeave(root());
+  act(() => { vi.advanceTimersByTime(450); });
+  expect(root()).toHaveClass("notch--collapsed");
+  fireEvent.pointerEnter(root());
+  expect(screen.getByPlaceholderText("Ask OpenClicky…")).toHaveValue("half a thought");
 });

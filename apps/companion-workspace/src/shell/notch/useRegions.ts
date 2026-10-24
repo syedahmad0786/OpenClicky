@@ -5,12 +5,15 @@ const DEBOUNCE_MS = 16;
 const MAX_RECTS = 64; // host limit (SurfaceRegions.MaxRects)
 const round = (v: number) => Math.round(v * 100) / 100;
 
-/** Smallest corner radius: a bigger one could cut drawn pixels, a smaller one only leaves invisible hit area. */
+/**
+ * One radius per rect: the larger bottom corner. The top edge of the notch is flush with the screen, so
+ * matching the 26 px sheet corners only shaves a sliver off the 10 px top flare; the reverse (smallest corner)
+ * would leave a visible hit area outside the rounded bottom.
+ */
 function radiusOf(el: Element, w: number, h: number): number {
   const style = getComputedStyle(el);
-  const corners = [style.borderTopLeftRadius, style.borderTopRightRadius, style.borderBottomRightRadius, style.borderBottomLeftRadius]
-    .map((v) => parseFloat(v) || 0);
-  return round(Math.min(Math.min(...corners), w / 2, h / 2));
+  const bottom = Math.max(parseFloat(style.borderBottomLeftRadius) || 0, parseFloat(style.borderBottomRightRadius) || 0);
+  return round(Math.min(bottom, w / 2, h / 2));
 }
 
 /**
