@@ -1,5 +1,6 @@
 using OpenClicky.Core;
 using OpenClicky.Core.Agent;
+using OpenClicky.Core.CompanionCursor;
 using OpenClicky.Core.Drawing;
 using OpenClicky.Providers;
 using System.Text.Json;
@@ -601,6 +602,64 @@ public class CompanionWorkflowTests
         await talk.SubmitRegionAsync("What is this?", (300, 400, 200, 100));
         Assert.Equal(0, capture.Calls);
         Assert.Equal(1, capture.RegionCalls);
+    }
+
+    private static HighlightGesture Gesture(DateTimeOffset endedAt) => new(
+        [new(StrokeKind.Circled, [new(20, 20), new(60, 20), new(60, 60), new(20, 60), new(20, 20)], new Box(20, 20, 40, 40), "Submit")],
+        [], endedAt);
+
+    [Fact]
+    public async Task HighlightCompositedAndDescribedOnce()
+    {
+        HighlightGesture? pending = Gesture(DateTimeOffset.UtcNow);
+        var takes = 0;
+        var composites = 0;
+        var systems = new List<string>();
+        var labels = new List<string>();
+        using var talk = new TalkOrchestrator(new Hotkey(), new Overlay(), new Capture(), new Mic(), () => null,
+            () => new Talk((_, _) => Task.FromResult("ok [POINT:none]"), inspectScreens: screens => labels.AddRange(screens.Select(s => s.Label)),
+                observeSystem: systems.Add),
+            new Tts(), () => new AppSettings { PersistConversationHistory = false }, log: _ => { },
+            windowTitle: () => "Claude", windowBounds: () => (0, 0, 200, 100),
+            takeHighlight: () => { takes++; return Interlocked.Exchange(ref pending, null); },
+            compositeHighlight: (screens, gesture) => { composites++; return screens.Select(s => s with { Label = s.Label + " +marks" }).ToList(); });
+
+        await talk.SubmitTextAsync("What is this?", false);
+        Assert.Equal(1, composites);
+        Assert.Equal(["test +marks"], labels);
+        Assert.Contains(HighlightDescriber.Intro, systems[0]);
+        Assert.Contains("\"Submit\"", systems[0]);
+
+        labels.Clear();
+        await talk.SubmitTextAsync("And this?", false); // the gesture was taken: the next turn has none
+        Assert.Equal(1, composites);
+        Assert.Equal(["test"], labels);
+        Assert.DoesNotContain(HighlightDescriber.Intro, systems[1]);
+
+        pending = Gesture(DateTimeOffset.UtcNow - TimeSpan.FromSeconds(11)); // too old to belong to this question
+        await talk.SubmitTextAsync("And now?", false);
+        Assert.Equal(1, composites);
+        Assert.DoesNotContain(HighlightDescriber.Intro, systems[2]);
+        Assert.Equal(3, takes);
+    }
+
+    [Fact]
+    public async Task RegionAskIgnoresHighlight()
+    {
+        HighlightGesture? pending = Gesture(DateTimeOffset.UtcNow);
+        var composites = 0;
+        string? system = null;
+        var capture = new Capture { Region = new([0xff, 0xd8], 100, 50, 0, 0, 200, 100, false, "detail") };
+        using var talk = new TalkOrchestrator(new Hotkey(), new Overlay(), capture, new Mic(), () => null,
+            () => new Talk((_, _) => Task.FromResult("ok [POINT:none]"), observeSystem: text => system = text), new Tts(),
+            () => new AppSettings { PersistConversationHistory = false }, log: _ => { },
+            takeHighlight: () => Interlocked.Exchange(ref pending, null),
+            compositeHighlight: (screens, _) => { composites++; return screens; });
+        await talk.SubmitRegionAsync("What is this?", (0, 0, 200, 100));
+        Assert.Equal(1, capture.RegionCalls);
+        Assert.Equal(0, composites);
+        Assert.DoesNotContain(HighlightDescriber.Intro, system);
+        Assert.Null(pending); // dropped: it belonged to no screen-wide question
     }
 
     [Theory]

@@ -177,12 +177,7 @@ public sealed class BuddyOverlayController : IOverlayController
         _timer.Tick += (_, _) => Frame();
         _buttonTimer.Tick += (_, _) => SyncButtons();
         // A spotlight reaching its end of life needs frames to fade out, even if the loop had stopped.
-        _drawing.Wake = () =>
-        {
-            if (_disposed || _hidden || _timer.Enabled) return;
-            _lastTick = Now;
-            _timer.Start();
-        };
+        _drawing.Wake = WakeFrames;
     }
 
     /// <summary>The cursor window. Smoke / diagnostics only.</summary>
@@ -307,6 +302,26 @@ public sealed class BuddyOverlayController : IOverlayController
             if (animations.Any(a => !a.Erase) && _mode is Mode.Idle or Mode.Processing) _mode = Mode.Responding;
             if (!_hidden) Show();
         });
+    }
+
+    public void AddHighlightPoint(int x, int y) => Post(() =>
+    {
+        _drawing.AddTrail(new Pt(x, y), DpiScale.ForPoint(new Point(x, y)), Now);
+        WakeFrames();
+    });
+
+    public void ClearHighlight() => Post(() =>
+    {
+        _drawing.ClearTrail();
+        WakeFrames(); // the next frame paints the ink without it (or hides the window)
+    });
+
+    /// <summary>Restarts a stopped frame loop (UI thread) so the ink window repaints; nothing while hidden.</summary>
+    private void WakeFrames()
+    {
+        if (_disposed || _hidden || _timer.Enabled) return;
+        _lastTick = Now;
+        _timer.Start();
     }
 
     public void FinishDrawing() => Post(() =>

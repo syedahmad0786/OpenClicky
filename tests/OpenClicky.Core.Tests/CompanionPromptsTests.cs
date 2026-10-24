@@ -18,6 +18,7 @@ public class CompanionPromptsTests
         var figures = prompt[prompt.IndexOf("3d figures:", StringComparison.Ordinal)..prompt.IndexOf("small actions:", StringComparison.Ordinal)].Trim();
         Assert.True(figures.Length <= 800, $"figure documentation is {figures.Length} characters");
         Assert.Contains("```figure", figures);
+        Assert.Contains("its closing ``` goes on a line of its own", figures);
         foreach (var kind in Enum.GetValues<OpenClicky.Core.Drawing.FigureKind>())
             Assert.Contains(kind.ToString().ToLowerInvariant(), figures);
         foreach (var op in Enum.GetValues<OpenClicky.Core.Drawing.DrawOpKind>().Where(k => k != OpenClicky.Core.Drawing.DrawOpKind.Figure))

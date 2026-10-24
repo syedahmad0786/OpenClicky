@@ -35,4 +35,27 @@ public static class CoordinateMapper
         var y = target.MonitorTop + Math.Min(target.MonitorHeight - 1, (int)Math.Round(point.Y.Value * scaleY));
         return (x, y);
     }
+
+    /// <summary>
+    /// The reverse of <see cref="ToVirtualScreen"/>: the 1-based screen whose monitor holds the virtual-screen pixel (half-open)
+    /// and the screenshot pixel there; null when no captured screen holds it.
+    /// </summary>
+    public static (int Screen, int X, int Y)? ToScreenshot(int virtualX, int virtualY, IReadOnlyList<ScreenCaptureResult> screens)
+    {
+        for (var i = 0; i < screens.Count; i++)
+        {
+            var s = screens[i];
+            if (s.PixelWidth <= 0 || s.PixelHeight <= 0 || s.MonitorWidth <= 0 || s.MonitorHeight <= 0
+                || virtualX < s.MonitorLeft || virtualX >= (long)s.MonitorLeft + s.MonitorWidth
+                || virtualY < s.MonitorTop || virtualY >= (long)s.MonitorTop + s.MonitorHeight) continue;
+            var (x, y) = ToPixels(s, virtualX, virtualY);
+            return (i + 1, x, y);
+        }
+        return null;
+    }
+
+    /// <summary>A virtual-screen point in <paramref name="s"/>'s screenshot pixels, clamped to the image.</summary>
+    internal static (int X, int Y) ToPixels(ScreenCaptureResult s, double virtualX, double virtualY) =>
+        ((int)Math.Clamp(Math.Floor((virtualX - s.MonitorLeft) * s.PixelWidth / Math.Max(1, s.MonitorWidth)), 0, Math.Max(0, s.PixelWidth - 1)),
+         (int)Math.Clamp(Math.Floor((virtualY - s.MonitorTop) * s.PixelHeight / Math.Max(1, s.MonitorHeight)), 0, Math.Max(0, s.PixelHeight - 1)));
 }

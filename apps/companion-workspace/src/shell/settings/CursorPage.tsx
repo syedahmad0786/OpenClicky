@@ -13,7 +13,7 @@ function GlowingCursor({ colour }: { colour: string }) {
 
 const TOGGLES = [
   { key: "hidden", title: "Hide floating cursor", description: "Keep the companion cursor out of sight." },
-  { key: "screenHighlight", title: "Screen highlight", description: "Glow around what OpenClicky is looking at." },
+  { key: "screenHighlight", title: "Screen highlight", description: "Draw on screen while you hold talk. Your marks, and the text under them, go with that question to the AI provider." },
   { key: "shakeToDetach", title: "Shake to detach", description: "Shake your mouse to pull the cursor loose." },
 ] as const;
 

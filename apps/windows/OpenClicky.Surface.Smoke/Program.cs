@@ -15,6 +15,7 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        if (args.Contains("--highlight-compositor")) return HighlightCompositorCheck();
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
 
@@ -61,6 +62,42 @@ internal static class Program
     }
 
     private static void Log(string line) => Console.WriteLine($"{DateTime.Now:HH:mm:ss.fff} {line}");
+
+    /// <summary>
+    /// The highlight compositor paints the strokes and rest rings into the screenshot in the accent, leaves the rest of the
+    /// image alone, keeps its size, and returns a screen without marks untouched. In memory only; nothing is shown.
+    /// </summary>
+    private static int HighlightCompositorCheck()
+    {
+        byte[] Jpeg()
+        {
+            using var white = new Bitmap(200, 100);
+            using (var g = Graphics.FromImage(white)) g.Clear(Color.White);
+            using var stream = new MemoryStream();
+            white.Save(stream, System.Drawing.Imaging.ImageFormat.Jpeg);
+            return stream.ToArray();
+        }
+        OpenClicky.Core.ScreenCaptureResult[] screens =
+        [
+            new(Jpeg(), 200, 100, 0, 0, 400, 200, true, "screen 1 of 2"),
+            new(Jpeg(), 200, 100, 400, 0, 400, 200, false, "screen 2 of 2"),
+        ];
+        var gesture = new OpenClicky.Core.CompanionCursor.HighlightGesture(
+            [new(OpenClicky.Core.CompanionCursor.StrokeKind.LineAcross, [new(40, 100), new(360, 100)], new(40, 100, 320, 0), "")],
+            [new(200, 160)], DateTimeOffset.UtcNow);
+        var result = OpenClicky.App.HighlightCompositor.Composite(screens, gesture, "#FF4C4C");
+        using var stream = new MemoryStream(result[0].JpegBytes);
+        using var image = new Bitmap(stream);
+        bool Red(int x, int y) { var c = image.GetPixel(x, y); return c.R > 200 && c.G < 200 && c.R - c.G > 50; }
+        bool White(int x, int y) { var c = image.GetPixel(x, y); return c.R > 235 && c.G > 235 && c.B > 235; }
+        var failure = !ReferenceEquals(result[1], screens[1]) ? "a screen without marks was re-encoded"
+            : result[0].PixelWidth != 200 || result[0].PixelHeight != 100 || image.Width != 200 ? "the screenshot changed size"
+            : !Red(100, 50) || !Red(30, 50) ? "the stroke is missing"
+            : !Red(110, 80) || !White(100, 80) ? "the rest ring is missing or filled"
+            : !White(100, 20) || !White(190, 50) ? "paint outside the marks" : null;
+        Console.WriteLine(failure is null ? "PASS: highlight compositor" : "FAIL: highlight compositor " + failure);
+        return failure is null ? 0 : 1;
+    }
 
     private static int FreeLoopbackPort()
     {

@@ -120,7 +120,9 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             canInterruptSpeech: () => LocalWhisperModel.IsAvailable && !_dictationActive,
             interruptionSttFactory: () => new LocalWhisperSttClient(
                 new EchoCancelledMicrophoneRecorder(() => _settings.MicrophoneDeviceId, Log), _whisperRuntime, Log),
-            foregroundCaptureEligible: ForegroundWindowInfo.IsCompanionCaptureEligible, visibleWindows: OtherVisibleWindows);
+            foregroundCaptureEligible: ForegroundWindowInfo.IsCompanionCaptureEligible, visibleWindows: OtherVisibleWindows,
+            takeHighlight: TakeHighlight,
+            compositeHighlight: (screens, gesture) => HighlightCompositor.Composite(screens, gesture, _settings.AccentColor));
 
         _connectors = new ConnectorRegistry(_secrets);
         _home = new HomeForm(_settings, SubmitFromHomeAsync, Stop, ShowSettings, TryPointingDemoAsync, TrySandboxDemoAsync,
@@ -247,10 +249,12 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         {
             if (_confirm.IsDialogOpen) return;
             _talk.ClearDrawing(); // Esc takes the drawing off the screen
+            ClearHighlight(); // and the highlight trail
             CancelMicWatch(); _tts.Stop(); _shell?.ClearCaptions(); if (IsBusy) Stop();
         };
         // Only once a talk press is past the tap window: a cancelled press must leave no trace.
         _talk.HeldTalkStarted += () => { _submissionCts?.Cancel(); PauseTask(); };
+        WireHighlight(); // before _talk.Start() subscribes to the shortcut
         _hotkey.TextMode += (_, _) => OpenTextMode();
         _hotkey.DictateStarted += (_, _) => BeginHeldDictation();
         _hotkey.DictateEnded += (_, e) => EndHeldDictation(e.Cancelled);

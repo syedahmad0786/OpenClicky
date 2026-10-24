@@ -59,6 +59,15 @@ public interface IOverlayController : IDisposable
     /// <summary>Ends every running reveal or erase at once (a new talk press): the drawing shows its final state.</summary>
     void FinishDrawing() { }
 
+    /// <summary>
+    /// One pointer sample of the user's highlight while they hold talk (virtual-screen px): the trail shows in the accent and
+    /// each sample fades over a second. <see cref="Hide"/> hides it with everything else.
+    /// </summary>
+    void AddHighlightPoint(int x, int y) { }
+
+    /// <summary>Takes the highlight trail off the screen at once (Esc, a cancelled hold, a new hold).</summary>
+    void ClearHighlight() { }
+
     /// <summary>True while the last <see cref="ShowDrawing"/> had parts. Any thread.</summary>
     bool HasDrawing => false;
 

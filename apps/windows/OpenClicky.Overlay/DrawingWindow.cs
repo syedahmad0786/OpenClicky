@@ -12,11 +12,17 @@ internal sealed class DrawingWindow : IDisposable
 {
     private const double FrameSeconds = 0.033, ReducedFadeSeconds = 0.12;
     private const long MaxPixels = DrawingRenderer.MaxInkPixels;
+    private const double TrailSeconds = 1;
+    private const float TrailWidthDip = 8, TrailAlpha = 0.55f;
+    /// <summary>The trail fades in this many steps; each step's segments are one polyline.</summary>
+    private const int TrailLevels = 10;
 
     private readonly LayeredWindow _window;
     private IReadOnlyList<DrawingRenderer.PartLayout> _layouts = [];
     private readonly Dictionary<(string Id, int Seq), (double Start, double Duration)> _reveals = [];
     private readonly List<(DrawingRenderer.PartLayout Layout, double Start, double Duration)> _erasing = [];
+    /// <summary>The user's highlight trail while they hold talk: each sample (virtual px, its DIP scale, when it came) fades over a second.</summary>
+    private readonly List<(Pt P, float Scale, double At)> _trail = [];
     private Bitmap? _bitmap;
     private bool _dirty;
     private double _lastPresent = double.NegativeInfinity;
@@ -62,7 +68,7 @@ internal sealed class DrawingWindow : IDisposable
         }
         var live = parts.Select(p => (p.Id, p.Seq)).ToHashSet();
         foreach (var key in _reveals.Keys.Where(k => !live.Contains(k)).ToArray()) _reveals.Remove(key);
-        if (_layouts.Count == 0 && _erasing.Count == 0)
+        if (_layouts.Count == 0 && _erasing.Count == 0 && _trail.Count == 0)
         {
             // Cleared, perhaps while hidden (Render does not run then): let the bitmap go now.
             _bitmap?.Dispose();
@@ -90,6 +96,21 @@ internal sealed class DrawingWindow : IDisposable
         _spotExpired = null;
         _spotStart = now;
         _expiry.Start();
+    }
+
+    /// <summary>One highlight sample; a repeat of the last one (the pointer is still) adds nothing.</summary>
+    public void AddTrail(Pt p, float scale, double now)
+    {
+        if (_trail.Count > 0 && _trail[^1].P == p) return;
+        _trail.Add((p, scale, now));
+        _dirty = true;
+    }
+
+    public void ClearTrail()
+    {
+        if (_trail.Count == 0) return;
+        _trail.Clear();
+        _dirty = true;
     }
 
     /// <summary>Every reveal and erase ends now.</summary>
@@ -142,7 +163,11 @@ internal sealed class DrawingWindow : IDisposable
             _dirty = true; // its last frame shows it whole
         }
         if (_erasing.RemoveAll(e => now >= End(e.Start, e.Duration)) > 0) _dirty = true;
-        var animating = _reveals.Count > 0 || _erasing.Count > 0;
+        // The segment to a sample fades with that sample, so the last faded sample stays as the start of the first live segment.
+        var live = _trail.FindIndex(t => now - t.At < TrailSeconds);
+        var faded = live < 0 ? _trail.Count : Math.Max(0, live - 1);
+        if (faded > 0) { _trail.RemoveRange(0, faded); _dirty = true; }
+        var animating = _reveals.Count > 0 || _erasing.Count > 0 || _trail.Count > 0;
         var spotAlpha = 1f;
         if (_spotKey is { } spotKey && now - _spotStart > DrawingRenderer.SpotlightSeconds)
         {
@@ -159,7 +184,7 @@ internal sealed class DrawingWindow : IDisposable
             else animating = true; // repainted at the animation pace while it fades
         }
 
-        if (_layouts.Count == 0 && _erasing.Count == 0)
+        if (_layouts.Count == 0 && _erasing.Count == 0 && _trail.Count == 0)
         {
             _window.HideWindow();
             _bitmap?.Dispose();
@@ -169,7 +194,9 @@ internal sealed class DrawingWindow : IDisposable
         }
         if (!_dirty && (!animating || now - _lastPresent < FrameSeconds)) return animating;
 
-        var union = _layouts.Concat(_erasing.Select(e => e.Layout)).Select(l => l.Bounds).Aggregate(RectangleF.Union);
+        var boxes = _layouts.Concat(_erasing.Select(e => e.Layout)).Select(l => l.Bounds).ToList();
+        if (_trail.Count > 0) boxes.Add(TrailBounds());
+        var union = boxes.Aggregate(RectangleF.Union);
         var area = Rectangle.Intersect(Rectangle.FromLTRB((int)MathF.Floor(union.Left), (int)MathF.Floor(union.Top),
             (int)MathF.Ceiling(union.Right), (int)MathF.Ceiling(union.Bottom)), SystemInformation.VirtualScreen);
         // ponytail: a drawing over more than MaxPixels (two 4K monitors, 64 MB) shows only on the monitor holding most of
@@ -202,11 +229,58 @@ internal sealed class DrawingWindow : IDisposable
                 if (now < start) { DrawingRenderer.Draw(g, layout, 1, 1, accent); continue; }
                 DrawingRenderer.Draw(g, layout, 1, (float)(1 - (now - start) / (reducedMotion ? ReducedFadeSeconds : duration)), accent);
             }
+            DrawTrail(g, now, accent); // on top: it is what the user is drawing now
         }
         _window.Present(_bitmap, area.Location);
         _dirty = false;
         _lastPresent = now;
         return animating;
+    }
+
+    private RectangleF TrailBounds()
+    {
+        float minX = float.MaxValue, minY = float.MaxValue, maxX = float.MinValue, maxY = float.MinValue, pad = 0;
+        foreach (var (p, scale, _) in _trail)
+        {
+            minX = Math.Min(minX, p.X); minY = Math.Min(minY, p.Y);
+            maxX = Math.Max(maxX, p.X); maxY = Math.Max(maxY, p.Y);
+            pad = Math.Max(pad, TrailWidthDip * scale / 2 + 2);
+        }
+        return RectangleF.FromLTRB(minX - pad, minY - pad, maxX + pad, maxY + pad);
+    }
+
+    /// <summary>
+    /// The trail in the accent at 55 % alpha, 8 DIP wide. Consecutive segments at the same fade step are one polyline, so where
+    /// they meet the alpha does not stack up.
+    /// </summary>
+    private void DrawTrail(Graphics g, double now, Color accent)
+    {
+        var run = new List<PointF>();
+        var level = -1;
+        var width = 0f;
+        for (var i = 1; i < _trail.Count; i++)
+        {
+            var step = (int)Math.Ceiling(TrailLevels * Math.Clamp(1 - (now - _trail[i].At) / TrailSeconds, 0, 1));
+            if (step != level)
+            {
+                Flush();
+                (level, width) = (step, TrailWidthDip * _trail[i].Scale);
+                run.Add(new(_trail[i - 1].P.X, _trail[i - 1].P.Y));
+            }
+            run.Add(new(_trail[i].P.X, _trail[i].P.Y));
+        }
+        Flush();
+
+        void Flush()
+        {
+            if (run.Count >= 2 && level > 0)
+            {
+                using var pen = new Pen(Color.FromArgb((int)(255 * TrailAlpha * level / TrailLevels), accent), width)
+                { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round, LineJoin = System.Drawing.Drawing2D.LineJoin.Round };
+                g.DrawLines(pen, run.ToArray());
+            }
+            run.Clear();
+        }
     }
 
     /// <summary>How far the pen has drawn a part, and its opacity: hidden before its start; reduced motion fades it in instead.</summary>

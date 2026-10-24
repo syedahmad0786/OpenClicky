@@ -266,6 +266,14 @@ internal static class Program
         }
         Console.WriteLine("PASS: drawing reveals in its own window, Hide hides it, it persists, an empty drawing clears it");
 
+        var trailFailure = ValidateHighlightTrail(overlay, vs);
+        if (trailFailure is not null)
+        {
+            Console.Error.WriteLine("FAIL: highlight trail " + trailFailure);
+            return 28;
+        }
+        Console.WriteLine("PASS: the highlight trail paints in the ink window, Hide hides it, ClearHighlight takes it down, it fades within about a second");
+
         var helperLiveFailure = ValidateHelperDrawing(overlay, vs);
         if (helperLiveFailure is not null)
         {
@@ -496,6 +504,48 @@ internal static class Program
         finally
         {
             overlay.ShowDrawing([], []);
+            overlay.Hide();
+            Cursor.Position = saved;
+        }
+    }
+
+    /// <summary>
+    /// The talk-hold highlight trail: samples paint a stroke in the ink window, Hide hides it, ClearHighlight takes it down, and
+    /// with no new samples it fades and the window goes. Only the cursor position is set; nothing is clicked or typed anywhere.
+    /// </summary>
+    private static string? ValidateHighlightTrail(BuddyOverlayController overlay, Rectangle vs)
+    {
+        var ink = overlay.DrawingHandle;
+        static bool Visible(IntPtr hwnd) => NativeMethods.IsWindowVisible(hwnd);
+        static bool Covers(IntPtr hwnd, Point p) =>
+            NativeMethods.GetWindowRect(hwnd, out var r) && r.Left <= p.X && p.X < r.Right && r.Top <= p.Y && p.Y < r.Bottom;
+        var saved = Cursor.Position;
+        var mon = Screen.PrimaryScreen!.Bounds;
+        int x = mon.Left + mon.Width / 4, y = mon.Top + mon.Height / 2;
+        void Stroke() { for (var i = 0; i <= 20; i++) overlay.AddHighlightPoint(x + i * 10, y + (i % 2) * 4); }
+        try
+        {
+            Cursor.Position = new Point(vs.Left + vs.Width * 3 / 4, vs.Top + vs.Height * 3 / 4); // the companion stays clear
+            overlay.ShowListening();
+            Stroke();
+            if (!PumpUntil(() => Visible(ink), TimeSpan.FromSeconds(1))) return "the trail never showed";
+            if (!Covers(ink, new Point(x + 100, y)) || !Covers(ink, new Point(x + 199, y))) return "the ink window does not cover the trail";
+            if (!NativeMethods.GetWindowRect(ink, out var r) || r.Right - r.Left >= vs.Width) return "the trail window spans the whole virtual screen";
+            overlay.Hide();
+            if (Visible(ink)) return "Hide left the trail visible";
+            overlay.ShowListening();
+            Stroke();
+            if (!PumpUntil(() => Visible(ink), TimeSpan.FromSeconds(1))) return "the trail did not show again";
+            overlay.ClearHighlight();
+            if (!PumpUntil(() => !Visible(ink), TimeSpan.FromSeconds(1))) return "ClearHighlight left the trail up";
+            Stroke();
+            if (!PumpUntil(() => Visible(ink), TimeSpan.FromSeconds(1))) return "a new trail did not show";
+            if (!PumpUntil(() => !Visible(ink), TimeSpan.FromSeconds(2))) return "the trail did not fade away";
+            return null;
+        }
+        finally
+        {
+            overlay.ClearHighlight();
             overlay.Hide();
             Cursor.Position = saved;
         }
