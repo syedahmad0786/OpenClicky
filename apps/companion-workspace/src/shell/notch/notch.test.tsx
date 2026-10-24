@@ -142,7 +142,7 @@ it("tabs post notch.tab; the gear opens Settings, which grows the panel; the app
 
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
   expect(host.posts("notch.tab").at(-1)).toEqual({ kind: "notch.tab", tab: "settings" });
-  expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
+  expect(screen.getByRole("navigation", { name: "Settings sections" })).toBeInTheDocument();
   expect(root()).toHaveClass("notch--settings");
 
   fireEvent.click(screen.getByRole("button", { name: "Home" }));
