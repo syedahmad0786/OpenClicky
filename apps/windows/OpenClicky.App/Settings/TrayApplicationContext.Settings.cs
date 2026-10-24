@@ -100,7 +100,7 @@ internal sealed partial class TrayApplicationContext
             // As the classic OnSettingsApplied: a new provider or proxy must not serve the task or turn in flight.
             case "account.provider" or "advanced.useLocalProxy" or "advanced.proxyUrl":
                 CancelTask();
-                _talk.Cancel();
+                CancelTalk();
                 RefreshConnection();
                 break;
             case "microphone.deviceId": StopMicTest(); RefreshConnection(); break; // the recorders read the device id on each start

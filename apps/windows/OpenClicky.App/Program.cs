@@ -28,6 +28,11 @@ internal static class Program
         try
         {
             ApplicationConfiguration.Initialize();
+            // An unexpected UI-thread exception (e.g. in an async void handler) is logged and the tray keeps running,
+            // instead of the WinForms exception dialog. Only the type is logged: messages may carry user text.
+            Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+            Application.ThreadException += (_, e) => LogUnhandled("ui", e.Exception);
+            AppDomain.CurrentDomain.UnhandledException += (_, e) => LogUnhandled("fatal", e.ExceptionObject as Exception);
             Application.ApplicationExit += (_, _) => ReleaseMutex();
             // --background (launch at login): start in the tray and open nothing.
             using var context = new TrayApplicationContext(background);
@@ -43,6 +48,12 @@ internal static class Program
 
     internal static RegisteredWaitHandle RegisterReopenRequest(WaitHandle request, Action reopen) =>
         ThreadPool.RegisterWaitForSingleObject(request, (_, _) => reopen(), null, Timeout.Infinite, executeOnlyOnce: false);
+
+    private static void LogUnhandled(string kind, Exception? error)
+    {
+        try { DebugLog.Append($"[{DateTimeOffset.Now:HH:mm:ss}] unhandled_{kind}_exception={error?.GetType().Name ?? "unknown"}"); }
+        catch { /* logging must never throw from here */ }
+    }
 
     private static void ReleaseMutex()
     {

@@ -161,7 +161,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         catch (Exception ex) { ClassicMessage("Saved task history was left unchanged: " + ex.Message); }
         _settingsForm = new SettingsForm(_settings, _secrets, OnSettingsApplied, ClearHistory);
         _companionDock = new CompanionDockForm(ToggleConversation, ShowHome,
-            () => _ = SelectScreenAreaAsync(), ShowClipboardShelf, _talk.StopConversation,
+            () => _ = SelectScreenAreaAsync(), ShowClipboardShelf, CancelTalk,
             () => (_home.Visible && _home.WindowState != FormWindowState.Minimized) || _settingsForm.Visible || _clipboardShelf?.Visible == true || _walkthroughForm.Visible);
         _talk.AssistantResponseChanged += (text, complete) =>
         {
@@ -446,7 +446,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         CancelTask();
         _taskControl.Resume();
         _submissionCts?.Cancel();
-        _talk.Cancel();
+        CancelTalk();
         _shell?.ClearCaptions();
         _home.TurnOffGuide();
     }
@@ -966,7 +966,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
     private void ToggleConversation()
     {
         if (_dictationActive) { CancelDictation(); return; }
-        if (_talk.ConversationActive) _talk.StopConversation();
+        if (_talk.ConversationActive) CancelTalk();
         else { PauseTask(); _talk.StartConversation(); }
         _home.SetConversationActive(_talk.ConversationActive);
     }
@@ -1212,7 +1212,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
                 _home.SetDictationResult("Stop recording before inserting the draft.");
                 return;
             }
-            _talk.Cancel();
+            CancelTalk();
             var result = await _dictationTarget.InsertAsync(draft, _executor,
                 exclusions: AgentDenyList.ParseExtraFragments(_settings.AgentDenyListExtra));
             OnUi(() => _home.SetDictationResult(result.Message, canContinue: !result.InputAttempted));
@@ -1237,7 +1237,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
     private void CancelDictation()
     {
         var hidden = DictationHidden;
-        _talk.Cancel();
+        CancelTalk();
         _dictationAutoInsert = false;
         _dictationActive = false;
         _dictationTarget = null;
@@ -1293,20 +1293,29 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
     private async void BeginHeldDictation()
     {
         if (_dictationActive || _dictationHeld) return;
-        _dictationHeld = true;
-        _dictationShown = false;
-        var press = ++_dictationPress;
-        _dictationHoldError = DictationBlocker(out var target);
-        if (_dictationHoldError is null)
+        try
         {
-            _dictationTarget = target;
-            _dictationActive = true;
-            _dictationAutoInsert = true;
-            _insertedDictation = "";
-            _talk.BeginHeldListening(); // picks the local Whisper recognizer because _dictationActive is set
+            _dictationHeld = true;
+            _dictationShown = false;
+            var press = ++_dictationPress;
+            _dictationHoldError = DictationBlocker(out var target);
+            if (_dictationHoldError is null)
+            {
+                _dictationTarget = target;
+                _dictationActive = true;
+                _dictationAutoInsert = true;
+                _insertedDictation = "";
+                _talk.BeginHeldListening(); // picks the local Whisper recognizer because _dictationActive is set
+            }
+            await Task.Delay(_talk.HeldRevealDelay);
+            if (press == _dictationPress) ShowHeldDictation();
         }
-        await Task.Delay(_talk.HeldRevealDelay);
-        if (press == _dictationPress) ShowHeldDictation();
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Log("dictation_hold_start_error=" + ex.GetType().Name);
+            if (_dictationActive) CancelDictation();
+            _dictationHeld = false;
+        }
     }
 
     private void ShowHeldDictation()
@@ -1333,17 +1342,17 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         _dictationPress++; // the reveal timer of this press is moot
         var target = _dictationTarget;
         bool Same() => _dictationActive && target is not null && ReferenceEquals(target, _dictationTarget);
-        if (cancelled)
-        {
-            if (Same()) CancelDictation(); // silent while still hidden
-            _dictationHeld = false;
-            return;
-        }
-        ShowHeldDictation();
-        _dictationHeld = false;
-        if (!Same()) return;
         try
         {
+            if (cancelled)
+            {
+                if (Same()) CancelDictation(); // silent while still hidden
+                _dictationHeld = false;
+                return;
+            }
+            ShowHeldDictation();
+            _dictationHeld = false;
+            if (!Same()) return;
             await _talk.EndListeningAsync();
             // A failed insert switched auto-insert off and left the draft in the classic window for review: keep that open.
             if (Same() && _dictationAutoInsert) CancelDictation();
@@ -1352,6 +1361,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         {
             Log("dictation_hold_error=" + ex.GetType().Name);
             if (Same()) CancelDictation();
+            _dictationHeld = false;
         }
     }
 
@@ -1420,7 +1430,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
     {
         StopWalkthrough();
         if (_dictationActive) CancelDictation();
-        PauseTask(); _talk.Cancel();
+        PauseTask(); CancelTalk();
         var text = _home.RequestText;
         _home.MinimizeForRequest();
         try
@@ -1493,7 +1503,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
     private void OnSettingsApplied()
     {
         CancelTask();
-        _talk.Cancel();
+        CancelTalk();
         IgnoreLegacyFixtureTranscript();
         _tts.Enabled = _settings.SpeakReplies;
         ApplyShortcutBindings();

@@ -141,5 +141,12 @@ internal sealed partial class TrayApplicationContext
         _micWatch = null;
     }
 
+    /// <summary>Every tray cancel of the talk orchestrator: the watch goes first, so a stopped hold never warns.</summary>
+    private void CancelTalk()
+    {
+        CancelMicWatch();
+        _talk.Cancel();
+    }
+
     private void DisposeTalkFeedback() => CancelMicWatch();
 }

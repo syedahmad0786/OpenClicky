@@ -453,12 +453,16 @@ public sealed class TalkOrchestrator : IDisposable
     /// <summary>Talk press: record silently; it becomes visible only once the 400 ms tap window has passed.</summary>
     private async void OnPressed(object? sender, EventArgs e)
     {
-        _shortcutTurn = null;
-        BeginHeldListening();
-        if (!_heldPending) return;
-        var press = ++_pressId;
-        await Task.Delay(HeldRevealDelay);
-        if (press == _pressId) RevealTalk();
+        try
+        {
+            _shortcutTurn = null;
+            BeginHeldListening();
+            if (!_heldPending) return;
+            var press = ++_pressId;
+            await Task.Delay(HeldRevealDelay);
+            if (press == _pressId) RevealTalk();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { _log($"talk_press_error={ex.GetType().Name}"); }
     }
 
     private void RevealTalk()
@@ -472,17 +476,21 @@ public sealed class TalkOrchestrator : IDisposable
     /// turn this press started without a word (a conversation that was running carries on listening).</summary>
     private async void OnReleased(object? sender, EventArgs e)
     {
-        _pressId++; // this press's reveal timer is moot
-        if (e is ShortcutEndedEventArgs { Cancelled: true })
+        try
         {
-            if (_heldPending) { DiscardHeldListening(); return; }
-            var started = Interlocked.Exchange(ref _shortcutTurn, null);
-            if (started is not null && ReferenceEquals(_turnCts, started)) CancelCurrentTurn();
-            return;
+            _pressId++; // this press's reveal timer is moot
+            if (e is ShortcutEndedEventArgs { Cancelled: true })
+            {
+                if (_heldPending) { DiscardHeldListening(); return; }
+                var started = Interlocked.Exchange(ref _shortcutTurn, null);
+                if (started is not null && ReferenceEquals(_turnCts, started)) CancelCurrentTurn();
+                return;
+            }
+            if (_heldPending) RevealTalk();
+            _shortcutTurn = null;
+            await EndListeningAsync();
         }
-        if (_heldPending) RevealTalk();
-        _shortcutTurn = null;
-        await EndListeningAsync();
+        catch (Exception ex) when (ex is not OutOfMemoryException) { _log($"talk_release_error={ex.GetType().Name}"); }
     }
     private async void OnUtteranceEnded() => await EndListeningAsync();
     private void OnListeningFailed(Exception error)

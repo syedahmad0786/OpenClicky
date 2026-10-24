@@ -29,9 +29,12 @@ public static class CaptionsPolicy
     public static bool ClearOnSpeechEnded(CompanionVoiceState state) =>
         state is not (CompanionVoiceState.Listening or CompanionVoiceState.Processing);
 
-    /// <summary>Listening (a new press or a barge-in) and Idle (the turn ended or was stopped) clear the old reply's words.</summary>
-    public static bool ClearOnState(CompanionVoiceState state) =>
-        state is CompanionVoiceState.Listening or CompanionVoiceState.Idle;
+    /// <summary>
+    /// Listening (a new press or a barge-in) and Idle (the turn ended or was stopped) clear the old reply's words. So do
+    /// Responding and Pointing: the last streamed sentence may have ended while still Processing (no clear then); if more
+    /// words are still being spoken, each one cancels the page's 1.5 s pending clear.
+    /// </summary>
+    public static bool ClearOnState(CompanionVoiceState state) => state is not CompanionVoiceState.Processing;
 }
 
 /// <summary>The talk warning cards and their actions.</summary>

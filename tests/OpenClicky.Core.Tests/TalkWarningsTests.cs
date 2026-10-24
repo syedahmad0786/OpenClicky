@@ -50,8 +50,8 @@ public class TalkWarningsTests
     [InlineData(CompanionVoiceState.Listening, true)] // a barge-in must not append the new reply to the old words
     [InlineData(CompanionVoiceState.Idle, true)]
     [InlineData(CompanionVoiceState.Processing, false)]
-    [InlineData(CompanionVoiceState.Responding, false)]
-    [InlineData(CompanionVoiceState.Pointing, false)]
-    public void CaptionsClearOnListeningAndIdle(CompanionVoiceState state, bool clear) =>
+    [InlineData(CompanionVoiceState.Responding, true)] // the last sentence may have ended while still Processing
+    [InlineData(CompanionVoiceState.Pointing, true)]
+    public void CaptionsClearOnEveryStateButProcessing(CompanionVoiceState state, bool clear) =>
         Assert.Equal(clear, CaptionsPolicy.ClearOnState(state));
 }
