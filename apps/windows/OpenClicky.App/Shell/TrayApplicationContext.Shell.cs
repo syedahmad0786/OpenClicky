@@ -147,6 +147,7 @@ internal sealed partial class TrayApplicationContext : IShellHost
             Theme = GeneralBehaviour.ReadTheme(),
             ReducedMotion = GeneralBehaviour.ReducedMotion(),
             FallbackUserName = Environment.UserName,
+            AccountDisplayName = GeneralBehaviour.AccountDisplayName,
             CurrentVersion = CurrentVersion,
         };
     }

@@ -37,6 +37,19 @@ internal static class GeneralBehaviour
         return SystemParametersInfo(SpiGetClientAreaAnimation, 0, out var animate, 0) && !animate;
     }
 
+    /// <summary>The signed-in account's full name (GetUserNameExW NameDisplay); empty for local accounts without one. Read once.</summary>
+    public static string AccountDisplayName => _accountName.Value;
+    private static readonly Lazy<string> _accountName = new(() =>
+    {
+        const int NameDisplay = 3;
+        uint size = 256;
+        var buffer = new System.Text.StringBuilder((int)size);
+        return GetUserNameExW(NameDisplay, buffer, ref size) ? buffer.ToString() : "";
+    });
+
+    [DllImport("secur32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool GetUserNameExW(int nameFormat, System.Text.StringBuilder name, ref uint size);
+
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SystemParametersInfo(uint action, uint param, [MarshalAs(UnmanagedType.Bool)] out bool value, uint winIni);
 }

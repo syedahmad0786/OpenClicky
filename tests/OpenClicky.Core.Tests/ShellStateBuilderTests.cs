@@ -101,7 +101,7 @@ public class ShellStateBuilderTests
     {
         var settings = new AppSettings { ChatGptAccountEmail = "ahmad.b@example.com", AccentColor = "not a colour" };
         var state = ShellStateBuilder.Build(new ShellInputs(settings, [new ShellJobInput(Job("r", "running"), [], [])], [], [], ShellPhase.Working, Now) { FallbackUserName = "win" });
-        Assert.Equal("Ahmad.b", state.User.DisplayName);
+        Assert.Equal("Ahmad", state.User.DisplayName);
         Assert.Equal("#3380FF", state.Accent);
         Assert.Equal(1, state.Status.JobsWorking);
         Assert.Equal(["Win", "Alt", "Space"], state.Hotkeys.Talk);
@@ -109,6 +109,22 @@ public class ShellStateBuilderTests
         settings.DisplayName = "Sam";
         Assert.Equal("Sam", ShellStateBuilder.Build(new ShellInputs(settings, [], [], [], ShellPhase.Idle, Now)).User.DisplayName);
         Assert.Equal("win", ShellStateBuilder.Build(new ShellInputs(new AppSettings(), [], [], [], ShellPhase.Idle, Now) { FallbackUserName = "win" }).User.DisplayName);
+    }
+
+    [Theory]
+    [InlineData("Sam", "Ahmad Bukhari", "ahmad@x.com", "win", "Sam")]                    // saved name wins
+    [InlineData("", "Ahmad Bukhari", "ahmadbukhari4245@gmail.com", "win", "Ahmad")]      // Windows account: first word
+    [InlineData("", "  ", "ahmadbukhari4245@gmail.com", "win", "Ahmadbukhari")]          // email: stop at the first digit
+    [InlineData("", "", "ahmad.bukhari@x.com", "win", "Ahmad")]                          // email: stop at '.'
+    [InlineData("", "", "ahmad_b@x.com", "win", "Ahmad")]                                // email: stop at '_'
+    [InlineData("", "", "ahmad-b@x.com", "win", "Ahmad")]                                // email: stop at '-'
+    [InlineData("", "", "4245@x.com", "win", "win")]                                     // no leading letters
+    [InlineData("", "", null, "win", "win")]                                             // nothing else: OS user
+    public void DisplayNameChain(string saved, string account, string? email, string user, string expected)
+    {
+        var settings = new AppSettings { DisplayName = saved, ChatGptAccountEmail = email };
+        var inputs = new ShellInputs(settings, [], [], [], ShellPhase.Idle, Now) { AccountDisplayName = account, FallbackUserName = user };
+        Assert.Equal(expected, ShellStateBuilder.Build(inputs).User.DisplayName);
     }
 
     [Fact]

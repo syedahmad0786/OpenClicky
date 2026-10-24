@@ -18,7 +18,10 @@ public sealed record ShellInputs(
 {
     public ShellTheme Theme { get; init; } = ShellTheme.Dark;
     public bool ReducedMotion { get; init; }
+    /// <summary>Last resort, one word (the OS user name).</summary>
     public string FallbackUserName { get; init; } = "";
+    /// <summary>The Windows account's display name (may be several words or empty); its first word is the greeting name.</summary>
+    public string AccountDisplayName { get; init; } = "";
     public string CurrentVersion { get; init; } = "0.0.0";
     public ShellNotch Notch { get; init; } = new(NotchTab.Home, false);
     public string? FeaturedJobId { get; init; }
@@ -60,7 +63,7 @@ public static class ShellStateBuilder
             inputs.Theme,
             settings.AccentColor is { } accent && Hex.IsMatch(accent) ? accent.ToUpperInvariant() : DefaultAccent,
             inputs.ReducedMotion,
-            new ShellUser(Cut(DisplayName(settings, inputs.FallbackUserName), 80)),
+            new ShellUser(Cut(DisplayName(settings, inputs.AccountDisplayName, inputs.FallbackUserName), 80)),
             new ShellHotkeys(Keys(settings.PushToTalk), [], [], []),
             new ShellStatus(inputs.Phase, cards.Count(j => j.State == JobState.Working), cards.Count(j => j.State == JobState.NeedsYou)),
             inputs.Notch,
@@ -134,11 +137,14 @@ public static class ShellStateBuilder
         if (!string.IsNullOrWhiteSpace(turn.Assistant)) yield return new ChatRow($"turn-{turn.Id}-a", ChatRole.Assistant, Cut(turn.Assistant, 32_000), at);
     }
 
-    public static string DisplayName(AppSettings settings, string fallback)
+    /// <summary>One word: the saved name, else the Windows account name's first word, else the email's leading letters, else the OS user.</summary>
+    public static string DisplayName(AppSettings settings, string accountName, string fallback)
     {
         if (!string.IsNullOrWhiteSpace(settings.DisplayName)) return settings.DisplayName.Trim();
-        var local = settings.ChatGptAccountEmail?.Split('@')[0].Trim();
-        if (!string.IsNullOrEmpty(local)) return char.ToUpper(local[0], CultureInfo.InvariantCulture) + local[1..];
+        if (accountName.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() is { } first) return first;
+        var local = settings.ChatGptAccountEmail?.Split('@')[0].Trim() ?? "";
+        var letters = new string(local.TakeWhile(char.IsLetter).ToArray());
+        if (letters.Length > 0) return char.ToUpper(letters[0], CultureInfo.InvariantCulture) + letters[1..].ToLowerInvariant();
         return fallback;
     }
 

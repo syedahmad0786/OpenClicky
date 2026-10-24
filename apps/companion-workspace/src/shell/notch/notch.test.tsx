@@ -157,6 +157,12 @@ it("a host tab change switches the tab", () => {
   expect(screen.getByPlaceholderText("Ask OpenClicky…")).toBeInTheDocument();
 });
 
+it("the composer starts as a single-line textarea", () => {
+  mockHost();
+  render(<Notch state={open("chat")} />);
+  expect(screen.getByPlaceholderText("Ask OpenClicky…")).toHaveAttribute("rows", "1");
+});
+
 it("Chat renders bubbles and event captions, and shows the empty state", () => {
   mockHost();
   const view = render(<Notch state={open("chat")} />);
