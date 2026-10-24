@@ -1,0 +1,109 @@
+{
+  "version": 1,
+  "theme": "dark",
+  "accent": "#3380FF",
+  "reducedMotion": false,
+  "user": { "displayName": "Ahmad" },
+  "hotkeys": {
+    "talk": ["Ctrl", "Alt"],
+    "text": ["Ctrl", "Alt", "T"],
+    "dictate": ["Ctrl", "Alt", "D"],
+    "handsFree": ["Ctrl", "Alt", "H"]
+  },
+  "status": { "phase": "working", "jobsWorking": 2, "jobsNeedYou": 1 },
+  "notch": { "tab": "home", "open": true },
+  "featured": {
+    "id": "job-working",
+    "title": "Summarise the quarterly report",
+    "state": "working",
+    "colour": "blue",
+    "summary": "Reading the PDF and pulling out the headline numbers.",
+    "stat": { "value": "3 of 5", "label": "steps done" },
+    "bullets": ["Opened the report", "Found the revenue table"],
+    "files": [{ "name": "q3-report.pdf", "path": "C:\\Users\\demo\\Documents\\q3-report.pdf", "kind": "pdf" }],
+    "liveLine": "Extracting table 2",
+    "plan": [
+      { "text": "Open the report", "done": true },
+      { "text": "Write the summary", "done": false }
+    ],
+    "updatedAt": "2026-10-24T09:30:00Z"
+  },
+  "jobs": [
+    {
+      "id": "job-queued", "title": "Tidy the downloads folder", "state": "queued", "colour": "yellow",
+      "bullets": [], "files": [{ "name": "Downloads", "path": "C:\\Users\\demo\\Downloads", "kind": "folder" }],
+      "plan": [], "updatedAt": "2026-10-24T09:00:00Z"
+    },
+    {
+      "id": "job-working", "title": "Summarise the quarterly report", "state": "working", "colour": "blue",
+      "summary": "Reading the PDF and pulling out the headline numbers.",
+      "stat": { "value": "3 of 5", "label": "steps done" },
+      "bullets": ["Opened the report", "Found the revenue table"],
+      "files": [{ "name": "q3-report.pdf", "path": "C:\\Users\\demo\\Documents\\q3-report.pdf", "kind": "pdf" }],
+      "liveLine": "Extracting table 2",
+      "plan": [{ "text": "Open the report", "done": true }, { "text": "Write the summary", "done": false }],
+      "updatedAt": "2026-10-24T09:30:00Z"
+    },
+    {
+      "id": "job-needs-you", "title": "Book the flight", "state": "needsYou", "colour": "red",
+      "summary": "Two fares match. Pick one to continue.",
+      "bullets": ["Fare A is cheaper", "Fare B is refundable", "Both leave at 8am", "Checked three sites"],
+      "files": [
+        { "name": "fares.xlsx", "path": "C:\\Users\\demo\\Documents\\fares.xlsx", "kind": "sheet" },
+        { "name": "itinerary.docx", "path": "C:\\Users\\demo\\Documents\\itinerary.docx", "kind": "doc" }
+      ],
+      "plan": [], "updatedAt": "2026-10-24T09:20:00Z"
+    },
+    {
+      "id": "job-done", "title": "Resize the photos", "state": "done", "colour": "green",
+      "summary": "All twelve photos are resized.",
+      "bullets": ["12 photos resized"],
+      "files": [
+        { "name": "cover.png", "path": "C:\\Users\\demo\\Pictures\\cover.png", "kind": "image" },
+        { "name": "intro.mp3", "path": "C:\\Users\\demo\\Music\\intro.mp3", "kind": "audio" },
+        { "name": "demo.mp4", "path": "C:\\Users\\demo\\Videos\\demo.mp4", "kind": "video" }
+      ],
+      "plan": [], "updatedAt": "2026-10-24T08:50:00Z"
+    },
+    {
+      "id": "job-failed", "title": "Upload the backup", "state": "failed", "colour": "red",
+      "summary": "The drive was offline.",
+      "bullets": [],
+      "files": [{ "name": "help", "path": "https://example.com/help", "kind": "link" }, { "name": "notes.bin", "path": "C:\\Users\\demo\\notes.bin", "kind": "other" }],
+      "plan": [], "updatedAt": "2026-10-24T08:40:00Z"
+    },
+    {
+      "id": "job-stopped", "title": "Draft the newsletter", "state": "stopped", "colour": "yellow",
+      "bullets": [], "files": [], "plan": [], "updatedAt": "2026-10-24T08:30:00Z"
+    },
+    {
+      "id": "job-new", "title": "Plan the week", "state": "new", "colour": "green",
+      "bullets": [], "files": [], "plan": [], "updatedAt": "2026-10-24T09:45:00Z"
+    }
+  ],
+  "chat": {
+    "rows": [
+      { "id": "row-1", "role": "user", "text": "Summarise the quarterly report", "at": "2026-10-24T09:29:00Z" },
+      { "id": "row-2", "role": "assistant", "text": "On it. I will start with the revenue table.", "at": "2026-10-24T09:29:05Z", "jobId": "job-working" },
+      { "id": "row-3", "role": "event", "text": "Job started", "at": "2026-10-24T09:29:06Z", "jobId": "job-working" }
+    ]
+  },
+  "cards": [
+    { "id": "card-activity", "kind": "activity", "title": "Working on it", "body": "Reading the report", "actions": [] },
+    { "id": "card-text", "kind": "textResponse", "title": "Here is the answer", "body": "Revenue grew eleven percent.", "actions": [{ "id": "copy", "label": "Copy", "style": "secondary" }] },
+    { "id": "card-update", "kind": "jobUpdate", "title": "Photos resized", "actions": [{ "id": "open", "label": "Open", "style": "primary" }] },
+    { "id": "card-needs", "kind": "needsYou", "title": "Pick a fare", "body": "Two options match.", "actions": [{ "id": "a", "label": "Fare A", "style": "primary" }, { "id": "b", "label": "Fare B", "style": "secondary" }, { "id": "stop", "label": "Cancel job", "style": "danger" }] },
+    { "id": "card-muted", "kind": "mutedSpeaker", "title": "Speaker is muted", "actions": [] },
+    { "id": "card-mic", "kind": "micTrouble", "title": "Microphone not heard", "actions": [] },
+    { "id": "card-clip", "kind": "clipboard", "title": "Copied text", "actions": [] },
+    { "id": "card-dict", "kind": "dictionaryLearned", "title": "Learned a word", "actions": [] },
+    { "id": "card-doc", "kind": "documentAccess", "title": "Allow file access?", "actions": [] },
+    { "id": "card-app", "kind": "appUpdated", "title": "Updated", "actions": [] },
+    { "id": "card-tip", "kind": "tip", "title": "Try holding the talk keys", "actions": [] },
+    { "id": "card-toast", "kind": "toast", "title": "Saved", "actions": [], "autoDismissMs": 3000 }
+  ],
+  "apps": { "connected": [{ "id": "notion", "name": "Notion" }, { "id": "slack", "name": "Slack" }] },
+  "general": { "showInTaskbar": true, "showInRecordings": false, "launchAtLogin": true, "paused": false },
+  "update": { "current": "1.4.0", "available": "1.5.0", "state": "available", "progress": 0 },
+  "document": { "path": "C:\\Users\\demo\\Documents\\notes.md", "name": "notes.md", "kind": "markdown", "content": "# Notes\n\nHello.", "truncated": false }
+}
