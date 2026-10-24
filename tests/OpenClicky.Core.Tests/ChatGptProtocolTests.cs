@@ -10,7 +10,79 @@ namespace OpenClicky.Core.Tests;
 
 public class ChatGptProtocolTests
 {
+    [Theory]
+    [InlineData("Look up official help: Projects", true)]
+    [InlineData("Where is Projects?", false)]
+    public async Task OfficialHelp_AddsWebSearchOnlyForAnExplicitLookup(string question, bool search)
+    {
+        string? body = null;
+        using var http = new HttpClient(new Handler(async (request, ct) =>
+        {
+            body = await request.Content!.ReadAsStringAsync(ct);
+            return Reply(Completed);
+        }));
+        var talk = new ChatGptTalkClient(_ => Task.FromResult("fixture-token"), http);
+        await talk.CompleteVisionTalkAsync("screen help", [], question, [], "available-model");
+        using var doc = JsonDocument.Parse(body!);
+        Assert.Equal(search, doc.RootElement.TryGetProperty("tools", out var tools));
+        if (search)
+        {
+            Assert.Equal("web_search", tools[0].GetProperty("type").GetString());
+            Assert.Equal("required", doc.RootElement.GetProperty("tool_choice").GetString());
+            Assert.Contains("support.claude.com", body!);
+            var instructions = doc.RootElement.GetProperty("instructions").GetString();
+            Assert.Contains("never search names", instructions);
+            Assert.Contains("Never include a URL or search result that you determined is unrelated", instructions);
+            Assert.Contains("local sandbox, demo, or test fixture", instructions);
+            Assert.Contains("include no URL", instructions);
+        }
+    }
     private const string Completed = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"Token sharing works.\"}\n\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"Token sharing works.\"}]}]}}\n\n";
+
+    [Fact]
+    public async Task StreamingTalk_PublishesCumulativeFinalAnswerAndSkipsCommentary()
+    {
+        const string body = "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"message\",\"phase\":\"commentary\"}}\n\n"
+            + "data: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"delta\":\"private plan\"}\n\n"
+            + "data: {\"type\":\"response.output_item.added\",\"output_index\":1,\"item\":{\"type\":\"message\",\"phase\":\"final_answer\"}}\n\n"
+            + "data: {\"type\":\"response.output_text.delta\",\"output_index\":1,\"delta\":\"First. \"}\n\n"
+            + "data: {\"type\":\"response.output_text.delta\",\"output_index\":1,\"delta\":\"Second.\"}\n\n"
+            + "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"phase\":\"final_answer\",\"content\":[{\"type\":\"output_text\",\"text\":\"First. Second.\"}]}]}}\n\n";
+        using var http = new HttpClient(new Handler((_, _) => Task.FromResult(Reply(body))));
+        var updates = new List<string>();
+
+        var result = await new ChatGptTalkClient(_ => Task.FromResult("fixture-token"), http)
+            .StreamVisionTalkAsync("test", [], "question", [], "available-model", updates.Add);
+
+        Assert.Equal("First. Second.", result);
+        Assert.Equal(["First. ", "First. Second."], updates);
+        Assert.DoesNotContain(updates, update => update.Contains("private plan"));
+    }
+
+    [Theory]
+    [InlineData("gpt-6-luna", true, true)]
+    [InlineData("gpt-6-luna", false, false)]
+    [InlineData("available-model", true, false)]
+    public async Task Talk_UsesLowReasoningOnlyForStreamedExactLunaModel(
+        string model, bool streaming, bool expectsLowReasoning)
+    {
+        using var http = new HttpClient(new Handler(async (request, ct) =>
+        {
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
+            Assert.False(body.RootElement.GetProperty("store").GetBoolean());
+            Assert.True(body.RootElement.GetProperty("stream").GetBoolean());
+            Assert.Equal(expectsLowReasoning, body.RootElement.TryGetProperty("reasoning", out var reasoning));
+            if (expectsLowReasoning)
+                Assert.Equal("low", reasoning.GetProperty("effort").GetString());
+            return Reply(Completed);
+        }));
+        var talk = new ChatGptTalkClient(_ => Task.FromResult("fixture-token"), http);
+
+        if (streaming)
+            await talk.StreamVisionTalkAsync("test", [], "question", [], model, _ => { });
+        else
+            await talk.CompleteVisionTalkAsync("test", [], "question", [], model);
+    }
 
     [Fact]
     public async Task Agent_UsesFinalMessageWithoutConcatenatingCommentary()

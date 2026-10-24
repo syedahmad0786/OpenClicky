@@ -2,59 +2,66 @@
 
 <img src="assets/openclicky.png" alt="OpenClicky green pointer companion" width="112" />
 
-An open-source Windows companion that can explain your screen, point things out, and perform short desktop tasks with your approval. MIT licensed, with your own AI provider account.
+One open-source Windows companion for conversation, screen guidance, approved desktop work, dictation, notes and interactive visuals. MIT licensed.
 
-Inspired by [HeyClicky](https://www.heyclicky.com/) and the public MIT project [farzaa/clicky](https://github.com/farzaa/clicky). OpenClicky has its own branding and Windows implementation. It is an independent project.
+Inspired by [HeyClicky](https://www.heyclicky.com/) and the public MIT project [farzaa/clicky](https://github.com/farzaa/clicky). OpenClicky has its own branding and Windows implementation.
 
-## Try it
+## Try the 0.6.0 preview
 
-Windows 11, x64. The portable release includes its runtime; no .NET installation is needed to run it.
+Windows 11 x64. Extract the complete portable folder and open **OpenClicky.exe**. The required local runtimes are bundled; keep their folders beside the EXE.
 
-1. Extract the published folder and open **OpenClicky.exe**.
-2. Try **Pointing demo** or **Test desktop actions**. These clearly labeled demos work without an account. Approve each test action and inspect the green button count and the exact text `hello`.
-3. In **Settings → Connection**, select **ChatGPT plan** and click **Continue with ChatGPT**. Finish the official browser sign-in yourself and enable plan usage. Eligible ChatGPT Plus or Pro accounts can power this local app without an API key. Choose from your account's available models; **Manage usage** opens ChatGPT's usage settings. OpenRouter remains an explicit alternative for existing users.
-4. Type a request in **Ask**, or hold **Win+Alt+Space**, speak, and release. Typed requests give you three seconds to select the app you want help with.
-5. For a short task, select **Agent**. Review each proposed click, typing action, hotkey, or scroll. **Stop** or **Escape** cancels the task; declining an action ends the run.
+- Connect through **Settings → Connection → ChatGPT plan → Continue with ChatGPT**. Complete official sign-in yourself and choose a model available to your account.
+- Select and test your microphone under **Voice & shortcut**, then download local English Whisper.
+- Click the companion once for continuous conversation. Click again to stop; hold **Win+Alt+Space** for one request.
+- Ask **“Open Calculator”**, **“Show me how to…”**, or request a chart in the same Chat.
+- Use **Dictate into app**, **Clipboard shelf**, **Memory**, **Notes** and **Tasks** from that workspace.
 
-The window closes to the tray. Double-click the tray icon to reopen it; choose **Quit** from the tray menu to exit. The voice shortcut can be changed in Settings. Escape is reserved for stopping.
+[Quick start](docs/portable-quick-start.md) explains the exact controls and data sharing. [Physical acceptance](docs/manual-acceptance-2026-10-12.md) lists microphone and keyboard checks.
 
-Windows speech recognition and spoken replies run locally with ChatGPT. An installed Windows speech recognizer is required for voice input; typing always remains available. ChatGPT plan usage supports screen images and text, but excludes audio transcription. Optional OpenRouter transcription sends recorded audio only when that alternative is selected and local recognition is turned off. See [OpenAI's supported inputs](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations).
+## Current status
 
-## Release status
+**0.6.0 is an unsigned implementation preview; phase-one acceptance is still in progress.** The [implementation ledger](docs/phase-one-implementation.md) distinguishes real AI, native fixture, automated, physical and packaging evidence. Earlier reports remain historical evidence rather than current release certification.
 
-**0.2 is a working Windows preview, with desktop verification and live-provider acceptance still separate.**
-
-| Capability | Evidence / limit |
+| Capability | Current evidence and limit |
 | --- | --- |
-| Home, tray, settings, original icons | Visually inspected on Windows 11 at this machine's display scaling |
-| Typed Ask and Agent requests | Shared cancellable pipeline; missing-provider errors are visible |
-| Pointing overlay | Actual overlay position verified, including a monitor left of the primary display |
-| Desktop actions with human approval | Built-in test clicked the green button and typed exact `hello`; decline stops input |
-| Screen capture | Actual in-memory JPEG capture on two monitors using WGC |
-| Local speech | Installed recognizer tested with generated speech; real TTS cancellation tested |
-| ChatGPT sign-in, model discovery, Talk / Agent | Human sign-in completed; live GPT-6.1-Sol read fresh sample text and planned approved sandbox clicks and exact `hello`; broader desktop acceptance remains open |
-| OpenRouter Talk / Agent | Preserved as an alternative; no live request verified for this release yet |
-| Physical microphone / voice shortcut | Accuracy remains unaccepted; earlier spoken requests produced garbled transcripts; typing works |
-| Portable EXE / MSIX | Built locally; unsigned; MSIX installation not verified |
+| OpenWork tasks | Real ChatGPT → OpenWork → approved sandbox click/type and Calculator launch passed with independent destination inspection. Memory-only source search and declined-task Stop passed. OpenWork is the workflow foundation; OpenCode is its internal dependency. No separate provider login is required. |
+| Unified chat and visuals | Packaged React/WebView2, CopilotKit v2 and AG-UI streaming. Real ChatGPT chart, connected diagram, calculator and rotatable cube passed bounded native checks; saved edits survived app restart. Self-contained visual creation keeps Home open without capturing a screen. |
+| Conversation and voice | Continuous listening, streaming text/sentence speech, local Whisper warmup/partial reuse and conditional Windows echo-cancelled interruption are built. Current 0.6 physical acceptance remains open. |
+| Dictation | Finalized raw words insert into the selected writable field on pause. Exact native insertion and refusal after focus changes passed; physical speech-to-field acceptance remains open. No Send/submit or automatic AI rewrite. |
+| Guidance | Step-by-step walkthroughs, Next/Back/Recheck/Stop, selected regions and seven progressive drawing shapes. A real three-step task checked progress, preserved existing text and re-grounded after moving its window. All shapes have native fixture proof; broader app and mixed-DPI checks remain separate. |
+| Memory and notes | Source-linked editable local facts, bounded automatic learning, local notes and read-only task memory search. Deletion suppression and transactional SQLite import have focused coverage. |
+| Clipboard shelf | Persistent exact text, URLs and numbers; edit/pin/reorder/search and sequential insertion. Exact multiline destination proof passed. Saved collection preference is preserved. |
+| Awareness | Local repeated-activity signals, quiet opt-in offers, five-minute cooldown, dismissal and snoozing. No continuous screen uploading. |
+| Browser | Optional scoped Chrome extension and native messaging are implemented. Installing it and verifying existing signed-in tabs remain manual acceptance items. |
+| Distribution | Version-aligned EXE, ZIP and unsigned MSIX previews. Final packaged-launch, signing and clean-machine acceptance are tracked in the ledger. |
 
-OpenClicky does not yet provide HeyClicky's persistent named companions, drawing canvas, routines, scheduling, dictation into apps, or account connectors. See the [video research and scope](docs/heyclicky-research.md) and [verification record](docs/verification.md).
+Performance is measured separately for capture, transcription, model response and speech. Recent real model first-text times exceeded the three-second warm-response target; another routing provider has not been added without evidence that routing is the bottleneck.
+
+Multiple companions, recurring routines, account connectors and broader skill distribution remain phase two. ChatGPT sign-in does not grant access to Gmail/Slack APIs. Composio/Nango are deferred.
 
 ## Privacy and control
 
-- Requests capture **all connected monitors** and send their images to your selected AI provider. Choose what is visible before starting. Images are held in memory rather than saved by OpenClicky.
-- There is no OpenClicky-hosted service. Providers have their own processing and retention policies; local capture does not make the AI request local.
-- API keys use Credential Manager. Oversized ChatGPT token records use a DPAPI-protected file. Non-secret settings live in `%AppData%\OpenClicky\settings.json`.
-- ChatGPT credentials are accepted only after signature, issuer, audience, expiry, nonce, and returning-account identity checks. AI requests require granted plan-usage permission and a completed Responses stream. Sign-out clears tokens and retains the account registration; remote revocation failures are reported.
-- Optional text history is enabled by default and saved in `%AppData%\OpenClicky\history.json`; turn it off or clear it in Settings. Routine logs contain sizes, states, and error classes rather than request or response contents. Existing logs from older versions are not deleted automatically.
-- Every input action requires approval. The window-title deny-list is a convenience guard, not a security boundary. Review the destination and action each time. See [agent safety](docs/agent-safety.md).
+- Screen questions share the current foreground window or explicitly selected pixels, plus request text, with ChatGPT. Tasks inspect relevant windows/tabs and may retrieve requested saved context. Raw audio is transcribed locally and discarded.
+- Ambient awareness starts with local activity signals and asks before inspecting a task. Exclusions are applied before supported inspection/capture paths. Window titles are convenience guards, not a security boundary.
+- ChatGPT credentials stay in the protected store. The private local inference adapter gives the managed OpenWork engine short-lived local authentication, not stored provider credentials.
+- Conversations, notes, clips and artifact references persist locally in SQLite; original JSON imports remain for recovery. The history preference is respected. Memory is editable and source-linked; forgetting suppresses recreation from its retained source.
+- **Confirm each** remains the default. Preview disables mutations. Auto confirms the plan and actions its rules classify as consequential/uncertain. Full access requires explicit warning acceptance. A running task keeps its initial access snapshot. Stop cannot undo completed input.
+- Generated visuals use constrained data and isolated rendering. Desktop actions still pass through the host broker. The task profile cannot use unrestricted shell tools.
+- Existing optional OpenRouter settings are retained for compatibility; cloud audio is sent only when explicitly selected.
+
+See [agent safety](docs/agent-safety.md), [architecture](docs/architecture.md) and [video requirements](docs/video-acceptance-matrix.md). The video review is sampled visual evidence, not a claim of frame-by-frame inspection or complete feature parity.
 
 ## Build from source
 
-Use a .NET 8 SDK or newer on Windows:
+Use .NET 8 SDK or newer on Windows and Node/pnpm for the embedded workspace.
 
 ```powershell
 dotnet build OpenClicky.sln -c Release
 dotnet test OpenClicky.sln -c Release --no-build
+pnpm --dir apps/companion-workspace install --frozen-lockfile
+pnpm --dir apps/companion-workspace test
+pnpm --dir apps/companion-workspace build
+powershell -ExecutionPolicy Bypass -File scripts/setup-openwork.ps1
 dotnet run --project apps/windows/OpenClicky.App -c Release
 ```
 
@@ -65,16 +72,12 @@ powershell -ExecutionPolicy Bypass -File scripts/publish-exe.ps1
 powershell -ExecutionPolicy Bypass -File scripts/pack-msix.ps1
 ```
 
-Outputs are under `artifacts/exe/win-x64/` and `artifacts/msix/`. [Packaging](docs/packaging.md) explains distribution and signing. CI in [.github/workflows/windows-ci.yml](.github/workflows/windows-ci.yml) builds, tests, runs dedicated capture/action/overlay checks, and publishes artifacts; that is not a substitute for human acceptance.
+Outputs are under `artifacts/phase-one-preview/`. [Packaging](docs/packaging.md) explains runtime verification, licenses and distribution. A clean-machine installation and signing are not implied by a successful build.
 
-The optional existing localhost proxy is under `services/local-proxy`. It only accepts an explicitly configured loopback URL. The normal app calls the selected provider directly.
+The latest test candidate is isolated under `artifacts/phase-one-screen-guard/`; its native refusal check and matching archives are pending. The previous `artifacts/phase-one-ready/` archives retain bounded visual acceptance but do not include that guard. Work is checkpointed in the [usage-pause handoff](docs/checkpoint-2026-10-12-usage-pause.md). The [implementation ledger](docs/phase-one-implementation.md) records hashes and evidence. Neither candidate is a final release.
 
-## Development checks
-
-The built-in demos are the easiest manual check. Automated desktop checks use their own sandbox window; automatic approval exists only in the dedicated test executable. The `OPENCLICKY_OFFLINE_TALK` and `OPENCLICKY_OFFLINE_AGENT` environment fixtures remain for development, with an explicit offline label. The offline Agent fixture types only `hello` into an already open, user-selected test field; it does not launch Notepad or run shell commands. Inspect the actual editor to verify the result. Debug transcript overrides are ignored on normal launches so an old fixture cannot silently replace microphone input.
-
-See [architecture](docs/architecture.md) and [verification](docs/verification.md) for the test commands and acceptance checklist. Earlier phase documents are historical implementation notes.
+Dedicated smoke executables use their own disposable destinations. Automatic approval is limited to the test harness. Offline fixtures remain visibly labeled; normal launches ignore stale debug transcript overrides. Inspect the actual destination for desktop acceptance.
 
 ## License
 
-[MIT](LICENSE). The adapted public companion prompt retains its original [third-party notice](THIRD-PARTY-NOTICES.md). No HeyClicky logo, commercial binary, or marketing video is included in the release.
+[MIT](LICENSE). See [third-party notices](THIRD-PARTY-NOTICES.md) and the packaged dependency license inventory. No HeyClicky logo, commercial binary or marketing video is included in the release.

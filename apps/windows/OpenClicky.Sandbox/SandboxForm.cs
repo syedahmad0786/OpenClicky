@@ -15,10 +15,10 @@ internal sealed class SandboxForm : Form
     public Point InputCenter => _input.PointToScreen(new Point(_input.Width / 2, _input.Height / 2));
     public bool HasVerifiedResult => _clicks > 0 && _input.Text == "hello";
 
-    public SandboxForm()
+    public SandboxForm(bool multilineTarget = false)
     {
         Text = "OpenClicky Agent Sandbox";
-        ClientSize = new Size(480, 280);
+        ClientSize = new Size(480, multilineTarget ? 320 : 280);
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
@@ -35,7 +35,7 @@ internal sealed class SandboxForm : Form
         _status = new Label
         {
             Left = 16,
-            Top = 200,
+            Top = multilineTarget ? 240 : 200,
             Width = 440,
             Height = 48,
             Text = "Ready.",
@@ -69,7 +69,9 @@ internal sealed class SandboxForm : Form
             Left = 16,
             Top = 152,
             Width = 440,
-            Height = 28,
+            Height = multilineTarget ? 70 : 28,
+            Multiline = multilineTarget,
+            AcceptsReturn = multilineTarget,
             AccessibleName = "Type target",
         };
         Controls.Add(_input);

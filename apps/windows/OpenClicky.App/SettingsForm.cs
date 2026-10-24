@@ -1,5 +1,6 @@
 using OpenClicky.Core;
 using OpenClicky.Providers;
+using OpenClicky.Input;
 
 namespace OpenClicky.App;
 
@@ -17,6 +18,7 @@ internal sealed class SettingsForm : Form
     private readonly TextBox _apiKeyBox;
     private readonly TextBox _modelBox;
     private readonly ComboBox _chatGptModelBox;
+    private readonly ComboBox _quickModelBox;
     private readonly FlowLayoutPanel _chatGptPanel;
     private readonly FlowLayoutPanel _openRouterPanel;
     private readonly Button _refreshModels;
@@ -35,6 +37,13 @@ internal sealed class SettingsForm : Form
     private readonly CheckBox _windowsSpeech;
     private readonly CheckBox _speakReplies;
     private readonly TextBox _transcriptionModelBox;
+    private readonly ComboBox _microphoneBox;
+    private readonly ProgressBar _microphoneLevel;
+    private readonly Button _testMicrophone;
+    private readonly Label _voiceModelStatus;
+    private NAudioMicrophoneRecorder? _microphoneTest;
+    private readonly System.Windows.Forms.Timer _meterTimer = new() { Interval = 100 };
+    private readonly CancellationTokenSource _voiceDownload = new();
 
     public SettingsForm(AppSettings settings, ISecretStore secrets, Action onApplied, Action? onClearHistory = null)
     {
@@ -90,6 +99,9 @@ internal sealed class SettingsForm : Form
         _chatGptPanel.Controls.Add(AppTheme.Label("Model · available after sign-in", 9, true));
         _chatGptModelBox = new ComboBox { Width = 550, DropDownStyle = ComboBoxStyle.DropDownList, DisplayMember = nameof(ChatGptModel.DisplayName), ValueMember = nameof(ChatGptModel.Slug), AccessibleName = "ChatGPT model", Margin = new Padding(0,6,0,12) };
         _chatGptPanel.Controls.Add(_chatGptModelBox);
+        _chatGptPanel.Controls.Add(AppTheme.Label("Quick screen replies · Agent keeps the model above", 9, true));
+        _quickModelBox = new ComboBox { Width = 550, DropDownStyle = ComboBoxStyle.DropDownList, DisplayMember = nameof(ChatGptModel.DisplayName), AccessibleName = "Quick reply model", Margin = new Padding(0,6,0,12) };
+        _chatGptPanel.Controls.Add(_quickModelBox);
         var usageButtons = new FlowLayoutPanel { Width = 560, AutoSize = true, Margin = Padding.Empty };
         _refreshModels = AppTheme.Button("Refresh models");
         _refreshModels.Click += async (_, _) => await RefreshModelsAsync();
@@ -102,7 +114,44 @@ internal sealed class SettingsForm : Form
         _chatGptPanel.Controls.Add(speechNote);
         _providerChatGpt.CheckedChanged += (_, _) => RefreshProviderPanels();
 
-        AddHeading(voice, "Talk from any app", "Hold your shortcut while speaking, then release. You can always type in Home.");
+        AddHeading(voice, "Talk from any app", "Click Start conversation in Home for hands-free turns, or hold your shortcut for one request. You can always type.");
+        voice.Controls.Add(AppTheme.Label("Microphone · choose the input you actually use", 9, true));
+        _microphoneBox = new ComboBox { Width = 550, DropDownStyle = ComboBoxStyle.DropDownList, DisplayMember = nameof(MicrophoneDevice.Name), AccessibleName = "Microphone input", Margin = new Padding(0,6,0,8) };
+        voice.Controls.Add(_microphoneBox);
+        var microphoneButtons = new FlowLayoutPanel { AutoSize = true, Width = 550, Margin = Padding.Empty };
+        var refreshMicrophones = AppTheme.Button("Refresh microphones");
+        refreshMicrophones.Click += (_, _) => RefreshMicrophones();
+        _testMicrophone = AppTheme.Button("Test microphone");
+        _testMicrophone.Click += (_, _) => TestMicrophone();
+        microphoneButtons.Controls.AddRange(new Control[] { _testMicrophone, refreshMicrophones });
+        voice.Controls.Add(microphoneButtons);
+        _microphoneLevel = new ProgressBar { Width = 550, Height = 14, AccessibleName = "Microphone input level", Margin = new Padding(0,6,0,8) };
+        voice.Controls.Add(_microphoneLevel);
+        voice.Controls.Add(AppTheme.Label("While testing, speak and watch the level move. Test audio is discarded. Save your selection below.", 9));
+        _meterTimer.Tick += (_, _) => _microphoneLevel.Value = Math.Clamp((int)((_microphoneTest?.PeakLevel ?? 0) * 100), 0, 100);
+        _microphoneBox.SelectedIndexChanged += (_, _) => StopMicrophoneTest();
+        VisibleChanged += (_, _) => { if (!Visible) StopMicrophoneTest(); };
+        Disposed += (_, _) => { StopMicrophoneTest(); _meterTimer.Dispose(); _voiceDownload.Cancel(); _voiceDownload.Dispose(); };
+        RefreshMicrophones();
+        _voiceModelStatus = AppTheme.Label(LocalWhisperModel.IsAvailable ? "Whisper is ready · English speech stays on this PC." : "Compatibility voice is active. Download Whisper for stronger recognition and live previews.", 9);
+        _voiceModelStatus.MaximumSize = new Size(530, 0);
+        voice.Controls.Add(_voiceModelStatus);
+        var downloadVoice = AppTheme.Button("Download accurate voice · 142 MB");
+        downloadVoice.Click += async (_, _) =>
+        {
+            downloadVoice.Enabled = false;
+            try
+            {
+                await LocalWhisperModel.DownloadAsync(new Progress<int>(percent => { if (!IsDisposed) _voiceModelStatus.Text = $"Downloading local voice: {percent}%"; }), _voiceDownload.Token);
+                if (IsDisposed) return;
+                _voiceModelStatus.Text = "Whisper is ready · English speech stays on this PC.";
+                _onApplied();
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex) { if (!IsDisposed) _voiceModelStatus.Text = "Download failed: " + ex.Message; }
+            finally { if (!IsDisposed) downloadVoice.Enabled = true; }
+        };
+        voice.Controls.Add(downloadVoice);
         _hotkeyBox = Field(voice, "Shortcut · click the field and press your combination", _draft.DisplayName);
         _hotkeyBox.ReadOnly = true;
         _hotkeyBox.KeyDown += HotkeyBoxOnKeyDown;
@@ -111,28 +160,28 @@ internal sealed class SettingsForm : Form
         voice.Controls.Add(reset);
         _hotkeyHint = AppTheme.Label("Default: Win+Alt+Space. Use a modifier and a key.", 9);
         voice.Controls.Add(_hotkeyHint);
-        _windowsSpeech = new CheckBox { Text = "Use local Windows speech recognition", Checked = settings.UseWindowsSpeech, AutoSize = true, Margin = new Padding(0,12,0,10) };
+        _windowsSpeech = new CheckBox { Text = "Use local speech recognition", Checked = settings.UseWindowsSpeech, AutoSize = true, Margin = new Padding(0,12,0,10) };
         voice.Controls.Add(_windowsSpeech);
         string languages;
         try { languages = string.Join(", ", LocalSpeechSttClient.InstalledLanguages()); }
         catch { languages = ""; }
-        voice.Controls.Add(AppTheme.Label(string.IsNullOrWhiteSpace(languages) ? "No Windows speech language found. Turn this off to use OpenRouter transcription." : "Installed: " + languages + ". Audio stays on this PC when Windows speech is on.", 9));
+        voice.Controls.Add(AppTheme.Label(string.IsNullOrWhiteSpace(languages) ? "Download Whisper for local speech. ChatGPT sign-in does not include cloud transcription." : "Windows compatibility language: " + languages + ". Whisper is used when downloaded; compatibility words appear after Send.", 9));
         _transcriptionModelBox = Field(voice, "OpenRouter transcription model · used when local speech is off", settings.TranscriptionModel);
         _speakReplies = new CheckBox { Text = "Read replies aloud using a Windows voice", Checked = settings.SpeakReplies, AutoSize = true, Margin = new Padding(0,12,0,10) };
         voice.Controls.Add(_speakReplies);
 
-        AddHeading(privacy, "You stay in charge", "All connected screens are captured for a request. Images stay in memory; your selected AI provider receives them to answer.");
+        AddHeading(privacy, "You stay in charge", "Screen questions share the current window or selected area with your AI provider. Tasks may inspect more of the desktop. Images stay in memory.");
         privacy.Controls.Add(AppTheme.Label("There is no OpenClicky cloud account. Keys and ChatGPT tokens use Windows Credential Manager or encrypted DPAPI storage.", 10));
-        _persistHistory = new CheckBox { Text = "Remember my last ten conversations · text only", Checked = settings.PersistConversationHistory, AutoSize = true, Margin = new Padding(0,10,0,12) };
+        _persistHistory = new CheckBox { Text = "Remember conversations and task history · text only", Checked = settings.PersistConversationHistory, AutoSize = true, Margin = new Padding(0,10,0,12) };
         privacy.Controls.Add(_persistHistory);
-        var clear = AppTheme.Button("Clear conversation history");
+        var clear = AppTheme.Button("Clear conversation and task history");
         clear.Click += (_, _) =>
         {
-            if (MessageBox.Show("Clear saved conversation history?", Text, MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes)
+            if (MessageBox.Show("Clear saved conversations and task history? Notes and explicit memories are kept.", Text, MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes)
                 _clearHistory?.Invoke();
         };
         privacy.Controls.Add(clear);
-        privacy.Controls.Add(AppTheme.Label("Agent asks before every click, keystroke, and scroll. Stop cancels the current task. Keep sensitive windows closed while sharing your screen.", 10));
+        privacy.Controls.Add(AppTheme.Label("Approve each action is the default. Your task access mode controls approval prompts. Stop cancels the current task. Close sensitive windows before sharing screens.", 10));
         _denyExtraBox = Field(privacy, "Extra protected window titles · separated by commas", settings.AgentDenyListExtra ?? "");
 
         AddHeading(advanced, "For troubleshooting", "You can leave these at their defaults.");
@@ -210,6 +259,7 @@ internal sealed class SettingsForm : Form
         _chatGptSignIn.Enabled = !_signInBusy;
         _refreshModels.Enabled = signedIn && !_signInBusy;
         _chatGptModelBox.Enabled = signedIn && !_signInBusy && _chatGptModelBox.Items.Count > 0;
+        _quickModelBox.Enabled = signedIn && !_signInBusy && _quickModelBox.Items.Count > 0;
     }
 
     private void RefreshProviderPanels()
@@ -237,6 +287,10 @@ internal sealed class SettingsForm : Form
             _chatGptModelBox.SelectedItem = models.FirstOrDefault(m => m.Slug == selected)
                 ?? models.FirstOrDefault(m => m.Slug == "gpt-5.6-terra") ?? models[0];
             _settings.ChatGptModel = ((ChatGptModel)_chatGptModelBox.SelectedItem!).Slug;
+            var quick = new List<ChatGptModel> { new("", "Use the same model") };
+            quick.AddRange(models);
+            _quickModelBox.DataSource = quick;
+            _quickModelBox.SelectedItem = quick.FirstOrDefault(m => m.Slug == _settings.ChatGptQuickModel) ?? quick[0];
             SettingsStore.Save(_settings);
             RefreshChatGptButtons();
             _onApplied();
@@ -244,6 +298,7 @@ internal sealed class SettingsForm : Form
         catch (Exception ex)
         {
             _chatGptModelBox.DataSource = null;
+            _quickModelBox.DataSource = null;
             RefreshChatGptButtons();
             _chatGptStatus.Text = "Model list unavailable. " + ex.Message;
             DebugLog.Append($"chatgpt_models_error={ex.GetType().Name}");
@@ -309,6 +364,7 @@ internal sealed class SettingsForm : Form
         {
             var revoked = await _chatGptOAuth.SignOutAsync(_settings, _secrets).ConfigureAwait(true);
             _chatGptModelBox.DataSource = null;
+            _quickModelBox.DataSource = null;
             SettingsStore.Save(_settings);
             RefreshChatGptButtons();
             _onApplied();
@@ -323,6 +379,49 @@ internal sealed class SettingsForm : Form
             _signInBusy = false;
             RefreshChatGptButtons();
         }
+    }
+
+    private void RefreshMicrophones()
+    {
+        var selected = _microphoneBox.SelectedItem as MicrophoneDevice;
+        var id = selected is null ? _settings.MicrophoneDeviceId : selected.Id;
+        StopMicrophoneTest();
+        _microphoneBox.Items.Clear();
+        try
+        {
+            foreach (var device in NAudioMicrophoneRecorder.ListDevices()) _microphoneBox.Items.Add(device);
+            var match = _microphoneBox.Items.Cast<MicrophoneDevice>().FirstOrDefault(d => d.Id == id);
+            if (match is null && id is not null)
+            {
+                match = new(id, "Saved microphone is disconnected · choose another");
+                _microphoneBox.Items.Add(match);
+            }
+            _microphoneBox.SelectedItem = match ?? _microphoneBox.Items[0];
+        }
+        catch (Exception ex) { MessageBox.Show("Could not list microphones: " + ex.Message, Text); }
+    }
+
+    private void TestMicrophone()
+    {
+        if (_microphoneTest is not null) { StopMicrophoneTest(); return; }
+        var id = (_microphoneBox.SelectedItem as MicrophoneDevice)?.Id;
+        try
+        {
+            _microphoneTest = new NAudioMicrophoneRecorder(() => id);
+            _microphoneTest.Start();
+            _testMicrophone.Text = "Stop microphone test";
+            _meterTimer.Start();
+        }
+        catch (Exception ex) { StopMicrophoneTest(); MessageBox.Show("Could not open this microphone: " + ex.Message, Text); }
+    }
+
+    private void StopMicrophoneTest()
+    {
+        _meterTimer.Stop();
+        _microphoneTest?.Dispose();
+        _microphoneTest = null;
+        _testMicrophone.Text = "Test microphone";
+        _microphoneLevel.Value = 0;
     }
 
     private void ApplyFormToSettings(bool persistSecrets)
@@ -350,7 +449,9 @@ internal sealed class SettingsForm : Form
 
         _settings.OpenRouterModel = string.IsNullOrWhiteSpace(_modelBox.Text) ? "openai/gpt-4o-mini" : _modelBox.Text.Trim();
         if (_chatGptModelBox.SelectedItem is ChatGptModel model) _settings.ChatGptModel = model.Slug;
+        if (_quickModelBox.SelectedItem is ChatGptModel quick) _settings.ChatGptQuickModel = quick.Slug;
         _settings.UseWindowsSpeech = _providerChatGpt.Checked || _windowsSpeech.Checked;
+        _settings.MicrophoneDeviceId = (_microphoneBox.SelectedItem as MicrophoneDevice)?.Id;
         _settings.SpeakReplies = _speakReplies.Checked;
         _settings.TranscriptionModel = string.IsNullOrWhiteSpace(_transcriptionModelBox.Text) ? "openai/whisper-1" : _transcriptionModelBox.Text.Trim();
         _settings.UseLocalProxy = _useProxy.Checked;
@@ -368,6 +469,7 @@ internal sealed class SettingsForm : Form
 
     private void Save()
     {
+        StopMicrophoneTest();
         if (!_draft.TryValidate(out var hotkeyError))
         {
             SetHotkeyHint(hotkeyError, isError: true);

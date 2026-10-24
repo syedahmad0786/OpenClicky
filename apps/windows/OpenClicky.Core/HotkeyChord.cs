@@ -117,6 +117,7 @@ public sealed record HotkeyChord(bool Win, bool Alt, bool Control, bool Shift, i
         0x09 => "Tab",
         >= 0x30 and <= 0x39 => ((char)virtualKey).ToString(),
         >= 0x41 and <= 0x5A => ((char)virtualKey).ToString(),
+        >= 0x70 and <= 0x87 => $"F{virtualKey - 0x6F}",
         _ => $"Vk{virtualKey:X2}",
     };
 }

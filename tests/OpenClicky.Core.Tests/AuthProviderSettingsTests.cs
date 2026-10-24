@@ -43,6 +43,7 @@ public class AuthProviderSettingsTests
                 ChatGptAccountEmail = "user@example.com",
                 ChatGptHostId = "urn:uuid:11111111-1111-1111-1111-111111111111",
                 ChatGptIssuedClientId = "oaiapp_test",
+                ChatGptQuickModel = "fast-model",
             };
             SettingsStore.Save(settings, path);
             var json = File.ReadAllText(path);
@@ -54,6 +55,7 @@ public class AuthProviderSettingsTests
             Assert.Null(loaded.OpenRouterApiKey);
             Assert.Equal("user@example.com", loaded.ChatGptAccountEmail);
             Assert.Equal("oaiapp_test", loaded.ChatGptIssuedClientId);
+            Assert.Equal("fast-model", loaded.ChatGptQuickModel);
         }
         finally
         {

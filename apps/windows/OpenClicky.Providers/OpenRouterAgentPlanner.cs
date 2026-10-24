@@ -107,7 +107,7 @@ public sealed class OpenRouterAgentPlanner : IAgentPlanner
         if (!root.TryGetProperty("tool", out var toolEl) || toolEl.ValueKind != JsonValueKind.String)
             throw new FormatException("The agent response did not contain a tool.");
         var tool = (toolEl.GetString() ?? "").Trim().ToLowerInvariant();
-        if (tool is not ("uia_snapshot" or "screenshot" or "click" or "type_text" or "hotkey" or "scroll" or "wait" or "done"))
+        if (tool is not ("uia_snapshot" or "screenshot" or "click" or "type_text" or "hotkey" or "scroll" or "wait" or "list_apps" or "open_app" or "done"))
             throw new FormatException("The agent selected an unsupported tool.");
         var rationale = root.TryGetProperty("rationale", out var r) ? r.GetString() ?? string.Empty : string.Empty;
         var args = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

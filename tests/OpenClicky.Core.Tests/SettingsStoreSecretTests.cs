@@ -15,6 +15,7 @@ public class SettingsStoreSecretTests
                 UseLocalProxy = true,
                 UseWindowsSpeech = false,
                 SpeakReplies = false,
+                MicrophoneDeviceId = "test-capture-endpoint",
             };
 
             SettingsStore.Save(settings, path);
@@ -26,6 +27,7 @@ public class SettingsStoreSecretTests
             Assert.True(loaded.UseLocalProxy);
             Assert.False(loaded.UseWindowsSpeech);
             Assert.False(loaded.SpeakReplies);
+            Assert.Equal("test-capture-endpoint", loaded.MicrophoneDeviceId);
             Assert.False(File.Exists(path + ".tmp"));
             Assert.Equal("openai/gpt-4o-mini", loaded.OpenRouterModel);
         }

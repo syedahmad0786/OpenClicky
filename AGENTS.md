@@ -2,7 +2,7 @@
 
 Keep Windows behavior and user-visible proof together. Read affected callers before changing shared code. Prefer existing helpers and platform features; avoid adding a dependency for a small feature. Preserve dirty checkouts and user settings, credentials, history, and logs.
 
-Build with `dotnet build OpenClicky.sln -c Release` and run the relevant tests. New nontrivial logic needs a focused check. For desktop actions, inspect the actual destination controls; input return values and logs alone do not prove success. Automatic approval belongs only in the dedicated test harness. Never add it to the production app.
+Build with `dotnet build OpenClicky.sln -c Release` and run the relevant tests. New nontrivial logic needs a focused check. For desktop actions, inspect the actual destination controls; input return values and logs alone do not prove success. Unconditional automatic-confirm helpers belong only in the dedicated test harness. The user's explicit 11 October 2026 request authorizes production Preview/Confirm-each/Auto/Full-access choices: Confirm-each stays default, Auto/Full require a visible warning, and a running task's access snapshot must not silently widen. Never enable Full access on the user's behalf or claim that heuristic risk detection/title guards form a security boundary.
 
 Keep provider secrets out of source, settings JSON, logs, and chat. Do not automate sign-in, credential entry, or Windows security changes. Explain which screens/audio leave the machine. A title deny-list is a convenience guard, not a security boundary.
 

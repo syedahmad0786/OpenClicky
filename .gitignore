@@ -12,6 +12,7 @@ obj/
 # Node
 node_modules/
 services/local-proxy/dist/
+apps/companion-workspace/dist/
 *.log
 .env
 .dev.vars
@@ -33,3 +34,4 @@ Thumbs.db
 
 # Publish output
 artifacts/
+.codex-build/

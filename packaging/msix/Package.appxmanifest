@@ -13,11 +13,11 @@
   <Identity
     Name="OpenClicky.OpenClicky"
     Publisher="CN=OpenClicky"
-    Version="0.2.0.0" />
+    Version="0.6.0.0" />
   <Properties>
     <DisplayName>OpenClicky</DisplayName>
     <PublisherDisplayName>OpenClicky</PublisherDisplayName>
-    <Description>Open-source Windows AI buddy — Talk, POINT, confirmed Agent.</Description>
+    <Description>OpenClicky companion with local OpenWork runtime and approval-gated desktop and browser tools.</Description>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
   <Dependencies>

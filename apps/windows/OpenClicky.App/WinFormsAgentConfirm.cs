@@ -12,6 +12,8 @@ internal sealed class WinFormsAgentConfirm : IAgentConfirm
 {
     private readonly SynchronizationContext _ui;
     private readonly Func<(IntPtr window, IntPtr focus)?>? _testTarget;
+    private volatile bool _isDialogOpen;
+    public bool IsDialogOpen => _isDialogOpen;
 
     public WinFormsAgentConfirm(SynchronizationContext uiContext, Func<(IntPtr window, IntPtr focus)?>? testTarget = null)
     {
@@ -20,6 +22,15 @@ internal sealed class WinFormsAgentConfirm : IAgentConfirm
     }
 
     public Task<bool> ConfirmAsync(string summary, CancellationToken cancellationToken = default)
+        => ConfirmCoreAsync(summary, false, true, cancellationToken);
+
+    public Task<bool> ConfirmNonInputAsync(string summary, CancellationToken cancellationToken = default)
+        => ConfirmCoreAsync(summary, false, false, cancellationToken);
+
+    public Task<bool> ConfirmTaskAsync(string summary, CancellationToken cancellationToken = default)
+        => ConfirmCoreAsync(summary, true, true, cancellationToken);
+
+    private Task<bool> ConfirmCoreAsync(string summary, bool wholeTask, bool restoreTarget, CancellationToken cancellationToken)
     {
         var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         void Show()
@@ -33,9 +44,10 @@ internal sealed class WinFormsAgentConfirm : IAgentConfirm
             var test = _testTarget?.Invoke();
             var prior = test?.window ?? ForegroundFocusRestorer.Capture();
             var focus = test?.focus ?? ForegroundFocusRestorer.CaptureFocus(prior);
+            _isDialogOpen = true;
             try
             {
-                using var dialog = new AgentConfirmDialog(summary);
+                using var dialog = new AgentConfirmDialog(summary, wholeTask);
                 using var registration = cancellationToken.Register(() => _ui.Post(_ =>
                 {
                     if (!dialog.IsDisposed) dialog.Close();
@@ -43,23 +55,25 @@ internal sealed class WinFormsAgentConfirm : IAgentConfirm
                 var result = dialog.ShowDialog();
                 // Form is closed/disposed; yield UI messages before restoring focus.
                 Application.DoEvents();
-                var restored = ForegroundFocusRestorer.Restore(prior, test is not null, focus);
+                var restored = !restoreTarget || ForegroundFocusRestorer.Restore(prior, test is not null, focus);
                 if (cancellationToken.IsCancellationRequested) tcs.TrySetCanceled(cancellationToken);
                 else if (result == DialogResult.Yes && !restored)
                     tcs.TrySetException(new InvalidOperationException("I couldn't restore the target app and field. Select the app you want to use, then try again."));
                 else tcs.TrySetResult(result == DialogResult.Yes);
+                _isDialogOpen = false;
             }
             catch (Exception ex)
             {
                 try
                 {
-                    ForegroundFocusRestorer.Restore(prior, test is not null, focus);
+                    if (restoreTarget) ForegroundFocusRestorer.Restore(prior, test is not null, focus);
                 }
                 catch
                 {
                     // best-effort restore on failure path
                 }
 
+                _isDialogOpen = false;
                 tcs.TrySetException(ex);
             }
         }
@@ -71,7 +85,7 @@ internal sealed class WinFormsAgentConfirm : IAgentConfirm
     /// <summary>Top-most Yes/No form that fully closes before SendInput continues.</summary>
     private sealed class AgentConfirmDialog : Form
     {
-        public AgentConfirmDialog(string summary)
+        public AgentConfirmDialog(string summary, bool wholeTask)
         {
             Text = "OpenClicky Agent";
             AppTheme.Apply(this);
@@ -79,7 +93,7 @@ internal sealed class WinFormsAgentConfirm : IAgentConfirm
             StartPosition = FormStartPosition.CenterScreen;
             MinimizeBox = false;
             MaximizeBox = false;
-            ShowInTaskbar = false;
+            ShowInTaskbar = true;
             TopMost = true;
             ClientSize = new Size(540, 340);
             Padding = new Padding(24);
@@ -89,11 +103,11 @@ internal sealed class WinFormsAgentConfirm : IAgentConfirm
                 Dock = DockStyle.Fill, Multiline = true, ReadOnly = true,
                 ScrollBars = ScrollBars.Vertical, BorderStyle = BorderStyle.None,
                 BackColor = AppTheme.Background, ForeColor = AppTheme.Ink,
-                Text = "Allow this one action?\r\n\r\n" + summary + "\r\n\r\nThe task stops if you decline or press Escape.",
+                Text = (wholeTask ? "Approve this task plan?" : "Allow this one action?") + "\r\n\r\n" + summary + "\r\n\r\nThe task stops if you decline or press Escape.",
                 AccessibleName = "Proposed desktop action",
             };
 
-            var yes = AppTheme.Button("Allow action", true);
+            var yes = AppTheme.Button(wholeTask ? "Approve task" : "Allow action", true);
             yes.DialogResult = DialogResult.Yes;
             var no = AppTheme.Button("Stop task");
             no.DialogResult = DialogResult.No;

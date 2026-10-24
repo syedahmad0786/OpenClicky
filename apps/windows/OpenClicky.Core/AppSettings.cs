@@ -21,7 +21,12 @@ public sealed class AppSettings
 
     public bool UseWindowsSpeech { get; set; } = true;
 
+    public string? MicrophoneDeviceId { get; set; }
+
     public bool SpeakReplies { get; set; } = true;
+    public bool AwarenessEnabled { get; set; } = true;
+
+    public AgentAccessMode AgentAccess { get; set; } = AgentAccessMode.ConfirmEach;
 
     /// <summary>
     /// Stable host id for Sign in with ChatGPT OSS registration (<c>ext_agent_host_id</c>).
@@ -37,6 +42,7 @@ public sealed class AppSettings
 
     /// <summary>ChatGPT Responses API model slug (from <c>/v1/models</c> when signed in).</summary>
     public string ChatGptModel { get; set; } = "";
+    public string ChatGptQuickModel { get; set; } = "";
 
     public bool ChatGptPlanWelcomeShown { get; set; }
 
@@ -59,6 +65,9 @@ public sealed class AppSettings
         AuthProvider == AuthProvider.ChatGPT
             ? ChatGptModel.Trim()
             : (string.IsNullOrWhiteSpace(OpenRouterModel) ? "openai/gpt-4o-mini" : OpenRouterModel.Trim());
+
+    public string ResolveTalkModel() => AuthProvider == AuthProvider.ChatGPT && !string.IsNullOrWhiteSpace(ChatGptQuickModel)
+        ? ChatGptQuickModel.Trim() : ResolveVisionModel();
 
     public void EnsureChatGptHostId()
     {

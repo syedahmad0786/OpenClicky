@@ -5,13 +5,19 @@
 #
 # Requires: makeappx.exe from Windows 10/11 SDK (PATH or auto-discovered under Windows Kits).
 
+param([string]$PayloadDirectory, [string]$OutputDirectory)
+
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
-$payload = Join-Path $root "artifacts\exe\win-x64"
-$staging = Join-Path $root "artifacts\msix\staging"
-$outDir = Join-Path $root "artifacts\msix"
+
+$payload = if ($PayloadDirectory) { [IO.Path]::GetFullPath($PayloadDirectory) } else { Join-Path $root "artifacts\phase-one-preview\win-x64" }
+$outDir = if ($OutputDirectory) { [IO.Path]::GetFullPath($OutputDirectory) } else { Join-Path $root "artifacts\phase-one-preview\msix" }
+$staging = Join-Path $outDir "staging"
 $manifestSrc = Join-Path $root "packaging\msix\Package.appxmanifest"
-$msix = Join-Path $outDir "OpenClicky.msix"
+$msix = Join-Path $outDir "OpenClicky-0.6.0-unsigned.msix"
+$resolvedStaging = [IO.Path]::GetFullPath($staging)
+$expectedRoot = [IO.Path]::GetFullPath((Join-Path $root 'artifacts')) + [IO.Path]::DirectorySeparatorChar
+if (-not $resolvedStaging.StartsWith($expectedRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Package staging must remain under repository artifacts.' }
 
 function Find-MakeAppx {
     $fromPath = Get-Command makeappx -ErrorAction SilentlyContinue
@@ -47,9 +53,6 @@ if (-not $makeappx) {
 Write-Host "Using makeappx: $makeappx"
 
 New-Item -ItemType Directory -Force -Path $staging, $outDir | Out-Null
-$resolvedStaging = [IO.Path]::GetFullPath($staging)
-$expectedStaging = [IO.Path]::GetFullPath((Join-Path $root 'artifacts\msix\staging'))
-if ($resolvedStaging -ne $expectedStaging) { throw 'Unexpected package staging directory.' }
 Get-ChildItem -LiteralPath $resolvedStaging -Force | ForEach-Object {
     if (-not $_.FullName.StartsWith($resolvedStaging + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe staging item.' }
     Remove-Item -LiteralPath $_.FullName -Recurse -Force

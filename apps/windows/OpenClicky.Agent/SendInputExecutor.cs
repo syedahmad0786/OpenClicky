@@ -77,7 +77,7 @@ public sealed class SendInputExecutor : IAgentActionExecutor
 
         // Unicode typing via KEYEVENTF_UNICODE (batched down+up per char for focus reliability).
         var inputSize = Marshal.SizeOf<NativeMethods.Input>();
-        foreach (var ch in text)
+        foreach (var ch in WindowsInputText(text))
         {
             cancellationToken.ThrowIfCancellationRequested();
             var pair = new NativeMethods.Input[2];
@@ -118,6 +118,15 @@ public sealed class SendInputExecutor : IAgentActionExecutor
         }
 
         return new AgentActionResult(true, $"typed {text.Length} chars", false);
+    }
+
+    internal static IEnumerable<char> WindowsInputText(string text)
+    {
+        for (var index = 0; index < text.Length; index++)
+        {
+            // Windows edit controls expand CR to CRLF; sending both characters creates a blank line.
+            if (text[index] != '\n' || index == 0 || text[index - 1] != '\r') yield return text[index];
+        }
     }
 
     private static AgentActionResult Scroll(AgentActionRequest request)

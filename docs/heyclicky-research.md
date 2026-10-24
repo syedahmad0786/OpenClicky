@@ -22,17 +22,17 @@ The recurring useful interaction is: invoke from the current app, ask a short qu
 
 The public videos make desktop action results visible. OpenClicky's action demonstration therefore checks the actual button count and exact text field contents; a successful input call or log line alone is insufficient. Every input step keeps an explicit human approval gate.
 
-| Reference behavior | OpenClicky 0.2 |
+| Reference behavior | OpenClicky 0.3 |
 | --- | --- |
 | Voice invocation and screen questions | Live ChatGPT screen-reading passed; local recognition tested with generated speech; physical voice accuracy remains unaccepted after garbled transcripts |
 | Screen pointing during speech | Implemented; position/hold and mixed-monitor mapping tested |
 | Desktop clicks and typing | Implemented with per-action approval; actual sandbox result verified |
 | Multiple monitors | Captured and mapped; real two-monitor check passed |
 | Named companions and separate persistent workspaces | Not implemented; one companion with optional short Talk history |
-| Drawing, arrows, polygons, freehand markup | Not implemented; pointer and label only |
+| Drawing, arrows, polygons, freehand markup | Circles, rectangles and arrows implemented in 0.3; polygons and freehand remain missing |
 | Dictation into arbitrary focused apps | Not implemented as a dedicated mode |
 | Routines, scheduling, background tasks | Not implemented |
 | Account connectors and multiple connected accounts | Not implemented |
-| Ongoing walkthroughs, proactive suggestions, file skills | Not implemented |
+| Ongoing walkthroughs, proactive suggestions, file skills | Optional ChatGPT/Claude app-switch orientation in 0.3; continuing walkthroughs, broader suggestions and file skills remain missing |
 
 The release is a scoped Windows preview. These gaps are recorded as product work, not represented as built capability.

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Windows.Automation;
 using OpenClicky.Agent;
+using OpenClicky.Core;
 
 namespace OpenClicky.Agent.Smoke;
 
@@ -49,6 +50,9 @@ internal static class Program
             if (!ForegroundFocusRestorer.Restore(new IntPtr(window.Current.NativeWindowHandle)))
                 throw new InvalidOperationException("Could not bring the launched sandbox to the foreground.");
             await Task.Delay(400).ConfigureAwait(true);
+
+            if (args.Contains("--dictation", StringComparer.OrdinalIgnoreCase))
+                return await RunDictationAsync(window).ConfigureAwait(true);
 
             var confirm = new AutoConfirm();
             var executor = new CompositeAgentExecutor();
@@ -226,6 +230,42 @@ internal static class Program
 
             sandbox?.Dispose();
         }
+    }
+
+    private static async Task<int> RunDictationAsync(AutomationElement window)
+    {
+        var edit = FindDescendant(window, ControlType.Edit, "Type target") ?? FindFirstEdit(window);
+        if (edit is null) { Console.Error.WriteLine("FAIL: dictation target edit not found"); return 20; }
+
+        var point = edit.GetClickablePoint();
+        var executor = new CompositeAgentExecutor();
+        var focus = await executor.ExecuteAsync(new AgentActionRequest(
+            AgentToolNames.Click,
+            new Dictionary<string, string>
+            {
+                ["x"] = ((int)Math.Round(point.X)).ToString(),
+                ["y"] = ((int)Math.Round(point.Y)).ToString(),
+            },
+            "focus deterministic dictation target"), userConfirmed: true).ConfigureAwait(true);
+        if (!focus.Success) { Console.Error.WriteLine("FAIL: " + focus.Message); return 21; }
+        await Task.Delay(250).ConfigureAwait(true);
+
+        if (!DictationTarget.TryCapture(out var target, out var error) || target is null)
+        { Console.Error.WriteLine("FAIL: dictation target capture: " + error); return 22; }
+
+        const string transcript = "deterministic local dictation draft";
+        var draft = new DictationDraft();
+        draft.AcceptTranscript(transcript);
+        var result = await target.InsertAsync(draft.Draft, executor).ConfigureAwait(true);
+        Console.WriteLine($"dictation_result attempted={result.InputAttempted} completed={result.InputCompleted} verified={result.Verified} message={result.Message}");
+        if (!result.InputCompleted || !result.Verified || result.FinalText != transcript)
+        {
+            Console.Error.WriteLine($"FAIL: expected verified exact text '{transcript}', got '{result.FinalText}'");
+            return 23;
+        }
+
+        Console.WriteLine($"PASS dictation target={target.ControlName} raw={draft.RawTranscript} final={result.FinalText}");
+        return 0;
     }
 
     private static string? ResolveSandboxExe(string[] args)

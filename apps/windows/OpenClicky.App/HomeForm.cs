@@ -1,4 +1,5 @@
 using OpenClicky.Core;
+using OpenClicky.Providers;
 
 namespace OpenClicky.App;
 
@@ -11,17 +12,48 @@ internal sealed class HomeForm : Form
     private readonly Label _status;
     private readonly Label _shortcut;
     private readonly RichTextBox _conversation;
+    private readonly IntelligentUiPanel _intelligentUi;
     private readonly TextBox _prompt;
     private readonly Button _sendButton;
     private readonly Button _stopButton;
+    private readonly Button _toolsButton;
     private readonly RadioButton _ask;
     private readonly RadioButton _agent;
     private readonly Panel _welcome;
     private readonly Button _demo;
+    private readonly Button _listen;
+    private readonly CheckBox _guide;
+    private readonly Label _transcript;
+    private readonly Label _microphone;
     private bool _busy;
+    private bool _taskRunning;
+    private bool _conversationActive;
+    private bool _walkthroughActive;
+    private readonly TaskWorkspacePanel _tasks;
+    private readonly TabControl _workspace;
+    private readonly ComboBox _access;
+    private readonly HomeUiState _uiState = new();
+    private readonly DictationPanel _dictation;
+    private readonly TableLayoutPanel _main;
+    private readonly TableLayoutPanel _composer;
+    private (float Composer, float Footer)? _dictationRowHeights;
+    private int _streamStart = -1, _streamLength;
+    private string? _completedStreamText;
+    private VisualWorkspacePanel? _visualWorkspace;
+    private (SizeType Type, float Height)[]? _nativeComposerRows;
+    private float _nativeComposerHeight;
 
     public HomeForm(AppSettings settings, Func<string, bool, Task> send, Action stop,
-        Action openSettings, Func<Task> tryDemo, Func<Task> testAgent)
+        Action openSettings, Func<Task> tryDemo, Func<Task> testAgent,
+        Action toggleConversation, Action<bool> guideChanged,
+        Func<Task> selectRegion, Action pauseTask, Func<Task> resumeTask, Action clearTasks,
+        Action showClipboardShelf,
+        Func<Task>? beginDictation = null,
+        Func<Task>? toggleDictationRecording = null,
+        Func<string, Task>? insertDictation = null,
+        Action? cancelDictation = null,
+        Func<string, Task>? startWalkthrough = null,
+        Action? setupChrome = null)
     {
         _settings = settings;
         _send = send;
@@ -29,16 +61,18 @@ internal sealed class HomeForm : Form
         Text = "OpenClicky";
         AppTheme.Apply(this);
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(980, 720);
-        MinimumSize = new Size(820, 640);
+        ClientSize = new Size(1180, 820);
+        MinimumSize = new Size(980, 700);
         KeyPreview = true;
+        Activated += (_, _) => { if (_taskRunning) pauseTask(); };
+        Resize += (_, _) => _uiState.ObserveWindowState(WindowState);
 
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1 };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 210));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         Controls.Add(layout);
 
-        var sidebar = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.Tint, Padding = new Padding(22, 28, 22, 22) };
+        var sidebar = new Panel { Dock = DockStyle.Fill, BackColor = AppTheme.Tint, Padding = new Padding(22, 28, 22, 22), AutoScroll = true };
         var nav = new FlowLayoutPanel { Dock = DockStyle.Top, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true };
         nav.Controls.Add(new PictureBox { Image = AppTheme.Logo, SizeMode = PictureBoxSizeMode.Zoom, Size = new Size(58, 58), Margin = new Padding(0, 0, 0, 12) });
         nav.Controls.Add(AppTheme.Label("OpenClicky", 19, true));
@@ -47,10 +81,39 @@ internal sealed class HomeForm : Form
         home.Width = 162;
         home.Click += (_, _) => FocusPrompt();
         nav.Controls.Add(home);
+        var select = AppTheme.Button("Select screen area");
+        select.Click += async (_, _) => { if (!_busy) await selectRegion(); };
+        nav.Controls.Add(select);
         var settingsButton = AppTheme.Button("Settings");
         settingsButton.Width = 162;
         settingsButton.Click += (_, _) => openSettings();
         nav.Controls.Add(settingsButton);
+        var clipboard = AppTheme.Button("Clipboard shelf");
+        clipboard.Click += (_, _) => showClipboardShelf();
+        nav.Controls.Add(clipboard);
+        var dictate = AppTheme.Button("Dictate into app", true);
+        dictate.Click += async (_, _) => { if (!_busy && beginDictation is not null) await beginDictation(); };
+        nav.Controls.Add(dictate);
+        var walkthrough = AppTheme.Button("Guide me step by step");
+        walkthrough.AccessibleName = "Guide me step by step";
+        walkthrough.Click += async (_, _) =>
+        {
+            if (_busy || startWalkthrough is null) return;
+            if (_visualWorkspace is not null)
+            {
+                _visualWorkspace.SetPrompt("Show me how to ");
+                SetStatus("Finish the walkthrough goal in chat, then send it.");
+                return;
+            }
+            if (string.IsNullOrWhiteSpace(RequestText))
+            {
+                SetStatus("Type your walkthrough goal below, then click Guide me step by step.");
+                FocusPrompt();
+                return;
+            }
+            await startWalkthrough(RequestText);
+        };
+        nav.Controls.Add(walkthrough);
         _demo = AppTheme.Button("Try pointing demo");
         _demo.Width = 162;
         _demo.Click += async (_, _) => await RunDemoAsync(tryDemo);
@@ -59,6 +122,18 @@ internal sealed class HomeForm : Form
         sandbox.Width = 162;
         sandbox.Click += async (_, _) => await RunDemoAsync(testAgent);
         nav.Controls.Add(sandbox);
+        _listen = AppTheme.Button("Start conversation", true);
+        _listen.Click += (_, _) => toggleConversation();
+        nav.Controls.Add(_listen);
+        _microphone = AppTheme.Label("Microphone: Windows default", 8);
+        _microphone.MaximumSize = new Size(160, 0);
+        nav.Controls.Add(_microphone);
+        var help = AppTheme.Button("Help with this app");
+        help.Click += async (_, _) => { if (!_busy) await _send(AppKnowledge.ScreenHelpRequest, false); };
+        nav.Controls.Add(help);
+        var webHelp = AppTheme.Button("Find official web help");
+        webHelp.Click += async (_, _) => { if (!_busy) await _send(AppKnowledge.WebHelpPrefix + "Explain the next useful step in the current app, and mark its visible control.", false); };
+        nav.Controls.Add(webHelp);
         foreach (var button in nav.Controls.OfType<Button>())
         {
             button.AutoSize = false;
@@ -66,18 +141,23 @@ internal sealed class HomeForm : Form
             button.Font = new Font("Segoe UI", 9);
             button.Padding = new Padding(6, 4, 6, 4);
         }
+        _guide = new CheckBox { Text = "Offer help when\nI seem stuck", Checked = settings.AwarenessEnabled, AutoSize = true, Margin = new Padding(0,12,0,8), AccessibleName = "Local awareness" };
+        nav.Controls.Add(_guide);
+        var guideNote = AppTheme.Label("Local activity can suggest help.\nAccept before screen inspection.\nEsc pauses awareness.", 8);
+        nav.Controls.Add(guideNote);
+        sidebar.AutoScroll = true;
         sidebar.Controls.Add(nav);
-        var foot = AppTheme.Label("Open source.\nYour account. Your control.\n\nv0.2 · Windows", 9);
+        var foot = AppTheme.Label($"Open source.\nYour account. Your control.\n\nv{Application.ProductVersion.Split('+')[0]} · Windows", 9);
         foot.Dock = DockStyle.Bottom;
         sidebar.Controls.Add(foot);
         layout.Controls.Add(sidebar, 0, 0);
 
-        var main = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(28, 24, 28, 20), RowCount = 4, ColumnCount = 1 };
-        main.RowStyles.Add(new RowStyle(SizeType.Absolute, 72));
-        main.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        main.RowStyles.Add(new RowStyle(SizeType.Absolute, 208));
-        main.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
-        layout.Controls.Add(main, 1, 0);
+        _main = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(28, 24, 28, 20), RowCount = 4, ColumnCount = 1 };
+        _main.RowStyles.Add(new RowStyle(SizeType.Absolute, 72));
+        _main.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        _main.RowStyles.Add(new RowStyle(SizeType.Absolute, 208));
+        _main.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
+        layout.Controls.Add(_main, 1, 0);
 
         var header = new Panel { Dock = DockStyle.Fill };
         header.Controls.Add(AppTheme.Label("Your companion", 19, true));
@@ -91,16 +171,36 @@ internal sealed class HomeForm : Form
         header.Controls.Add(_stopButton);
         header.Resize += (_, _) => _stopButton.Left = header.ClientSize.Width - _stopButton.Width;
         _stopButton.Click += (_, _) => _stop();
-        main.Controls.Add(header, 0, 0);
+        _toolsButton = AppTheme.Button("Tools");
+        _toolsButton.AutoSize = false;
+        _toolsButton.Size = new Size(90, 38);
+        _toolsButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+        header.Controls.Add(_toolsButton);
+        _guide.CheckedChanged += (_, _) => { guideChanged(_guide.Checked); _stopButton.Enabled = _walkthroughActive || _taskRunning || _busy || _guide.Checked; };
+        header.Resize += (_, _) => _toolsButton.Left = _stopButton.Left - _toolsButton.Width - 8;
+        _main.Controls.Add(header, 0, 0);
 
         var surface = new Panel { Dock = DockStyle.Fill, BackColor = Color.White, Padding = new Padding(20), Margin = new Padding(0, 0, 0, 14) };
         _conversation = new RichTextBox
         {
             Dock = DockStyle.Fill, ReadOnly = true, BorderStyle = BorderStyle.None, BackColor = Color.White,
-            ForeColor = AppTheme.Ink, Font = new Font("Segoe UI", 11), DetectUrls = false,
+            ForeColor = AppTheme.Ink, Font = new Font("Segoe UI", 11), DetectUrls = true,
             AccessibleName = "Conversation", TabStop = true,
         };
         surface.Controls.Add(_conversation);
+        _intelligentUi = new IntelligentUiPanel(PrepareSuggestedPromptAsync)
+        {
+            Dock = DockStyle.Bottom,
+            Height = 260,
+        };
+        surface.Controls.Add(_intelligentUi);
+        surface.SizeChanged += (_, _) => _intelligentUi.Height = Math.Clamp(
+            (surface.ClientSize.Height - surface.Padding.Vertical) / 2, 96, 360);
+        _conversation.LinkClicked += (_, e) =>
+        {
+            if (Uri.TryCreate(e.LinkText, UriKind.Absolute, out var link) && link.Scheme == "https")
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(link.AbsoluteUri) { UseShellExecute = true });
+        };
         _welcome = new Panel { Dock = DockStyle.Fill, BackColor = Color.White };
         var welcomeFlow = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true };
         welcomeFlow.Controls.Add(AppTheme.Label("A little help,\nright where you work.", 25, true));
@@ -115,18 +215,71 @@ internal sealed class HomeForm : Form
         _welcome.Controls.Add(welcomeFlow);
         surface.Controls.Add(_welcome);
         _welcome.BringToFront();
-        main.Controls.Add(surface, 0, 1);
+        _dictation = new DictationPanel(toggleDictationRecording ?? (() => Task.CompletedTask),
+            insertDictation ?? (_ => Task.CompletedTask), cancelDictation ?? (() => { }));
+        surface.Controls.Add(_dictation);
+        _workspace = new TabControl { Dock = DockStyle.Fill, AccessibleName = "Companion workspace" };
+        var chatPage = new TabPage("Chat") { BackColor = Color.White }; chatPage.Controls.Add(surface);
+        _tasks = new TaskWorkspacePanel(pauseTask, resumeTask, stop, clearTasks);
+        var taskPage = new TabPage("Tasks") { BackColor = Color.White }; taskPage.Controls.Add(_tasks);
+        var memoryPage = new TabPage("Memory") { BackColor = Color.White }; memoryPage.Controls.Add(new CompanionMemoryPanel());
+        var notesPage = new TabPage("Notes") { BackColor = Color.White }; notesPage.Controls.Add(new NotesPanel());
+        var connectionsPage = new TabPage("Connections") { BackColor = Color.White, Padding = new Padding(20) };
+        var connectionInfo = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true };
+        connectionInfo.Controls.Add(AppTheme.Label("Your accounts, under your control", 17, true));
+        connectionInfo.Controls.Add(AppTheme.Label("ChatGPT powers reasoning. Gmail and other accounts need their own consent.\nComposio and Nango free plans were reviewed; account setup is not connected yet.", 11));
+        connectionInfo.Controls.Add(AppTheme.Label("No Gmail account is connected by this app.\nYour ChatGPT credentials are never copied into another engine.", 10));
+        connectionInfo.Controls.Add(AppTheme.Label("OpenWork · tasks inside your companion", 13, true));
+        connectionInfo.Controls.Add(AppTheme.Label("Choose Agent in Chat, then describe your task. Progress and approvals appear here in OpenClicky. Your selected access mode stays fixed for that task.", 10));
+        connectionInfo.Controls.Add(AppTheme.Label("During a task, relevant window images and control text go to ChatGPT. Local speech recognition keeps raw audio on your PC.", 9));
+        var chromeSetup = AppTheme.Button("Set up Chrome tabs");
+        chromeSetup.Click += (_, _) => setupChrome?.Invoke();
+        chromeSetup.Enabled = setupChrome is not null;
+        connectionInfo.Controls.Add(chromeSetup);
+        connectionInfo.Controls.Add(AppTheme.Label("Optional: use your existing signed-in tabs on sites you choose. Review the requested site access in Chrome before enabling the local extension.", 9));
+        connectionsPage.Controls.Add(connectionInfo);
+        _workspace.TabPages.AddRange([chatPage, taskPage, memoryPage, notesPage, connectionsPage]);
+        _workspace.SelectedIndexChanged += (_, _) =>
+        {
+            if (_workspace.SelectedIndex != 0 && _dictation.Visible) cancelDictation?.Invoke();
+            if (_taskRunning) pauseTask();
+            if (_workspace.SelectedIndex == 0 && Visible && WindowState != FormWindowState.Minimized
+                && _uiState.ConsumeDeferredChatScroll())
+                BeginInvoke(ScrollConversationToLatest);
+            if (_workspace.SelectedIndex == 2 && memoryPage.Controls[0] is CompanionMemoryPanel memory) memory.RefreshMemory();
+            if (_workspace.SelectedIndex == 3 && notesPage.Controls[0] is NotesPanel notes) notes.RefreshNotes();
+        };
+        _main.Controls.Add(_workspace, 0, 1);
 
-        var composer = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 4, ColumnCount = 1, Margin = Padding.Empty };
-        composer.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
-        composer.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        composer.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
-        composer.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
+        _composer = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 5, ColumnCount = 1, Margin = Padding.Empty };
+        _composer.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
+        _composer.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        _composer.RowStyles.Add(new RowStyle(SizeType.Absolute, 32));
+        _composer.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
+        _composer.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
         var modes = new FlowLayoutPanel { Dock = DockStyle.Fill, Margin = Padding.Empty };
         _ask = new RadioButton { Text = "Ask about my screen", AutoSize = true, Checked = true, ForeColor = AppTheme.Accent };
         _agent = new RadioButton { Text = "Do a task · Agent", AutoSize = true, Margin = new Padding(20, 3, 3, 3) };
         modes.Controls.AddRange(new Control[] { _ask, _agent });
-        composer.Controls.Add(modes, 0, 0);
+        _access = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 160, AccessibleName = "Task access mode", Margin = new Padding(12,0,0,0) };
+        _access.Items.AddRange(["Preview only", "Approve each action", "Auto · approve task", "Full access"]);
+        _access.SelectedIndex = Enum.IsDefined(settings.AgentAccess) ? (int)settings.AgentAccess : 1;
+        _access.SelectedIndexChanged += (_, _) =>
+        {
+            var mode = (AgentAccessMode)_access.SelectedIndex;
+            if (mode is AgentAccessMode.FullAccess or AgentAccessMode.Auto)
+            {
+                var warning = mode == AgentAccessMode.FullAccess
+                    ? "Full access performs desktop input without individual approvals. It may send, publish, delete or change visible data. Stop cannot undo completed actions. Only use it in a task and account you intend to control. Enable Full access?"
+                    : "Auto asks you to approve the task plan, then runs routine steps. Sensitive-step detection uses model descriptions and conservative rules; it can miss risk. Choose Approve each action for strict control. Enable Auto?";
+                if (MessageBox.Show(this, warning, "Choose task access", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2) != DialogResult.Yes) { _access.SelectedIndex = 1; return; }
+            }
+            _settings.AgentAccess = mode;
+            try { SettingsStore.Save(_settings); }
+            catch (Exception ex) { AddMessage("OpenClicky", "Could not save task access: " + ex.Message); }
+        };
+        modes.Controls.Add(_access);
+        _composer.Controls.Add(modes, 0, 0);
         _prompt = new TextBox
         {
             Multiline = true, Dock = DockStyle.Fill, BorderStyle = BorderStyle.FixedSingle, ScrollBars = ScrollBars.Vertical,
@@ -136,8 +289,8 @@ internal sealed class HomeForm : Form
         {
             if (e.KeyCode == Keys.Enter && !e.Shift) { e.SuppressKeyPress = true; await SendAsync(); }
         };
-        composer.Controls.Add(_prompt, 0, 1);
-        composer.Controls.Add(AppTheme.Label("Sending shares all connected screens with your provider. Agent asks before each action.", 8), 0, 2);
+        _composer.Controls.Add(_prompt, 0, 1);
+        _composer.Controls.Add(AppTheme.Label("Screen questions share the current window or selected area. Tasks may inspect more of the desktop. Check your task access mode.", 8), 0, 2);
         var actions = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty };
         _status = AppTheme.Label("Ready when you are", 9);
         _status.Top = 10;
@@ -149,18 +302,108 @@ internal sealed class HomeForm : Form
         actions.Controls.Add(_sendButton);
         actions.Resize += (_, _) => _sendButton.Left = actions.Width - _sendButton.Width;
         _sendButton.Click += async (_, _) => await SendAsync();
-        composer.Controls.Add(actions, 0, 3);
-        main.Controls.Add(composer, 0, 2);
+        _transcript = AppTheme.Label("Voice stays on this PC · recognized words appear here", 9);
+        _transcript.AutoSize = false;
+        _transcript.Dock = DockStyle.Fill;
+        _transcript.AutoEllipsis = true;
+        _transcript.AccessibleName = "Live transcript";
+        _composer.Controls.Add(_transcript, 0, 3);
+        _composer.Controls.Add(actions, 0, 4);
+        _main.Controls.Add(_composer, 0, 2);
         _shortcut = AppTheme.Label($"Hold {settings.PushToTalk.DisplayName} in any app to talk. Closing this window keeps your buddy in the tray.", 8);
         _shortcut.Dock = DockStyle.Fill;
         _shortcut.TextAlign = ContentAlignment.MiddleLeft;
-        main.Controls.Add(_shortcut, 0, 3);
+        _main.Controls.Add(_shortcut, 0, 3);
         SetState(CompanionVoiceState.Idle);
         ResumeLayout(true);
     }
 
     public void SetConnection(string text) => _connection.Text = text;
-    private void FocusPrompt() => _prompt.Focus();
+    public void BeginDictation(string appTitle, string controlName, bool automatic = false)
+    {
+        _welcome.Hide();
+        _workspace.SelectedIndex = 0;
+        _dictationRowHeights ??= (_main.RowStyles[2].Height, _main.RowStyles[3].Height);
+        _composer.Hide();
+        _shortcut.Hide();
+        _main.RowStyles[2].Height = 0;
+        _main.RowStyles[3].Height = 0;
+        _dictation.Begin(appTitle, controlName, automatic);
+    }
+    public void SetDictationTranscript(string text) => _dictation.ShowLive(text);
+    public void AcceptDictationTranscript(string text) => _dictation.AcceptTranscript(text);
+    public void SetDictationResult(string text, bool canContinue = true) => _dictation.SetResult(text, canContinue);
+    public void EndDictation()
+    {
+        _dictation.End();
+        if (_dictationRowHeights is { } heights)
+        {
+            _main.RowStyles[2].Height = heights.Composer;
+            _main.RowStyles[3].Height = heights.Footer;
+            _dictationRowHeights = null;
+        }
+        _composer.Show();
+        _shortcut.Show();
+        _visualWorkspace?.BringToFront();
+        if (_conversation.TextLength == 0 && _visualWorkspace is null) _welcome.Show();
+    }
+    public void SetToolsMenu(ContextMenuStrip menu)
+    {
+        _toolsButton.ContextMenuStrip = menu;
+        _toolsButton.Click += (_, _) => menu.Show(_toolsButton, new Point(0, _toolsButton.Height));
+    }
+    public void ShowIntelligentUi(IntelligentUiDocument? document)
+    {
+        if (document is null) _intelligentUi.ClearDocument();
+        else _intelligentUi.ShowDocument(document);
+    }
+    public void UpdateTasks(IReadOnlyList<TaskRunRecord> tasks) => _tasks.UpdateRuns(tasks);
+    public bool AgentSelected => _agent.Checked;
+    public void AttachVisualWorkspace(VisualWorkspacePanel panel)
+    {
+        _visualWorkspace = panel;
+        panel.Dock = DockStyle.Fill;
+        _conversation.Parent!.Controls.Add(panel);
+        panel.BringToFront();
+        _welcome.Hide(); _conversation.Hide(); _intelligentUi.Hide();
+        _prompt.Hide(); _sendButton.Hide();
+        _nativeComposerRows = _composer.RowStyles.Cast<RowStyle>().Select(style => (style.SizeType, style.Height)).ToArray();
+        _nativeComposerHeight = _main.RowStyles[2].Height;
+        for (var i = 1; i < _composer.RowStyles.Count; i++) _composer.RowStyles[i] = new RowStyle(SizeType.Absolute, 0);
+        _main.RowStyles[2].Height = 42;
+    }
+    public void DetachVisualWorkspace()
+    {
+        _visualWorkspace?.Dispose(); _visualWorkspace = null;
+        if (_nativeComposerRows is { } rows)
+            for (var i = 0; i < rows.Length; i++) _composer.RowStyles[i] = new RowStyle(rows[i].Type, rows[i].Height);
+        _main.RowStyles[2].Height = _nativeComposerHeight;
+        _conversation.Show(); _prompt.Show(); _sendButton.Show();
+        if (_conversation.TextLength == 0) _welcome.Show();
+    }
+    public void SetTaskRunning(bool running)
+    {
+        _taskRunning = running;
+        _access.Enabled = !running;
+        _stopButton.Enabled = _walkthroughActive || _busy || running || _guide.Checked;
+        if (!_busy) _status.Text = running ? "Task running · voice pauses it" : "Ready when you are";
+    }
+    public void ShowTasks() => _workspace.SelectedIndex = 1;
+    public string RequestText => _prompt.Text.Trim();
+    private Task PrepareSuggestedPromptAsync(string prompt)
+    {
+        _prompt.Text = prompt;
+        _ask.Checked = true;
+        FocusPrompt();
+        SetStatus("Suggested request added · review it, then Send");
+        return Task.CompletedTask;
+    }
+    private void FocusPrompt()
+    {
+        _workspace.SelectedIndex = 0;
+        if (_visualWorkspace is not null) _visualWorkspace.SetPrompt(_prompt.Text);
+        else _prompt.Focus();
+    }
     private void SetExample(string example)
     {
         _prompt.Text = example;
@@ -169,26 +412,67 @@ internal sealed class HomeForm : Form
         _prompt.Focus();
     }
     public void SetStatus(string text) => _status.Text = text;
+    public void SetWalkthroughActive(bool active)
+    {
+        _walkthroughActive = active;
+        _stopButton.Enabled = active || _busy || _taskRunning || _guide.Checked;
+    }
+    public void SetTranscript(string text) => _transcript.Text = string.IsNullOrWhiteSpace(text)
+        ? "Voice stays on this PC · recognized words appear here" : "Hearing: " + text;
+    public void SetMicrophone(string name, bool whisper) => _microphone.Text = "Microphone: " + name + "\n" + (whisper ? "Whisper · local English voice" : "Compatibility voice · download Whisper in Settings");
+    public void SetConversationActive(bool active)
+    {
+        _conversationActive = active;
+        _listen.Text = active ? "Stop conversation" : "Start conversation";
+        _listen.AccessibleName = _listen.Text;
+        _listen.Enabled = active || !_busy;
+    }
+    public void TurnOffGuide() => _guide.Checked = false;
     public void RefreshShortcut() => _shortcut.Text = $"Hold {_settings.PushToTalk.DisplayName} in any app to talk. Closing this window keeps your buddy in the tray.";
+    public void RestoreFromMinimized()
+    {
+        if (WindowState == FormWindowState.Minimized)
+            WindowState = _uiState.RestoreWindowState;
+        if (Visible && _uiState.WindowBecameVisible(_workspace.SelectedIndex == 0))
+            BeginInvoke(ScrollConversationToLatest);
+    }
+
+    public void MinimizeForRequest()
+    {
+        if (Visible && WindowState != FormWindowState.Minimized)
+            _uiState.WindowWillHide(_workspace.SelectedIndex == 0, IsConversationAtLatest());
+        WindowState = FormWindowState.Minimized;
+    }
 
     public void SetState(CompanionVoiceState state)
     {
         _busy = state != CompanionVoiceState.Idle;
         _sendButton.Enabled = !_busy;
         _demo.Enabled = !_busy;
-        _stopButton.Enabled = _busy;
+        _stopButton.Enabled = _walkthroughActive || _busy || _taskRunning || _guide.Checked;
+        _listen.Text = _conversationActive ? "Stop conversation" : "Start conversation";
+        _listen.AccessibleName = _listen.Text;
+        _listen.Enabled = _conversationActive || !_busy;
         _status.Text = state switch
         {
-            CompanionVoiceState.Listening => "Listening… release the shortcut to send",
-            CompanionVoiceState.Processing => "Looking at your screen…",
-            CompanionVoiceState.Pointing => "Pointing it out",
-            CompanionVoiceState.Responding => "Here’s what I found",
-            _ => "Ready when you are",
+            CompanionVoiceState.Listening => _conversationActive ? "Listening… speak naturally; Stop ends the conversation" : "Listening… release the shortcut to send",
+            CompanionVoiceState.Processing => "Thinking…",
+            CompanionVoiceState.Pointing => "Speaking… pointing it out",
+            CompanionVoiceState.Responding => "Speaking…",
+            _ => _taskRunning ? "Task running · voice pauses it" : "Ready when you are",
         };
+        if (_dictation.Visible) _dictation.SetVoiceState(state);
     }
 
     public void AddMessage(string role, string text)
     {
+        if (role == "OpenClicky" && _completedStreamText == text) { _completedStreamText = null; return; }
+        _streamStart = -1;
+        _completedStreamText = null;
+        var chatSelected = _workspace.SelectedIndex == 0;
+        var windowVisible = Visible && WindowState != FormWindowState.Minimized;
+        var scrollToLatest = _uiState.MessageAppended(
+            chatSelected, windowVisible, chatSelected && windowVisible && IsConversationAtLatest());
         _welcome.Hide();
         _conversation.SelectionStart = _conversation.TextLength;
         using var headingFont = new Font("Segoe UI", 9, FontStyle.Bold);
@@ -198,10 +482,43 @@ internal sealed class HomeForm : Form
         _conversation.SelectionFont = _conversation.Font;
         _conversation.SelectionColor = AppTheme.Ink;
         _conversation.AppendText(text + "\n\n");
-        _conversation.ScrollToCaret();
+        if (scrollToLatest) ScrollConversationToLatest();
     }
 
-    public void ClearConversation() { _conversation.Clear(); _welcome.Show(); }
+    public void SetStreamingResponse(string text, bool complete)
+    {
+        if (_streamStart < 0)
+        {
+            AddMessage("OpenClicky", "");
+            _streamStart = _conversation.TextLength - 2;
+            _streamLength = 0;
+        }
+        var follow = IsConversationAtLatest();
+        _conversation.Select(_streamStart, _streamLength);
+        _conversation.SelectedText = text;
+        _streamLength = text.Length;
+        if (follow) ScrollConversationToLatest();
+        if (complete) { _streamStart = -1; _completedStreamText = text; }
+    }
+
+    public void ClearConversation() { _streamStart = -1; _completedStreamText = null; _conversation.Clear(); _intelligentUi.ClearDocument(); _visualWorkspace?.ClearConversation(); if (_visualWorkspace is null) _welcome.Show(); _uiState.ClearConversation(); }
+
+    private bool IsConversationAtLatest()
+    {
+        if (_conversation.TextLength == 0) return true;
+        var bottomRight = new Point(
+            Math.Max(0, _conversation.ClientSize.Width - 2),
+            Math.Max(0, _conversation.ClientSize.Height - 2));
+        return _conversation.GetCharIndexFromPosition(bottomRight) >= _conversation.TextLength - 2;
+    }
+
+    private void ScrollConversationToLatest()
+    {
+        if (_conversation.IsDisposed) return;
+        _conversation.SelectionStart = _conversation.TextLength;
+        _conversation.SelectionLength = 0;
+        _conversation.ScrollToCaret();
+    }
 
     private async Task SendAsync()
     {
@@ -220,13 +537,76 @@ internal sealed class HomeForm : Form
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
-        if (keyData == Keys.Escape && _busy) { _stop(); return true; }
+        if (keyData == Keys.Escape && (_busy || _taskRunning || _guide.Checked)) { _stop(); return true; }
         return base.ProcessCmdKey(ref msg, keyData);
+    }
+
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        if (_uiState.ConsumeInitialChatScroll(_workspace.SelectedIndex == 0, _conversation.TextLength > 0))
+            BeginInvoke(ScrollConversationToLatest);
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
-        if (e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; Hide(); }
+        if (e.CloseReason == CloseReason.UserClosing)
+        {
+            _uiState.WindowWillHide(_workspace.SelectedIndex == 0, IsConversationAtLatest());
+            e.Cancel = true;
+            Hide();
+        }
         base.OnFormClosing(e);
+    }
+}
+
+internal sealed class HomeUiState
+{
+    private bool _deferredChatScroll;
+    private bool _initialShowPending = true;
+    private bool _followLatestWhileWindowHidden;
+
+    public FormWindowState RestoreWindowState { get; private set; } = FormWindowState.Normal;
+
+    public void ObserveWindowState(FormWindowState state)
+    {
+        if (state is FormWindowState.Normal or FormWindowState.Maximized)
+            RestoreWindowState = state;
+    }
+
+    public void WindowWillHide(bool chatSelected, bool readerAtLatest) =>
+        _followLatestWhileWindowHidden = chatSelected && readerAtLatest;
+
+    public bool MessageAppended(bool chatSelected, bool windowVisible, bool readerAtLatest)
+    {
+        if (chatSelected && windowVisible) return readerAtLatest;
+        if (!chatSelected || _followLatestWhileWindowHidden) _deferredChatScroll = true;
+        return false;
+    }
+
+    public bool WindowBecameVisible(bool chatSelected)
+    {
+        _followLatestWhileWindowHidden = false;
+        return chatSelected && ConsumeDeferredChatScroll();
+    }
+
+    public bool ConsumeDeferredChatScroll()
+    {
+        if (!_deferredChatScroll) return false;
+        _deferredChatScroll = false;
+        return true;
+    }
+
+    public bool ConsumeInitialChatScroll(bool chatSelected, bool hasMessages)
+    {
+        if (!_initialShowPending) return false;
+        _initialShowPending = false;
+        return chatSelected && hasMessages;
+    }
+
+    public void ClearConversation()
+    {
+        _deferredChatScroll = false;
+        _followLatestWhileWindowHidden = false;
     }
 }

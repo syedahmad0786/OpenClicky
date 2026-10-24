@@ -18,6 +18,12 @@ public sealed class AgentOrchestrator
     private readonly Func<IEnumerable<string>?>? _denyListExtra;
     private readonly int _maxSteps;
     private readonly Action<string>? _onReply;
+    private readonly Action<AgentProgress>? _onProgress;
+    private readonly Func<CancellationToken, Task>? _beforeStep;
+    private readonly AgentAccessMode _access;
+    private readonly Func<nint>? _foregroundWindow;
+    private readonly Func<long>? _revision;
+    private readonly Func<(int X, int Y, int Width, int Height)?>? _foregroundBounds;
 
     public AgentOrchestrator(
         IScreenCaptureService capture,
@@ -30,7 +36,12 @@ public sealed class AgentOrchestrator
         int maxSteps = 8,
         Func<string?>? foregroundTitle = null,
         Func<IEnumerable<string>?>? denyListExtra = null,
-        Action<string>? onReply = null)
+        Action<string>? onReply = null,
+        Action<AgentProgress>? onProgress = null,
+        Func<CancellationToken, Task>? beforeStep = null,
+        AgentAccessMode access = AgentAccessMode.ConfirmEach,
+        Func<nint>? foregroundWindow = null, Func<long>? revision = null,
+        Func<(int X, int Y, int Width, int Height)?>? foregroundBounds = null)
     {
         _capture = capture;
         _planner = planner;
@@ -43,6 +54,12 @@ public sealed class AgentOrchestrator
         _foregroundTitle = foregroundTitle;
         _denyListExtra = denyListExtra;
         _onReply = onReply;
+        _onProgress = onProgress;
+        _beforeStep = beforeStep;
+        _access = Enum.IsDefined(access) ? access : AgentAccessMode.ConfirmEach;
+        _foregroundWindow = foregroundWindow;
+        _revision = revision;
+        _foregroundBounds = foregroundBounds;
     }
 
     public async Task RunAsync(string task, string model, CancellationToken cancellationToken = default)
@@ -50,19 +67,99 @@ public sealed class AgentOrchestrator
         var prior = new List<string>();
         _overlay.ShowProcessing();
         _log($"agent_start task_chars={task.Length}");
+        Progress(0, "started", "Task started");
 
         for (var step = 1; step <= _maxSteps; step++)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (_beforeStep is not null) await _beforeStep(cancellationToken).ConfigureAwait(false);
+            var capturedTitle = _foregroundTitle?.Invoke();
+            if (_foregroundTitle is not null)
+            {
+                var extras = _denyListExtra?.Invoke();
+                if (AgentDenyList.IsDenied(capturedTitle, extras))
+                {
+                    var reason = AgentDenyList.MatchReason(capturedTitle, extras) ?? "sensitive window";
+                    var blocked = $"i stopped before looking because the foreground window is protected ({reason}). switch away and try again.";
+                    _log("agent_denied protected_window_before_capture");
+                    _overlay.ShowResponding(blocked);
+                    _onReply?.Invoke(blocked);
+                    Progress(step, "stopped", blocked);
+                    await SpeakReplyAsync(blocked, cancellationToken).ConfigureAwait(false);
+                    return;
+                }
+            }
+            Progress(step, "planning", "Looking at the current screen");
             // Hide buddy so it does not pollute the vision / UIA capture.
             _overlay.Hide();
-            var screens = await Task.Run(() => _capture.CaptureAllMonitorsJpegAsync(cancellationToken), cancellationToken).ConfigureAwait(false);
+            var capturedWindow = _foregroundWindow?.Invoke();
+            var capturedRevision = _revision?.Invoke();
+            var capturedBounds = _foregroundBounds?.Invoke();
+            IReadOnlyList<ScreenCaptureResult> screens;
+            if (_foregroundBounds is not null)
+            {
+                if (capturedBounds is not { Width: > 0, Height: > 0 } region)
+                    throw new InvalidOperationException("The foreground window has no visible area.");
+                var screen = await Task.Run(() => _capture.CaptureRegionJpegAsync(region, cancellationToken), cancellationToken).ConfigureAwait(false)
+                    ?? throw new InvalidOperationException("The current window could not be captured.");
+                screens = [screen];
+            }
+            else
+            {
+                screens = await Task.Run(() => _capture.CaptureAllMonitorsJpegAsync(cancellationToken), cancellationToken).ConfigureAwait(false);
+            }
             _overlay.ShowProcessing();
+            var afterCaptureTitle = _foregroundTitle?.Invoke();
+            var afterCaptureExclusions = _denyListExtra?.Invoke();
+            if (_foregroundTitle is not null && AgentDenyList.IsDenied(afterCaptureTitle, afterCaptureExclusions))
+            {
+                var reason = AgentDenyList.MatchReason(afterCaptureTitle, afterCaptureExclusions) ?? "sensitive window";
+                var blocked = $"i stopped because the foreground changed to a protected window ({reason}). captured pixels were discarded.";
+                _log("agent_denied protected_window_after_capture");
+                _overlay.ShowResponding(blocked);
+                _onReply?.Invoke(blocked);
+                Progress(step, "stopped", blocked);
+                await SpeakReplyAsync(blocked, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            if ((_foregroundTitle is not null && capturedTitle != afterCaptureTitle)
+                || (capturedWindow is { } windowAfterCapture && _foregroundWindow?.Invoke() != windowAfterCapture)
+                || (capturedRevision is { } revisionAfterCapture && _revision?.Invoke() != revisionAfterCapture)
+                || (_foregroundBounds is not null && capturedBounds != _foregroundBounds()))
+            {
+                prior.Add("The foreground window changed during capture. Discard the captured pixels and inspect again.");
+                Progress(step, "observing", "Context changed during capture; discarding it");
+                continue;
+            }
             var plan = await _planner.NextStepAsync(task, screens, prior, model, cancellationToken).ConfigureAwait(false);
             plan = plan with { ToolName = plan.ToolName.Trim().ToLowerInvariant() };
-            if (plan.ToolName is not ("click" or "type_text" or "hotkey" or "scroll" or "wait" or "uia_snapshot" or "screenshot" or "done"))
+            if (plan.ToolName is not ("click" or "type_text" or "hotkey" or "scroll" or "wait" or "uia_snapshot" or "screenshot" or "list_apps" or "open_app" or "done"))
                 throw new FormatException("The agent selected an unsupported tool.");
             _log($"agent_step={step} tool={plan.ToolName}");
+            if (_beforeStep is not null) await _beforeStep(cancellationToken).ConfigureAwait(false);
+            var afterPlanningTitle = _foregroundTitle?.Invoke();
+            var afterPlanningExclusions = _denyListExtra?.Invoke();
+            if (_foregroundTitle is not null && AgentDenyList.IsDenied(afterPlanningTitle, afterPlanningExclusions))
+            {
+                var reason = AgentDenyList.MatchReason(afterPlanningTitle, afterPlanningExclusions) ?? "sensitive window";
+                var blocked = $"i stopped because the foreground changed to a protected window ({reason}).";
+                _log("agent_denied protected_window_after_planning");
+                _overlay.ShowResponding(blocked);
+                _onReply?.Invoke(blocked);
+                Progress(step, "stopped", blocked, plan.ToolName);
+                await SpeakReplyAsync(blocked, cancellationToken).ConfigureAwait(false);
+                return;
+            }
+            if ((_foregroundTitle is not null && capturedTitle != afterPlanningTitle)
+                || (capturedWindow is { } plannedWindow && _foregroundWindow?.Invoke() != plannedWindow)
+                || (capturedRevision is { } plannedRevision && _revision?.Invoke() != plannedRevision)
+                || (_foregroundBounds is not null && capturedBounds != _foregroundBounds()))
+            {
+                _log($"agent_context_changed planned_window={capturedWindow} current_window={_foregroundWindow?.Invoke()} planned_revision={capturedRevision} current_revision={_revision?.Invoke()}");
+                prior.Add("The foreground window or user guidance changed during planning. Discard the old plan and inspect again.");
+                Progress(step, "observing", "Context changed; making a fresh plan", plan.ToolName);
+                continue;
+            }
 
             if (plan.Done || plan.ToolName.Equals("done", StringComparison.OrdinalIgnoreCase))
             {
@@ -71,13 +168,15 @@ public sealed class AgentOrchestrator
                     : (string.IsNullOrWhiteSpace(plan.Rationale) ? "done." : plan.Rationale);
                 _overlay.ShowResponding(summary);
                 _onReply?.Invoke(summary);
-                await _tts.SpeakAsync(summary, cancellationToken).ConfigureAwait(false);
+                Progress(step, "completed", summary, "done");
+                await SpeakReplyAsync(summary, cancellationToken).ConfigureAwait(false);
                 return;
             }
 
             var args = ResolveArguments(plan, screens);
-            var mutating = plan.ToolName is "click" or "type_text" or "hotkey" or "scroll";
-            if (mutating && _foregroundTitle is not null)
+            var mutating = plan.ToolName is "click" or "type_text" or "hotkey" or "scroll" or "open_app";
+            var sendsForegroundInput = plan.ToolName is "click" or "type_text" or "hotkey" or "scroll";
+            if (_foregroundTitle is not null)
             {
                 var title = _foregroundTitle();
                 var extras = _denyListExtra?.Invoke();
@@ -89,38 +188,68 @@ public sealed class AgentOrchestrator
                     _log("agent_denied protected_window");
                     _overlay.ShowResponding(blocked);
                     _onReply?.Invoke(blocked);
-                    await _tts.SpeakAsync(blocked, cancellationToken).ConfigureAwait(false);
+                    Progress(step, "stopped", blocked, plan.ToolName);
+                    await SpeakReplyAsync(blocked, cancellationToken).ConfigureAwait(false);
                     return;
                 }
             }
 
             var confirmed = !mutating;
+            var request = new ActionRequest(plan.ToolName, args, plan.Rationale);
+            Progress(step, "proposed", plan.Rationale, plan.ToolName);
+            if (mutating && _access == AgentAccessMode.Preview)
+            {
+                const string preview = "Preview only: no desktop input was performed. Choose an execution mode to run this task.";
+                _onReply?.Invoke(preview);
+                Progress(step, "stopped", preview, plan.ToolName);
+                return;
+            }
             if (mutating)
             {
                 var summary = $"{plan.ToolName}: {FormatArgs(args)} — {plan.Rationale}";
-                confirmed = await _confirm.ConfirmAsync(summary, cancellationToken).ConfigureAwait(false);
+                if (AgentAccessPolicy.RequiresConfirmation(_access, request))
+                {
+                    Progress(step, "awaiting-approval", plan.Rationale, plan.ToolName);
+                    confirmed = await (plan.ToolName == "open_app"
+                        ? _confirm.ConfirmNonInputAsync(summary, cancellationToken)
+                        : _confirm.ConfirmAsync(summary, cancellationToken)).ConfigureAwait(false);
+                }
+                else confirmed = true;
                 if (!confirmed)
                 {
                     const string denied = "okay, i stopped the agent.";
                     _overlay.ShowResponding(denied);
                     _onReply?.Invoke(denied);
-                    await _tts.SpeakAsync(denied, cancellationToken).ConfigureAwait(false);
+                    Progress(step, "stopped", denied, plan.ToolName);
+                    await SpeakReplyAsync(denied, cancellationToken).ConfigureAwait(false);
                     return;
                 }
             }
 
             cancellationToken.ThrowIfCancellationRequested();
+            if (plan.ToolName == "click")
+            {
+                _overlay.PointAt(int.Parse(args["x"]), int.Parse(args["y"]), plan.Rationale);
+                await Task.Delay(350, cancellationToken).ConfigureAwait(false);
+            }
+            if (_beforeStep is not null) await _beforeStep(cancellationToken).ConfigureAwait(false);
+            if (mutating && ((sendsForegroundInput && capturedWindow is { } expectedWindow && _foregroundWindow?.Invoke() != expectedWindow)
+                || (capturedRevision is { } expectedRevision && _revision?.Invoke() != expectedRevision)))
+            {
+                prior.Add("The foreground window changed before input. No action was performed; inspect the new screen.");
+                Progress(step, "observing", "Window changed; discarding the old action", plan.ToolName);
+                continue;
+            }
             if (mutating && AgentDenyList.IsDenied(_foregroundTitle?.Invoke(), _denyListExtra?.Invoke()))
             {
                 const string changed = "The active window changed to a protected app. I stopped without performing the action.";
                 _onReply?.Invoke(changed);
                 _overlay.ShowResponding(changed);
+                Progress(step, "stopped", changed, plan.ToolName);
                 return;
             }
 
-            if (plan.ToolName == "click") _overlay.PointAt(int.Parse(args["x"]), int.Parse(args["y"]), plan.Rationale);
-
-            var request = new ActionRequest(plan.ToolName, args, plan.Rationale);
+            Progress(step, "executing", plan.Rationale, plan.ToolName);
             var result = await _execute(request, confirmed, cancellationToken).ConfigureAwait(false);
             prior.Add($"step {step}: {plan.ToolName} → success={result.Success} {result.Message}");
             _log($"agent_result success={result.Success} tool={plan.ToolName}");
@@ -130,16 +259,30 @@ public sealed class AgentOrchestrator
                 var msg = $"I stopped because {plan.ToolName} failed: {result.Message}";
                 _overlay.ShowResponding(msg);
                 _onReply?.Invoke(msg);
-                await _tts.SpeakAsync(msg, cancellationToken).ConfigureAwait(false);
+                Progress(step, "failed", msg, plan.ToolName);
+                await SpeakReplyAsync(msg, cancellationToken).ConfigureAwait(false);
                 return;
             }
+            Progress(step, "observing", result.Message, plan.ToolName);
             await Task.Delay(200, cancellationToken).ConfigureAwait(false);
         }
 
         const string capped = "i hit the step limit for this agent run.";
         _overlay.ShowResponding(capped);
         _onReply?.Invoke(capped);
-        await _tts.SpeakAsync(capped, cancellationToken).ConfigureAwait(false);
+        Progress(_maxSteps, "stopped", capped);
+        await SpeakReplyAsync(capped, cancellationToken).ConfigureAwait(false);
+    }
+
+    private void Progress(int step, string state, string message, string? tool = null)
+        => _onProgress?.Invoke(new(step, state, message, tool));
+
+    private async Task SpeakReplyAsync(string message, CancellationToken token)
+    {
+        try { await _tts.SpeakAsync(message, token).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested) { }
+        catch (Exception ex) when (!token.IsCancellationRequested)
+        { _log("agent_voice_error=" + ex.GetType().Name); _onReply?.Invoke("Spoken narration is unavailable; the task result is in chat."); }
     }
 
     private static string FormatArgs(IReadOnlyDictionary<string, string> args) =>
