@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { parseHostMessage, parseShellState, settingsActions, settingsPatchKeySchema, settingsSections, shellStateSchema } from "./contract";
 
 const fixture = JSON.parse(readFileSync(resolve(__dirname, "../../../../tests/fixtures/shell-state.v1.json"), "utf8"));
+const enums: Record<string, string[]> = JSON.parse(readFileSync(resolve(__dirname, "../../../../tests/fixtures/shell-enums.v1.json"), "utf8"));
 
 describe("shell contract", () => {
   it("parses the v1 fixture", () => {
@@ -90,6 +91,44 @@ describe("shell contract", () => {
     for (const key of ["voice.speed", "cursor.screenHighlight", "a." + "b".repeat(58)]) expect(settingsPatchKeySchema.safeParse(key).success).toBe(true);
     for (const key of ["speed", "Voice.speed", "voice..speed", "voice.speed.", "voice.sp eed", "voice.speed\n", "a." + "b".repeat(59)])
       expect(settingsPatchKeySchema.safeParse(key).success).toBe(false);
+  });
+
+  it("caps the access deny list at 2,000 chars", () => {
+    const deny = (value: string) => ({ ...fixture, settings: { ...fixture.settings, access: { ...fixture.settings.access, denyList: value } } });
+    expect(parseShellState(deny("x".repeat(2_000)))).not.toBeNull();
+    expect(parseShellState(deny("x".repeat(2_001)))).toBeNull();
+  });
+
+  it("enum values match the shared list (drift guard; C# checks the same file)", () => {
+    const top = shellStateSchema.shape;
+    const settings = top.settings.shape;
+    const actual: Record<string, readonly string[]> = {
+      sections: settingsSections,
+      actions: settingsActions,
+      theme: top.theme.options,
+      phase: top.status.shape.phase.options,
+      tab: top.notch.shape.tab.options,
+      jobState: top.jobs.element.shape.state.options,
+      jobColour: top.jobs.element.shape.colour.options,
+      jobFileKind: top.jobs.element.shape.files.element.shape.kind.options,
+      chatRole: top.chat.shape.rows.element.shape.role.options,
+      cardKind: top.cards.element.shape.kind.options,
+      cardActionStyle: top.cards.element.shape.actions.element.shape.style.options,
+      documentKind: top.document.unwrap().shape.kind.options,
+      updateState: top.update.shape.state.options,
+      accountProvider: settings.account.shape.provider.options,
+      deviceState: settings.microphone.shape.devices.element.shape.state.options,
+      whisperState: settings.microphone.shape.whisper.options,
+      hotkeyTrigger: settings.shortcuts.shape.talk.shape.trigger.options,
+      chromeState: settings.integrations.shape.chrome.options,
+      connectorStatus: settings.integrations.shape.connectors.element.shape.status.options,
+      reachState: settings.agents.shape.reach.element.shape.state.options,
+      routineStatus: settings.routines.element.shape.status.options,
+      accessMode: settings.access.shape.mode.options,
+    };
+    expect(Object.keys(actual).sort()).toEqual(Object.keys(enums).sort());
+    for (const [name, values] of Object.entries(actual)) expect([name, [...values]]).toEqual([name, enums[name]]);
+    expect(shellStateSchema.shape.notch.shape.section.options).toEqual(enums.sections);
   });
 
   it("parses mic.level", () => {

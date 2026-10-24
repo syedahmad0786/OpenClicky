@@ -196,7 +196,7 @@ public static class ShellIntentParser
     private static readonly string[] Tabs = ["home", "chat", "settings", "document"];
     private static readonly string[] GeneralKeys = ["showInTaskbar", "showInRecordings", "launchAtLogin", "paused"];
     private static readonly string[] LinkTargets = ["whatsNew", "bug", "feature"];
-    private static readonly Regex PatchKey = new(@"^[a-z]+(\.[a-zA-Z]+)+\z", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(50));
+    private static readonly Regex PatchKey = new(@"^[a-z]+(\.[a-zA-Z]+)+\z", RegexOptions.CultureInvariant); // linear pattern, input capped at 60 chars before the match
     private const int MaxPatchKeyLength = 60, MaxPatchValueChars = 4_000, MaxPatchValueDepth = 4, MaxActionArgLength = 512;
 
     /// <summary>settings.action allow-list.</summary>
@@ -279,6 +279,13 @@ public static class ShellIntentParser
         && m.TryGetProperty("value", out var value) && value.GetRawText().Length <= MaxPatchValueChars
         && SmallJson(value, MaxPatchValueDepth);
 
+    /// <summary>JsonProperty.Name throws InvalidOperationException on an escaped lone surrogate; TryParse catches that and rejects.</summary>
+    private static bool NameIsValid(JsonProperty property)
+    {
+        _ = property.Name;
+        return true;
+    }
+
     /// <summary>At most <paramref name="levels"/> nested arrays/objects; every string and property name must be valid UTF-16 (a lone surrogate throws, TryParse rejects).</summary>
     private static bool SmallJson(JsonElement e, int levels)
     {
@@ -288,7 +295,7 @@ public static class ShellIntentParser
             case JsonValueKind.Array:
                 return levels > 0 && e.EnumerateArray().All(item => SmallJson(item, levels - 1));
             case JsonValueKind.Object:
-                return levels > 0 && e.EnumerateObject().All(p => p.Name.Length >= 0 && SmallJson(p.Value, levels - 1));
+                return levels > 0 && e.EnumerateObject().All(p => NameIsValid(p) && SmallJson(p.Value, levels - 1));
             default: return true;
         }
     }

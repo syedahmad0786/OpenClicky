@@ -136,7 +136,7 @@ const settingsViewSchema = z.object({
   }).strict()).max(100),
   access: z.object({
     mode: z.enum(["preview", "confirmEach", "auto", "full"]),
-    denyList: text(20_000),
+    denyList: text(2_000),
     rememberHistory: z.boolean(),
   }).strict(),
   advanced: z.object({ useLocalProxy: z.boolean(), proxyUrl: text(2_048), forceGdiCapture: z.boolean() }).strict(),

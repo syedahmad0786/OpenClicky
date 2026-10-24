@@ -120,6 +120,9 @@ public class ShellContractTests
     [InlineData("""{"kind":"settings.patch","key":7,"value":1}""")]
     [InlineData("""{"kind":"settings.patch","key":"voice.speed","value":"\ud800"}""")]
     [InlineData("""{"kind":"settings.patch","key":"voice.speed","value":[[[[[1]]]]]}""")]
+    [InlineData("""{"kind":"settings.patch","key":"voice.speed","value":{"a\ud800":1}}""")]
+    [InlineData("""{"kind":"settings.patch","key":"voice.speed","value":["\ud800"]}""")]
+    [InlineData("""{"kind":"settings.patch","key":"voice.speed","value":{"a":["ok",{"b":"\udc00"}]}}""")]
     [InlineData("""{"kind":"settings.action"}""")]
     [InlineData("""{"kind":"settings.action","action":"formatDisk"}""")]
     [InlineData("""{"kind":"settings.action","action":"signIn","arg":5}""")]
@@ -210,6 +213,47 @@ public class ShellContractTests
         // arg: at most 512 chars
         Assert.True(ShellIntentParser.TryParse(Action(new string('a', 512)), out _));
         Assert.False(ShellIntentParser.TryParse(Action(new string('a', 513)), out _));
+    }
+
+    private static string Wire<T>(T value) where T : struct, Enum =>
+        System.Text.Json.JsonSerializer.Serialize(value, ShellContract.Options).Trim('"');
+
+    private static string[] Values<T>() where T : struct, Enum => Enum.GetValues<T>().Select(Wire).ToArray();
+
+    [Fact]
+    public void EnumValuesMatchTheSharedList()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "OpenClicky.sln"))) dir = dir.Parent;
+        var shared = JsonNode.Parse(File.ReadAllText(Path.Combine(dir!.FullName, "tests", "fixtures", "shell-enums.v1.json")))!.AsObject();
+        var actual = new Dictionary<string, string[]>
+        {
+            ["sections"] = ShellContract.Sections.ToArray(),
+            ["actions"] = ShellIntentParser.SettingsActions.ToArray(),
+            ["theme"] = Values<ShellTheme>(),
+            ["phase"] = Values<ShellPhase>(),
+            ["tab"] = Values<NotchTab>(),
+            ["jobState"] = Values<JobState>(),
+            ["jobColour"] = Values<JobColour>(),
+            ["jobFileKind"] = Values<JobFileKind>(),
+            ["chatRole"] = Values<ChatRole>(),
+            ["cardKind"] = Values<NotchCardKind>(),
+            ["cardActionStyle"] = Values<CardActionStyle>(),
+            ["documentKind"] = Values<DocumentKind>(),
+            ["updateState"] = Values<UpdateState>(),
+            ["accountProvider"] = Values<AccountProvider>(),
+            ["deviceState"] = Values<DeviceState>(),
+            ["whisperState"] = Values<WhisperState>(),
+            ["hotkeyTrigger"] = Values<HotkeyTrigger>(),
+            ["chromeState"] = Values<ChromeState>(),
+            ["connectorStatus"] = Values<ConnectorStatus>(),
+            ["reachState"] = Values<ReachState>(),
+            ["routineStatus"] = Values<RoutineStatus>(),
+            ["accessMode"] = Values<AccessModeView>(),
+        };
+        Assert.Equal(shared.Select(p => p.Key).Order(), actual.Keys.Order());
+        foreach (var (name, values) in actual)
+            Assert.True(shared[name]!.AsArray().Select(v => v!.GetValue<string>()).SequenceEqual(values), name + ": " + string.Join(",", values));
     }
 
     [Fact]
