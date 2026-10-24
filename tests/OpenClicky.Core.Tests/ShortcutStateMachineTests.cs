@@ -135,7 +135,7 @@ public class ShortcutStateMachineTests
         d.Down(LCtrl); d.Down(LAlt, 30); // the 150 ms count starts once the exact set is down
         d.Wait(held);
         Assert.Equal(started, d.All.Contains(Cmd(K.TalkStart)));
-        Assert.Equal(!started, d.Machine.NeedsTick);
+        Assert.True(d.Machine.NeedsTick); // pending, then held (recovery checks run while held)
     }
 
     [Theory]
@@ -233,7 +233,7 @@ public class ShortcutStateMachineTests
         Assert.Equal([Cmd(K.TalkStart)], d.Down(Space));
         Assert.True(d.Machine.SwallowLastKey);
         d.Down(Space, 30); Assert.True(d.Machine.SwallowLastKey); // auto-repeat
-        Assert.Equal([Cmd(K.TalkEnd)], d.Up(Space, 2000));
+        Assert.Equal([Cmd(K.TalkEnd)], d.Up(Space, 1000));
         Assert.True(d.Machine.SwallowLastKey);
         d.Up(LAlt); Assert.False(d.Machine.SwallowLastKey);
         Assert.Equal([Cmd(K.MaskStartMenu)], d.Up(LWin));
@@ -313,6 +313,104 @@ public class ShortcutStateMachineTests
         Assert.Equal([Cmd(K.TalkEnd, true)], d.Machine.Reset());
         Assert.Empty(d.Machine.PressedPassedKeys);
         Assert.Empty(d.Up(LAlt)); Assert.Empty(d.Up(LCtrl)); // unseen key-ups are ignored
+    }
+
+    [Fact]
+    public void MissedKeyUpDuringAHoldEndsItCancelled()
+    {
+        var d = new Driver();
+        d.Down(LCtrl); d.Down(LAlt); d.Wait(2000);
+        Assert.True(d.Machine.NeedsTick); // the host keeps checking for lost key-ups while a hold runs
+        Assert.Equal([Cmd(K.TalkEnd, true)], d.Machine.ReleaseMissed(LAlt, d.Now)); // e.g. Alt-up lost to a UAC prompt
+        Assert.Empty(d.Machine.ReleaseMissed(LCtrl, d.Now));
+
+        // Win lost on the secure desktop: no Start-menu mask (the key-up already went), dictation is discarded.
+        d.Down(LCtrl, 1000); d.Down(LWin); d.Wait(2000);
+        Assert.Equal([Cmd(K.DictateEnd, true)], d.Machine.ReleaseMissed(LWin, d.Now));
+        d.Up(LCtrl);
+        Assert.Equal([Cmd(K.TalkStart), Cmd(K.DictateStart)], d.All); // nothing else, e.g. no mask on the real Ctrl-up
+
+        // Recovered releases never complete a double-tap.
+        d.Tap(50, LCtrl); d.Down(LCtrl, 100);
+        Assert.Empty(d.Machine.ReleaseMissed(LCtrl, d.Now + 50));
+    }
+
+    [Fact]
+    public void SwallowedKeyThatStopsRepeatingIsReleasedCancelled()
+    {
+        var d = new Driver(ShortcutBindings.Default with { Talk = new HotkeyBinding(["Ctrl", "Space"], HotkeyTrigger.Hold) });
+        d.Down(LCtrl); d.Down(Space);
+        d.Down(Space, 1000); // first auto-repeat after the keyboard delay
+        Assert.Empty(d.Wait(ShortcutStateMachine.SwallowedStaleMs));
+        Assert.Equal([Cmd(K.TalkEnd, true)], d.Wait(1)); // repeats went quiet: its key-up was missed
+        Assert.Empty(d.Up(Space)); // a late real key-up is ignored
+        d.Up(LCtrl);
+        Assert.False(d.Machine.NeedsTick);
+    }
+
+    [Fact]
+    public void CtrlClickIsNotACtrlTap()
+    {
+        var d = new Driver();
+        d.Down(LCtrl); d.Machine.OnMouseButton(d.Now + 30); d.Up(LCtrl, 60);
+        d.Tap(50, LCtrl);
+        Assert.Empty(d.All);
+
+        // A click between two clean taps also breaks the double-tap; a click stops a pending hold too.
+        d.Wait(1000);
+        d.Tap(50, LCtrl); d.Machine.OnMouseButton(d.Now + 50); d.Wait(100); d.Tap(50, LCtrl);
+        d.Wait(1000);
+        d.Down(LCtrl); d.Down(LAlt); d.Machine.OnMouseButton(d.Now + 20); d.Wait(500); d.Up(LAlt); d.Up(LCtrl);
+        Assert.Empty(d.All);
+    }
+
+    [Fact]
+    public void ChangingBindingsKeepsUnchangedShortcutsAndCancelsChangedOnes()
+    {
+        var d = new Driver();
+        d.Down(LCtrl); d.Down(LAlt); d.Wait(1000);
+        d.Machine.Bindings = d.Machine.Bindings with
+        {
+            Talk = new HotkeyBinding(["Alt", "Ctrl"], HotkeyTrigger.Hold), // same chord, new instance
+            Text = new HotkeyBinding(["Shift"], HotkeyTrigger.DoubleTap),
+        };
+        Assert.Empty(d.Wait(20));
+        Assert.Equal([Cmd(K.TalkEnd)], d.Up(LAlt));
+        d.Up(LCtrl);
+
+        // A double-tap toggle that is on when its chord changes ends cancelled on the next tick.
+        d.Machine.Bindings = d.Machine.Bindings with { Dictate = new HotkeyBinding(["Ctrl", "Win"], HotkeyTrigger.DoubleTap) };
+        d.Wait(1000);
+        d.Tap(50, LCtrl, LWin); d.Wait(100); d.Tap(50, LCtrl, LWin);
+        Assert.Equal(K.DictateStart, d.All.Single(c => c.Kind == K.DictateStart).Kind);
+        d.Machine.Bindings = d.Machine.Bindings with { Dictate = HotkeyBinding.DefaultDictate };
+        Assert.True(d.Machine.NeedsTick);
+        Assert.Equal([Cmd(K.DictateEnd, true)], d.Wait(15));
+        Assert.False(d.Machine.NeedsTick);
+    }
+
+    [Fact]
+    public void EscDoesNotCancelAnActionWithoutAnEnd()
+    {
+        var d = new Driver(ShortcutBindings.Default with { Text = new HotkeyBinding(["Ctrl", "Shift"], HotkeyTrigger.Hold) });
+        d.Down(LCtrl); d.Down(LShift); d.Wait(200);
+        Assert.Equal([Cmd(K.TextMode)], d.All);
+        Assert.Empty(d.Down(Esc));
+    }
+
+    [Fact]
+    public void DoubleTapKeyIsSwallowedInPairs()
+    {
+        const int F9 = 0x78;
+        var d = new Driver(ShortcutBindings.Default with { Text = new HotkeyBinding(["F9"], HotkeyTrigger.DoubleTap) });
+        d.Down(F9); Assert.True(d.Machine.SwallowLastKey);
+        d.Up(F9, 50); Assert.True(d.Machine.SwallowLastKey);
+        d.Down(F9, 100); Assert.True(d.Machine.SwallowLastKey);
+        Assert.Equal([Cmd(K.TextMode)], d.Up(F9, 50));
+        Assert.True(d.Machine.SwallowLastKey);
+
+        d.Down(LShift, 1000); d.Down(F9); Assert.False(d.Machine.SwallowLastKey); // Shift+F9 is not the binding
+        d.Up(F9); Assert.False(d.Machine.SwallowLastKey);
     }
 
     [Fact]

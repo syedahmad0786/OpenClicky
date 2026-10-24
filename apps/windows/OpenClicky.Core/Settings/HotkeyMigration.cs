@@ -16,7 +16,7 @@ public static class HotkeyMigration
     {
         if (s.ShortcutsVersion >= CurrentVersion) return false;
         if (s.PushToTalk is { } chord && chord != HotkeyChord.Default
-            && HotkeyBinding.TryCreate(chord.DisplayName.Split('+'), HotkeyTrigger.Hold, out var talk, out _))
+            && HotkeyBinding.TryCreate(ShellStateBuilder.Keys(chord), HotkeyTrigger.Hold, out var talk, out _))
             s.TalkHotkey = talk!;
         s.ShortcutsVersion = CurrentVersion;
         return true;

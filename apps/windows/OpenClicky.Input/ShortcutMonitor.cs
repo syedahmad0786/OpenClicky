@@ -15,38 +15,52 @@ public sealed class ShortcutEndedEventArgs(bool cancelled) : EventArgs
 /// <summary>
 /// Hosts <see cref="ShortcutStateMachine"/> on a <c>WH_KEYBOARD_LL</c> hook (UI thread). Pressed/Released are talk;
 /// Released carries <see cref="ShortcutEndedEventArgs"/>. Events are posted to the UI SynchronizationContext captured
-/// in <see cref="Start"/> so handlers never run inside (and stall) the hook. Only the non-modifier key of an active
-/// hold binding (and non-modifier keys while recording) is swallowed; injected input passes through untouched.
+/// in <see cref="Start"/> so handlers never run inside (and stall) the hook. Only a binding's non-modifier key (and
+/// non-modifier keys while recording) is swallowed; a mouse hook poisons Ctrl+click; injected input passes through.
 /// Change from <see cref="PushToTalkHotkeyMonitor"/>: <see cref="Cancelled"/> fires on Esc only while an action is active.
 /// </summary>
 public sealed class ShortcutMonitor : IPushToTalkMonitor
 {
-    private const int WhKeyboardLl = 13;
+    private const int WhKeyboardLl = 13, WhMouseLl = 14;
     private const int WmKeyDown = 0x0100, WmKeyUp = 0x0101, WmSysKeyDown = 0x0104, WmSysKeyUp = 0x0105;
-    private const int LlkhfInjected = 0x10;
+    private const int WmLButtonDown = 0x0201, WmRButtonDown = 0x0204, WmMButtonDown = 0x0207, WmXButtonDown = 0x020B;
+    private const int LlkhfInjected = 0x10, LlmhfInjected = 0x01;
     private const ushort VkUnassignedMask = 0xE8;
 
-    private readonly NativeMethods.LowLevelKeyboardProc _hookProc;
+    private readonly NativeMethods.HookProc _keyboardProc;
+    private readonly NativeMethods.HookProc _mouseProc;
     private readonly ShortcutStateMachine _machine;
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 15 };
     private SynchronizationContext? _context;
     private Action<HotkeyBinding?>? _recordDone;
-    private IntPtr _hookId;
+    private IntPtr _keyboardHook;
+    private IntPtr _mouseHook;
     private bool _disposed;
 
     public ShortcutMonitor(ShortcutBindings? bindings = null)
     {
         _machine = new ShortcutStateMachine(bindings ?? ShortcutBindings.Default);
-        _hookProc = HookCallback; // keep the delegate alive for the native callback
+        _keyboardProc = KeyboardCallback; // keep the delegates alive for the native callbacks
+        _mouseProc = MouseCallback;
         _timer.Tick += (_, _) =>
         {
-            Run(_machine.Tick(Environment.TickCount64));
+            var now = Environment.TickCount64;
+            DropMissedKeyUps(currentVk: -1, now); // a running hold must not outlive a key-up the hook never saw
+            Run(_machine.Tick(now));
             if (!_machine.NeedsTick) _timer.Stop();
         };
     }
 
-    /// <summary>Set while no shortcut is held (it resets per-binding state).</summary>
-    public ShortcutBindings Bindings { get => _machine.Bindings; set => _machine.Bindings = value; }
+    /// <summary>Unchanged chords keep running; an active shortcut whose chord changed ends cancelled.</summary>
+    public ShortcutBindings Bindings
+    {
+        get => _machine.Bindings;
+        set
+        {
+            _machine.Bindings = value;
+            if (_machine.NeedsTick) _timer.Start(); // delivers the queued End on the next tick
+        }
+    }
 
     /// <summary>Ignored: shortcuts come from <see cref="Bindings"/>. Kept for <see cref="IPushToTalkMonitor"/>.</summary>
     public HotkeyChord Chord { get; set; } = HotkeyChord.Default;
@@ -61,20 +75,22 @@ public sealed class ShortcutMonitor : IPushToTalkMonitor
 
     public void Start()
     {
-        if (_hookId != IntPtr.Zero) return;
+        if (_keyboardHook != IntPtr.Zero) return;
         _context = SynchronizationContext.Current;
-        _hookId = NativeMethods.SetWindowsHookEx(WhKeyboardLl, _hookProc, ResolveModuleHandle(), 0);
-        if (_hookId == IntPtr.Zero) throw new InvalidOperationException($"SetWindowsHookEx failed: {Marshal.GetLastWin32Error()}");
+        var module = ResolveModuleHandle();
+        _keyboardHook = NativeMethods.SetWindowsHookEx(WhKeyboardLl, _keyboardProc, module, 0);
+        if (_keyboardHook == IntPtr.Zero) throw new InvalidOperationException($"SetWindowsHookEx failed: {Marshal.GetLastWin32Error()}");
+        // Only poisons Ctrl+click and the like; shortcuts still work if it cannot be installed.
+        _mouseHook = NativeMethods.SetWindowsHookEx(WhMouseLl, _mouseProc, module, 0);
+        if (_mouseHook == IntPtr.Zero) Trace.TraceWarning($"ShortcutMonitor: mouse hook failed: {Marshal.GetLastWin32Error()}");
     }
 
     /// <summary>Unhooks and ends any active action as cancelled (and any recording with null).</summary>
     public void Stop()
     {
-        if (_hookId != IntPtr.Zero)
-        {
-            NativeMethods.UnhookWindowsHookEx(_hookId);
-            _hookId = IntPtr.Zero;
-        }
+        foreach (var hook in new[] { _keyboardHook, _mouseHook })
+            if (hook != IntPtr.Zero) NativeMethods.UnhookWindowsHookEx(hook);
+        _keyboardHook = _mouseHook = IntPtr.Zero;
         _timer.Stop();
         Run(_machine.Reset());
     }
@@ -92,32 +108,58 @@ public sealed class ShortcutMonitor : IPushToTalkMonitor
         _timer.Start();
     }
 
-    private IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
+    private IntPtr KeyboardCallback(int nCode, IntPtr wParam, IntPtr lParam)
     {
-        var message = wParam.ToInt32();
-        var down = message is WmKeyDown or WmSysKeyDown;
-        if (nCode >= 0 && (down || message is WmKeyUp or WmSysKeyUp))
+        try
         {
-            var data = Marshal.PtrToStructure<NativeMethods.KbdLlHookStruct>(lParam);
-            var injected = (data.Flags & LlkhfInjected) != 0;
-            var now = Environment.TickCount64;
-            if (!injected) DropMissedKeyUps(data.VkCode, now);
-            var commands = _machine.OnKey(data.VkCode, down, injected, now);
-            var swallow = _machine.SwallowLastKey;
-            Run(commands); // MaskStartMenu is sent here, before this Win key-up is passed on
-            if (_machine.NeedsTick) _timer.Start();
-            if (swallow) return 1;
+            var message = wParam.ToInt32();
+            var down = message is WmKeyDown or WmSysKeyDown;
+            if (nCode >= 0 && (down || message is WmKeyUp or WmSysKeyUp))
+            {
+                var data = Marshal.PtrToStructure<NativeMethods.KbdLlHookStruct>(lParam);
+                var injected = (data.Flags & LlkhfInjected) != 0;
+                var now = Environment.TickCount64;
+                if (!injected) DropMissedKeyUps(data.VkCode, now);
+                var commands = _machine.OnKey(data.VkCode, down, injected, now);
+                var swallow = _machine.SwallowLastKey;
+                Run(commands); // MaskStartMenu is sent here, before this Win key-up is passed on
+                if (_machine.NeedsTick) _timer.Start();
+                if (swallow) return 1;
+            }
         }
-        return NativeMethods.CallNextHookEx(_hookId, nCode, wParam, lParam);
+        catch (Exception ex)
+        {
+            Trace.TraceError($"ShortcutMonitor keyboard hook: {ex}"); // never break the user's keyboard
+        }
+        return NativeMethods.CallNextHookEx(_keyboardHook, nCode, wParam, lParam);
     }
 
-    /// <summary>The hook misses key-ups that happen on the secure desktop (Win+L, Ctrl+Alt+Del); release any key
-    /// the OS no longer reports down so the session can end.</summary>
+    private IntPtr MouseCallback(int nCode, IntPtr wParam, IntPtr lParam)
+    {
+        try
+        {
+            if (nCode >= 0 && wParam.ToInt32() is WmLButtonDown or WmRButtonDown or WmMButtonDown or WmXButtonDown
+                && (Marshal.PtrToStructure<NativeMethods.MsLlHookStruct>(lParam).Flags & LlmhfInjected) == 0)
+            {
+                Run(_machine.OnMouseButton(Environment.TickCount64));
+                if (_machine.NeedsTick) _timer.Start();
+            }
+        }
+        catch (Exception ex)
+        {
+            Trace.TraceError($"ShortcutMonitor mouse hook: {ex}");
+        }
+        return NativeMethods.CallNextHookEx(_mouseHook, nCode, wParam, lParam);
+    }
+
+    /// <summary>The hook misses key-ups on the secure desktop (UAC, Win+L, Ctrl+Alt+Del) and some focus changes;
+    /// release any passed-through key the OS no longer reports down (what it held ends cancelled). Swallowed keys
+    /// are covered inside the state machine by their auto-repeat going quiet (the OS never saw them go down).</summary>
     private void DropMissedKeyUps(int currentVk, long now)
     {
         foreach (var vk in _machine.PressedPassedKeys)
             if (vk != currentVk && (NativeMethods.GetAsyncKeyState(vk) & 0x8000) == 0)
-                Run(_machine.OnKey(vk, down: false, injected: false, now));
+                Run(_machine.ReleaseMissed(vk, now));
     }
 
     private void Run(IReadOnlyList<ShortcutCommand> commands)
@@ -191,7 +233,7 @@ public sealed class ShortcutMonitor : IPushToTalkMonitor
 
     private static class NativeMethods
     {
-        public delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
+        public delegate IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam);
 
         [StructLayout(LayoutKind.Sequential)]
         public struct KbdLlHookStruct
@@ -200,6 +242,17 @@ public sealed class ShortcutMonitor : IPushToTalkMonitor
             public int ScanCode;
             public int Flags;
             public int Time;
+            public IntPtr DwExtraInfo;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct MsLlHookStruct
+        {
+            public int X;
+            public int Y;
+            public uint MouseData;
+            public uint Flags;
+            public uint Time;
             public IntPtr DwExtraInfo;
         }
 
@@ -240,7 +293,7 @@ public sealed class ShortcutMonitor : IPushToTalkMonitor
         }
 
         [DllImport("user32.dll", SetLastError = true)]
-        public static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc lpfn, IntPtr hMod, uint dwThreadId);
+        public static extern IntPtr SetWindowsHookEx(int idHook, HookProc lpfn, IntPtr hMod, uint dwThreadId);
 
         [DllImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]

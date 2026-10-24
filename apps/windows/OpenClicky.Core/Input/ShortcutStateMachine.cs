@@ -14,7 +14,7 @@ public enum ShortcutCommandKind
     RecordingFinished,
 }
 
-/// <param name="Cancelled">For TalkEnd/DictateEnd: the hold was a tap, was interrupted by another key, or Esc.</param>
+/// <param name="Cancelled">For TalkEnd/DictateEnd: a tap, another key or click, Esc, a missed key-up or a binding change.</param>
 public sealed record ShortcutCommand(ShortcutCommandKind Kind, bool Cancelled = false, HotkeyBinding? Binding = null);
 
 public sealed record ShortcutBindings(HotkeyBinding Talk, HotkeyBinding Text, HotkeyBinding Dictate, HotkeyBinding HandsFree)
@@ -30,57 +30,78 @@ public sealed record ShortcutBindings(HotkeyBinding Talk, HotkeyBinding Text, Ho
 
 /// <summary>
 /// Turns low-level key events into shortcut commands. Pure: no clock and no Win32; the host passes timestamps and
-/// calls <see cref="Tick"/> while <see cref="NeedsTick"/> (the 150 ms hold delay and the recorder timeout).
+/// calls <see cref="Tick"/> while <see cref="NeedsTick"/>.
 /// <para>Rules. Left/right modifiers fold to Ctrl/Alt/Shift/Win. A binding is eligible only while the pressed set
-/// equals its key set exactly and no other key has gone down since the keyboard was last fully released (any other
-/// key poisons it until then), so Ctrl+C, Ctrl+Alt+Del and AltGr+letter never trigger it. A modifier-only hold
-/// starts after 150 ms; a hold with a key starts on the spot. Releasing within 400 ms of the exact set going down
-/// is a tap: the hold ends cancelled. Double-tap fires on the second release when both taps are taps and the second
-/// goes down within 500 ms of the first's release. Esc cancels only an active action. Injected input is ignored.</para>
+/// equals its key set exactly and no other key (or mouse click) has gone down since the keyboard was last fully
+/// released (anything else poisons it until then), so Ctrl+C, Ctrl+Alt+Del, AltGr+letter and Ctrl+click never trigger
+/// it. A modifier-only hold starts after 150 ms; a hold with a key starts on the spot. Releasing within 400 ms of the
+/// exact set going down is a tap: the hold ends cancelled. Double-tap fires on the second release when both taps are
+/// taps and the second goes down within 500 ms of the first's release. Esc cancels only an active action that has an
+/// end. Injected input is ignored. A key-up the hook never saw (<see cref="ReleaseMissed"/>, or a swallowed key that
+/// stopped auto-repeating) ends what it held as cancelled.</para>
 /// </summary>
 public sealed class ShortcutStateMachine
 {
     public const long HoldDelayMs = 150, TapMaxMs = 400, DoubleTapGapMs = 500, RecordTimeoutMs = 7000;
+    /// <summary>A held swallowed key is always the last key down, so it auto-repeats (slowest Windows setting: 1 s
+    /// delay, ~400 ms period). No event for this long means its key-up was missed. The OS key state cannot tell us:
+    /// it never saw the swallowed key-down.</summary>
+    public const long SwallowedStaleMs = 1500;
     private const int VkEscape = 0x1B;
+    private const string MouseButton = "Mouse";
 
     private readonly HashSet<int> _pressed = [];
     private readonly HashSet<int> _swallowed = [];
+    private readonly Dictionary<int, long> _lastDown = [];
     private readonly HashSet<string> _sessionKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<ShortcutCommand> _queued = [];
     private ShortcutBindings _bindings = ShortcutBindings.Default;
     private Slot[] _slots = [];
     private bool _maskWin;
+    private bool _recovering;
     private ShortcutAction? _recording;
     private long _recordingSince;
     private List<string> _recordMax = [];
 
-    public ShortcutStateMachine(ShortcutBindings bindings) => Bindings = bindings;
+    public ShortcutStateMachine(ShortcutBindings bindings)
+    {
+        _bindings = bindings;
+        _slots = BuildSlots(bindings);
+    }
 
-    /// <summary>Setting this drops per-binding state; set it while no shortcut is held.</summary>
+    /// <summary>
+    /// Slots whose chord is unchanged keep their state (a running hold or toggle carries on). An active slot whose
+    /// binding changed ends cancelled; that End is queued for the next <see cref="OnKey"/>/<see cref="Tick"/>.
+    /// </summary>
     public ShortcutBindings Bindings
     {
         get => _bindings;
         set
         {
+            var next = BuildSlots(value);
+            for (var i = 0; i < next.Length; i++)
+            {
+                if (_slots[i].Binding.SameChord(next[i].Binding)) next[i] = _slots[i];
+                else if (_slots[i].Held || _slots[i].On) Stop(_slots[i], cancelled: true, _queued);
+            }
             _bindings = value;
-            _slots =
-            [
-                new(ShortcutAction.Talk, value.Talk), new(ShortcutAction.Text, value.Text),
-                new(ShortcutAction.Dictate, value.Dictate), new(ShortcutAction.HandsFree, value.HandsFree),
-            ];
+            _slots = next;
         }
     }
 
-    /// <summary>True when the host must block the last key event (the non-modifier key of an active hold, or any
-    /// non-modifier key while recording). Modifiers are never swallowed.</summary>
+    /// <summary>True when the host must block the last key event (a binding's non-modifier key, or any
+    /// non-modifier key while recording). Modifiers are never swallowed; a swallowed down's up is swallowed too.</summary>
     public bool SwallowLastKey { get; private set; }
 
-    public bool NeedsTick => IsRecording || _slots.Any(s => s.Pending);
+    /// <summary>Pending hold, running hold or toggle, swallowed key, recording or queued command: keep ticking
+    /// (the host also checks for missed key-ups on each tick).</summary>
+    public bool NeedsTick => IsRecording || _queued.Count > 0 || _swallowed.Count > 0 || _slots.Any(s => s.Pending || s.Held || s.On);
     public bool IsRecording => _recording is not null;
     public HotkeyBinding? Recorded { get; private set; }
     public bool RecordingTimedOut { get; private set; }
 
-    /// <summary>Held keys the OS saw go down (not swallowed). The host may release any the OS reports up, which
-    /// recovers key-ups the hook never sees (e.g. after Win+L locks the session).</summary>
+    /// <summary>Held keys the OS saw go down (not swallowed), so the OS key state is a valid check for them. The host
+    /// calls <see cref="ReleaseMissed"/> for any the OS reports up (e.g. key-ups lost to the secure desktop).</summary>
     public IReadOnlyList<int> PressedPassedKeys => _pressed.Where(vk => !_swallowed.Contains(vk)).ToArray();
 
     public IReadOnlyList<ShortcutCommand> Tick(long nowMs)
@@ -96,41 +117,31 @@ public sealed class ShortcutStateMachine
         if (injected) return []; // the agent's own SendInput must never start, end or cancel anything
         var commands = new List<ShortcutCommand>();
         Advance(nowMs, commands);
-        if (down && !_pressed.Add(vk))
-        {
-            SwallowLastKey = _swallowed.Contains(vk); // auto-repeat changes nothing
-            return commands;
-        }
-        if (!down && !_pressed.Remove(vk)) return commands; // never saw it go down
+        Apply(vk, down, nowMs, commands);
+        return commands;
+    }
 
-        var key = KeyName(vk);
-        if (down) _sessionKeys.Add(key);
-        if (!down && key == "Win" && (_maskWin || IsRecording)) commands.Add(new(ShortcutCommandKind.MaskStartMenu));
+    /// <summary>A key-up the hook never delivered: release <paramref name="vk"/>, ending anything it held as
+    /// cancelled (no Start-menu mask, no double-tap).</summary>
+    public IReadOnlyList<ShortcutCommand> ReleaseMissed(int vk, long nowMs)
+    {
+        var commands = new List<ShortcutCommand>();
+        Advance(nowMs, commands);
+        Recover(vk, nowMs, commands);
+        return commands;
+    }
 
-        if (down && vk == VkEscape && _slots.Any(s => s.Held || s.On))
-        {
-            foreach (var slot in _slots.Where(s => s.Held || s.On)) Stop(slot, cancelled: true, commands);
-            commands.Add(new(ShortcutCommandKind.Cancel));
-        }
-
-        var pressed = _pressed.Select(KeyName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Any physical mouse button went down: poisons the current key session (Ctrl+click is not a Ctrl tap)
+    /// and forgets a half-done double-tap.</summary>
+    public IReadOnlyList<ShortcutCommand> OnMouseButton(long nowMs)
+    {
+        var commands = new List<ShortcutCommand>();
+        Advance(nowMs, commands);
+        foreach (var slot in _slots) slot.LastTapUp = null;
+        if (_pressed.Count == 0) return commands;
+        _sessionKeys.Add(MouseButton);
+        var pressed = PressedNames();
         foreach (var slot in _slots) Update(slot, pressed, nowMs, commands);
-
-        var swallow = false;
-        if (down && IsRecording)
-        {
-            swallow = !IsModifier(key);
-            if (vk == VkEscape) FinishRecording(null, timedOut: false, commands);
-            else if (pressed.Count > _recordMax.Count) _recordMax = [.. pressed];
-        }
-        else if (down && !IsModifier(key))
-        {
-            swallow = _slots.Any(s => s.Held && s.Contains(key));
-        }
-        if (swallow) _swallowed.Add(vk);
-        SwallowLastKey = down ? swallow : _swallowed.Remove(vk);
-
-        if (_pressed.Count == 0) EndSession(nowMs, commands);
         return commands;
     }
 
@@ -148,14 +159,16 @@ public sealed class ShortcutStateMachine
     /// <summary>Forgets every key and ends active actions as cancelled (the hook is going away).</summary>
     public IReadOnlyList<ShortcutCommand> Reset()
     {
-        var commands = new List<ShortcutCommand>();
+        var commands = new List<ShortcutCommand>(_queued);
+        _queued.Clear();
         foreach (var slot in _slots.Where(s => s.Held || s.On)) Stop(slot, cancelled: true, commands);
         if (IsRecording) FinishRecording(null, timedOut: false, commands);
         _pressed.Clear();
         _swallowed.Clear();
+        _lastDown.Clear();
         _sessionKeys.Clear();
         _maskWin = false;
-        Bindings = _bindings;
+        _slots = BuildSlots(_bindings);
         return commands;
     }
 
@@ -175,13 +188,80 @@ public sealed class ShortcutStateMachine
 
     private static bool IsModifier(string key) => HotkeyBinding.Modifiers.Contains(key);
 
+    private static Slot[] BuildSlots(ShortcutBindings b) =>
+    [
+        new(ShortcutAction.Talk, b.Talk), new(ShortcutAction.Text, b.Text),
+        new(ShortcutAction.Dictate, b.Dictate), new(ShortcutAction.HandsFree, b.HandsFree),
+    ];
+
+    private HashSet<string> PressedNames() => _pressed.Select(KeyName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
     private void Advance(long nowMs, List<ShortcutCommand> commands)
     {
+        commands.AddRange(_queued);
+        _queued.Clear();
+        foreach (var vk in _swallowed.Where(vk => _pressed.Contains(vk) && nowMs - _lastDown.GetValueOrDefault(vk) > SwallowedStaleMs).ToArray())
+            Recover(vk, nowMs, commands);
         if (IsRecording && nowMs - _recordingSince >= RecordTimeoutMs) FinishRecording(null, timedOut: true, commands);
         if (IsRecording) return;
         foreach (var slot in _slots)
             if (slot.Pending && nowMs - slot.ExactSince >= HoldDelayMs) Start(slot, commands);
     }
+
+    private void Recover(int vk, long nowMs, List<ShortcutCommand> commands)
+    {
+        _recovering = true;
+        try { Apply(vk, down: false, nowMs, commands); }
+        finally { _recovering = false; }
+    }
+
+    private void Apply(int vk, bool down, long nowMs, List<ShortcutCommand> commands)
+    {
+        if (down && !_pressed.Add(vk))
+        {
+            SwallowLastKey = _swallowed.Contains(vk); // auto-repeat changes nothing
+            if (SwallowLastKey) _lastDown[vk] = nowMs;
+            return;
+        }
+        if (!down && !_pressed.Remove(vk)) return; // never saw it go down
+
+        var key = KeyName(vk);
+        if (down) _sessionKeys.Add(key);
+        if (!down && !_recovering && key == "Win" && (_maskWin || IsRecording)) commands.Add(new(ShortcutCommandKind.MaskStartMenu));
+
+        if (down && vk == VkEscape && _slots.Any(Cancellable))
+        {
+            foreach (var slot in _slots.Where(Cancellable)) Stop(slot, cancelled: true, commands);
+            commands.Add(new(ShortcutCommandKind.Cancel));
+        }
+
+        var pressed = PressedNames();
+        foreach (var slot in _slots) Update(slot, pressed, nowMs, commands);
+
+        var swallow = false;
+        if (down && IsRecording)
+        {
+            swallow = !IsModifier(key);
+            if (vk == VkEscape) FinishRecording(null, timedOut: false, commands);
+            else if (pressed.Count > _recordMax.Count) _recordMax = [.. pressed];
+        }
+        else if (down && !IsModifier(key))
+        {
+            // A hold's key while it runs; a double-tap's key whenever its set is exactly down (e.g. a lone F9).
+            swallow = _slots.Any(s => s.Contains(key) && (s.Held || s.Binding.Trigger == HotkeyTrigger.DoubleTap && s.ExactSince is not null));
+        }
+        if (swallow)
+        {
+            _swallowed.Add(vk);
+            _lastDown[vk] = nowMs;
+        }
+        SwallowLastKey = down ? swallow : _swallowed.Remove(vk);
+        if (!down) _lastDown.Remove(vk);
+
+        if (_pressed.Count == 0) EndSession(nowMs, commands);
+    }
+
+    private static bool Cancellable(Slot s) => (s.Held || s.On) && s.EndKind is not null;
 
     private void Update(Slot slot, HashSet<string> pressed, long nowMs, List<ShortcutCommand> commands)
     {
@@ -196,7 +276,7 @@ public sealed class ShortcutStateMachine
             if (slot.Binding.Trigger == HotkeyTrigger.Hold && !slot.ModifierOnly && !IsRecording) Start(slot, commands);
             return;
         }
-        if (slot.Held) Stop(slot, cancelled: poisoned || nowMs - slot.ExactSince <= TapMaxMs, commands);
+        if (slot.Held) Stop(slot, cancelled: _recovering || poisoned || nowMs - slot.ExactSince <= TapMaxMs, commands);
         slot.ExactSince = null;
     }
 
@@ -206,7 +286,7 @@ public sealed class ShortcutStateMachine
         {
             if (slot.Binding.Trigger == HotkeyTrigger.DoubleTap)
             {
-                var tap = slot.FirstExact is { } downAt && nowMs - downAt <= TapMaxMs && _sessionKeys.All(slot.Contains);
+                var tap = !_recovering && slot.FirstExact is { } downAt && nowMs - downAt <= TapMaxMs && _sessionKeys.All(slot.Contains);
                 if (!tap) slot.LastTapUp = null;
                 else if (slot.LastTapUp is { } lastUp && slot.FirstExact - lastUp <= DoubleTapGapMs && !IsRecording)
                 {
