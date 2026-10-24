@@ -1,3 +1,4 @@
+using OpenClicky.Agent;
 using OpenClicky.App.Shell;
 using OpenClicky.Core;
 using OpenClicky.Core.CompanionCursor;
@@ -20,6 +21,25 @@ internal sealed partial class TrayApplicationContext
         // An agent task that is running (not paused) injects input: it must not detach the companion or have a click swallowed.
         _overlay.DetachSuppressed = () => _taskCts is not null && !_taskControl.IsPaused;
         _talk.StateChanged += state => OnUi(() => { if (state == CompanionVoiceState.Listening && _micWatch is null) WatchMicLevels(); });
+        WatchForStaleDrawing();
+    }
+
+    /// <summary>
+    /// The drawing is anchored to the window the reply was about: when another window comes to the front, or that one moves or
+    /// resizes, the drawing no longer lines up and is cleared. OpenClicky's own windows (the shell, a card) never count.
+    /// </summary>
+    private void WatchForStaleDrawing()
+    {
+        var timer = new System.Windows.Forms.Timer { Interval = 250 };
+        timer.Tick += (_, _) =>
+        {
+            if (!_overlay.HasDrawing || ForegroundWindowInfo.IsCurrentProcessForeground()) return;
+            if (ForegroundWindowInfo.IsCurrentProcessWindow(_responseWindowHandle)) return; // the reply's window was ours: no anchor
+            if (ForegroundWindowInfo.GetHandle() != _responseWindowHandle || ForegroundWindowInfo.GetBounds() != _responseWindowBounds)
+                _talk.ClearDrawing();
+        };
+        timer.Start();
+        _home.Disposed += (_, _) => timer.Dispose();
     }
 
     /// <summary>The surface covers the monitor it follows; the companion docks at that monitor's top centre.</summary>

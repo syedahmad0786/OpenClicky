@@ -52,9 +52,16 @@ internal static class Program
             return 13;
         }
 
+        var layoutFailure = ValidateDrawingLayout();
+        if (layoutFailure is not null)
+        {
+            Console.Error.WriteLine("FAIL: drawing layout " + layoutFailure);
+            return 17;
+        }
+
         if (args.Contains("--geometry-only", StringComparer.OrdinalIgnoreCase))
         {
-            Console.WriteLine("PASS: region, response bubble and message bubble geometry");
+            Console.WriteLine("PASS: region, response bubble, message bubble and drawing layout geometry");
             return 0;
         }
 
@@ -76,10 +83,10 @@ internal static class Program
         }
 
         Console.WriteLine($"overlay_hwnd=0x{overlay.WindowHandle:X}");
-        if (overlay.WindowHandles.Count != 3 || overlay.WindowHandles.Distinct().Count() != 3 || overlay.WindowHandles.Contains(IntPtr.Zero)
-            || overlay.BuddyTipHandle != overlay.WindowHandle)
+        if (overlay.WindowHandles.Count != 4 || overlay.WindowHandles.Distinct().Count() != 4 || overlay.WindowHandles.Contains(IntPtr.Zero)
+            || overlay.BuddyTipHandle != overlay.WindowHandle || overlay.WindowHandles[3] != overlay.DrawingHandle)
         {
-            Console.Error.WriteLine($"FAIL: expected the cursor, drawing and click-catcher windows, got [{string.Join(",", overlay.WindowHandles)}]");
+            Console.Error.WriteLine($"FAIL: expected the cursor, ring, click-catcher and drawing windows, got [{string.Join(",", overlay.WindowHandles)}]");
             return 2;
         }
 
@@ -243,6 +250,14 @@ internal static class Program
         }
         Console.WriteLine("PASS: spring flight onto the target, dashed click ring, return flight, Hide clears the ring");
 
+        var drawingFailure = ValidateDrawing(overlay, vs);
+        if (drawingFailure is not null)
+        {
+            Console.Error.WriteLine("FAIL: drawing " + drawingFailure);
+            return 16;
+        }
+        Console.WriteLine("PASS: drawing reveals in its own window, Hide hides it, it persists, an empty drawing clears it");
+
         var dockFailure = ValidateDockAndDetach(overlay, fixture, vs, targetX, targetY);
         if (dockFailure is not null)
         {
@@ -336,29 +351,111 @@ internal static class Program
             Cursor.Position = saved;
         }
 
-        static Bitmap Grab(Rectangle area)
-        {
-            var bitmap = new Bitmap(area.Width, area.Height);
-            using var g = Graphics.FromImage(bitmap);
-            g.CopyFromScreen(area.Location, Point.Empty, area.Size);
-            return bitmap;
-        }
-
-        static int CountChanged(Bitmap a, Bitmap b)
-        {
-            var changed = 0;
-            for (var y = 0; y < a.Height; y++)
-            {
-                for (var x = 0; x < a.Width; x++)
-                {
-                    Color p = a.GetPixel(x, y), q = b.GetPixel(x, y);
-                    if (Math.Abs(p.R - q.R) + Math.Abs(p.G - q.G) + Math.Abs(p.B - q.B) > 12) changed++;
-                }
-            }
-            return changed;
-        }
-
         static float DpiOf(Point at) => DpiScale.ForPoint(at);
+    }
+
+    private static Bitmap Grab(Rectangle area)
+    {
+        var bitmap = new Bitmap(area.Width, area.Height);
+        using var g = Graphics.FromImage(bitmap);
+        g.CopyFromScreen(area.Location, Point.Empty, area.Size);
+        return bitmap;
+    }
+
+    private static int CountChanged(Bitmap a, Bitmap b)
+    {
+        var changed = 0;
+        for (var y = 0; y < a.Height; y++)
+        {
+            for (var x = 0; x < a.Width; x++)
+            {
+                Color p = a.GetPixel(x, y), q = b.GetPixel(x, y);
+                if (Math.Abs(p.R - q.R) + Math.Abs(p.G - q.G) + Math.Abs(p.B - q.B) > 12) changed++;
+            }
+        }
+        return changed;
+    }
+
+    private static OpenClicky.Core.Drawing.DrawPart Part(string id, OpenClicky.Core.Drawing.DrawOpKind kind, OpenClicky.Core.Drawing.Box box,
+        OpenClicky.Core.Drawing.Pt[]? points = null, string? label = null)
+    {
+        var args = new Dictionary<string, string>();
+        if (label is not null) args["label"] = label;
+        var op = new OpenClicky.Core.Drawing.DrawOp(kind, id, points ?? [], box, label, "#FF4C4C", 1, args, 0);
+        return new(id, op, op, 1, 1);
+    }
+
+    /// <summary>Layout keeps on-screen parts with bounds covering what they paint, separates their pills, and drops off-screen or NaN parts.</summary>
+    private static string? ValidateDrawingLayout()
+    {
+        var vs = SystemInformation.VirtualScreen;
+        int x = vs.Left + 200, y = vs.Top + 200;
+        var rect = Part("a", OpenClicky.Core.Drawing.DrawOpKind.Rect, new(x, y, 120, 60), label: "first");
+        var twin = Part("b", OpenClicky.Core.Drawing.DrawOpKind.Rect, new(x, y, 120, 60), label: "second");
+        var off = Part("c", OpenClicky.Core.Drawing.DrawOpKind.Rect, new(vs.Right - 10, y, 120, 60));
+        var broken = Part("d", OpenClicky.Core.Drawing.DrawOpKind.Line, new(x, y, float.NaN, 1), [new(x, y), new(float.NaN, y)]);
+        var layouts = DrawingRenderer.Layout([rect, twin, off, broken]);
+        if (layouts.Count != 2) return $"kept {layouts.Count} parts, expected the two on-screen ones";
+        var bounds = layouts[0].Bounds;
+        if (!bounds.Contains(new RectangleF(x, y, 120, 60))) return $"bounds {bounds} do not cover the rect";
+        if (layouts[0].Pill is not { } p0 || layouts[1].Pill is not { } p1 || p0.IntersectsWith(p1)) return "label pills overlap";
+        if (DrawingRenderer.PenTip(layouts[0], 0.5f) is not { } tip || !bounds.Contains(tip.X, tip.Y)) return "pen tip outside the part";
+        return null;
+    }
+
+    /// <summary>
+    /// The model's drawing reveals in its own window over the part (checked on the real screen), that window is not the whole
+    /// virtual screen, Hide hides it, the next Show brings it back (it persists), and an empty drawing clears it. Only the cursor
+    /// position is set; nothing is clicked or typed anywhere.
+    /// </summary>
+    private static string? ValidateDrawing(BuddyOverlayController overlay, Rectangle vs)
+    {
+        var ink = overlay.DrawingHandle;
+        static bool Visible(IntPtr hwnd) => NativeMethods.IsWindowVisible(hwnd);
+        static void Pump(int ms) => PumpUntil(() => false, TimeSpan.FromMilliseconds(ms));
+        static bool Covers(IntPtr hwnd, Point p) =>
+            NativeMethods.GetWindowRect(hwnd, out var r) && r.Left <= p.X && p.X < r.Right && r.Top <= p.Y && p.Y < r.Bottom;
+
+        var saved = Cursor.Position;
+        int x = vs.Left + vs.Width / 4, y = vs.Top + vs.Height / 2;
+        try
+        {
+            Cursor.Position = new Point(vs.Left + vs.Width * 3 / 4, vs.Top + vs.Height * 3 / 4); // the companion stays clear
+            overlay.ShowIdle();
+            Pump(300);
+            var part = Part("box", OpenClicky.Core.Drawing.DrawOpKind.Rect, new(x, y, 200, 80));
+            overlay.ShowDrawing([part], [new(part, TimeSpan.Zero, TimeSpan.FromSeconds(0.4), false)]);
+            if (!overlay.HasDrawing) return "HasDrawing stayed false";
+            if (!PumpUntil(() => Visible(ink), TimeSpan.FromSeconds(2))) return "the drawing window never appeared";
+            if (!Covers(ink, new Point(x, y)) || !Covers(ink, new Point(x + 199, y + 79))) return "the drawing window does not cover the part";
+            if (!NativeMethods.GetWindowRect(ink, out var r) || r.Right - r.Left >= vs.Width) return "the drawing window spans the whole virtual screen";
+            Pump(1200); // past the reveal and the companion's ride back
+
+            var edge = new Rectangle(x + 60, y - 6, 80, 12); // across the top stroke
+            var away = new Rectangle(x + 60, y - 80, 80, 12); // nothing of ours here
+            var withInk = Grab(edge);
+            var awayBefore = Grab(away);
+            overlay.Hide();
+            if (Visible(ink)) return "Hide left the drawing visible";
+            Pump(IOverlayController.HideSettleMilliseconds + 60);
+            var changed = CountChanged(withInk, Grab(edge));
+            var awayChanged = CountChanged(awayBefore, Grab(away));
+            if (changed < 40 || awayChanged > changed / 4) return $"the screen shows no stroke (changed pixels={changed}, control strip={awayChanged})";
+            Console.WriteLine($"ink_pixels_changed={changed} control_pixels_changed={awayChanged}");
+
+            overlay.ShowIdle();
+            if (!PumpUntil(() => Visible(ink), TimeSpan.FromSeconds(2))) return "the drawing did not come back after Hide";
+            overlay.ShowDrawing([], []);
+            if (overlay.HasDrawing) return "HasDrawing stayed true after clearing";
+            if (!PumpUntil(() => !Visible(ink), TimeSpan.FromSeconds(2))) return "an empty drawing left its window up";
+            return null;
+        }
+        finally
+        {
+            overlay.ShowDrawing([], []);
+            overlay.Hide();
+            Cursor.Position = saved;
+        }
     }
 
     /// <summary>Six lines at most with "…" when cut, never wider than 300 DIP, and the 4 s hold then 400 ms fade.</summary>

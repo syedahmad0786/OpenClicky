@@ -244,6 +244,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         // A confirm dialog owns Esc: declining a talk action must not also stop a (paused) task.
         _hotkey.EscapePressed += (_, _) =>
         {
+            _talk.ClearDrawing(); // always: Esc takes the drawing off the screen
             if (_confirm.IsDialogOpen) return;
             CancelMicWatch(); _tts.Stop(); _shell?.ClearCaptions(); if (IsBusy) Stop();
         };

@@ -79,6 +79,9 @@ public sealed class BuddyOverlayController : IOverlayController
     /// <summary>Marshals calls onto the thread that owns the windows (the one that constructed the controller).</summary>
     private readonly Control _ui = new();
     private readonly LayeredWindow _cursorWindow, _drawingWindow;
+    /// <summary>The model's persistent drawing, in its own window (<see cref="_drawingWindow"/> keeps the click ring and legacy marks).</summary>
+    private readonly DrawingWindow _drawing;
+    private volatile bool _hasDrawing;
     private readonly ClickCatcher _catcher;
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 16 };
     private readonly Stopwatch _clock = Stopwatch.StartNew();
@@ -137,6 +140,7 @@ public sealed class BuddyOverlayController : IOverlayController
         _ = _ui.Handle;
         _cursorWindow = new("OpenClicky Companion", log);
         _drawingWindow = new("OpenClicky Drawing", log);
+        _drawing = new(log);
         _catcher = new("OpenClicky Companion Click");
         _catcher.Clicked += OnCatcherClicked;
         _accent = ParseAccent(_style.AccentHex);
@@ -159,7 +163,10 @@ public sealed class BuddyOverlayController : IOverlayController
     public Func<bool>? DetachSuppressed { get; set; }
 
     /// <summary>Every overlay window exists from construction until disposal.</summary>
-    public IReadOnlyList<nint> WindowHandles => _disposed ? [] : [_cursorWindow.Handle, _drawingWindow.Handle, _catcher.Handle];
+    public IReadOnlyList<nint> WindowHandles => _disposed ? [] : [_cursorWindow.Handle, _drawingWindow.Handle, _catcher.Handle, _drawing.Handle];
+
+    /// <summary>The model's drawing window. Smoke / diagnostics only.</summary>
+    public IntPtr DrawingHandle => _drawing.Handle;
 
     /// <summary>True once a POINT has brought the tip to rest on its target (still pointing).</summary>
     public bool IsPointFlyComplete => InvokeRead(() =>
@@ -206,6 +213,26 @@ public sealed class BuddyOverlayController : IOverlayController
         _marks = marks.ToArray();
         _marksStart = Now;
         if (_marks.Count == 0) ClearMarks();
+        if (!_hidden) Show();
+    });
+
+    public bool HasDrawing => _hasDrawing;
+
+    public void ShowDrawing(IReadOnlyList<DrawPart> parts, IReadOnlyList<PartAnimation> animations)
+    {
+        _hasDrawing = parts.Count > 0;
+        Post(() =>
+        {
+            _drawing.Show(parts, animations, Now);
+            // A part being drawn brings a docked companion out and lets it ride the pen (thinking dots give way to the ink).
+            if (animations.Any(a => !a.Erase) && _mode is Mode.Idle or Mode.Processing) _mode = Mode.Responding;
+            if (!_hidden) Show();
+        });
+    }
+
+    public void FinishDrawing() => Post(() =>
+    {
+        _drawing.Finish();
         if (!_hidden) Show();
     });
 
@@ -259,6 +286,7 @@ public sealed class BuddyOverlayController : IOverlayController
         _style = style;
         _accent = ParseAccent(style.AccentHex);
         _drawingDirty = true;
+        _drawing.Invalidate();
         if (!_hidden) Show();
     });
 
@@ -321,6 +349,7 @@ public sealed class BuddyOverlayController : IOverlayController
             _timer.Stop();
             _cursorWindow.HideWindow();
             _drawingWindow.HideWindow(); // marks and the click ring
+            _drawing.HideWindow(); // kept: the next Show* brings it back
             // A POINT that is still held flies in again, and its ring is drawn again, when the overlay next appears.
             _flight = null;
             _returning = false;
@@ -349,6 +378,7 @@ public sealed class BuddyOverlayController : IOverlayController
             _timer.Dispose();
             _cursorWindow.Dispose();
             _drawingWindow.Dispose();
+            _drawing.Dispose();
             _catcher.Dispose();
             _cursorBitmap?.Dispose();
             _drawingBitmap?.Dispose();
@@ -371,8 +401,8 @@ public sealed class BuddyOverlayController : IOverlayController
 
     private bool CursorVisible => !_hidden && _style.Presence != CursorPresence.Off && _dock.Visible;
 
-    /// <summary>While docked, only a POINT (or marks being drawn) brings the companion out of the notch.</summary>
-    private bool WantsCursorOut => _mode == Mode.Pointing || (_mode == Mode.Responding && _marks.Count > 0);
+    /// <summary>While docked, only a POINT (or marks or a drawing during a reply) brings the companion out of the notch.</summary>
+    private bool WantsCursorOut => _mode == Mode.Pointing || (_mode == Mode.Responding && (_marks.Count > 0 || _drawing.HasParts));
 
     /// <summary>The stored notch point if a live monitor holds it, else the nearest live monitor's top centre.</summary>
     private Pt Notch => NotchPoint.Resolve(_notchPoint,
@@ -383,6 +413,7 @@ public sealed class BuddyOverlayController : IOverlayController
     {
         _hidden = false;
         _drawingDirty = true;
+        _drawing.Invalidate();
         if (!_timer.Enabled) _lastTick = Now;
         _timer.Start();
         Frame();
@@ -459,7 +490,8 @@ public sealed class BuddyOverlayController : IOverlayController
 
         DrawCursorFrame(now, dt);
         var drawingAnimating = DrawDrawingFrame(now);
-        if (!CursorVisible && !drawingAnimating) _timer.Stop();
+        var inkAnimating = _drawing.Render(now, _accent, _style.ReducedMotion);
+        if (!CursorVisible && !drawingAnimating && !inkAnimating) _timer.Stop();
     }
 
     private void DrawCursorFrame(double now, double dt)
@@ -479,7 +511,9 @@ public sealed class BuddyOverlayController : IOverlayController
         }
 
         StepDetach(cursor, now, spring.Position);
-        var target = _mode == Mode.Pointing && _pointTarget is { } point ? new Pt(point.X, point.Y) : _detach.Detached ? _detach.At : follow;
+        // While a part is being drawn the companion rides the pen tip; afterwards it follows the cursor again.
+        var pen = _drawing.PenTip(now, _style.ReducedMotion);
+        var target = _mode == Mode.Pointing && _pointTarget is { } point ? new Pt(point.X, point.Y) : _detach.Detached ? _detach.At : pen ?? follow;
         if (!_cursorShown && _dock.Phase != DockPhase.Grow) spring.Snap(follow); // reappearing: start beside the real cursor, not where it was last seen
         if (_flightPending && _pointTarget is { } landing)
         {

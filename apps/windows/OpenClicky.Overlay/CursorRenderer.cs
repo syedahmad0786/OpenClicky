@@ -174,11 +174,13 @@ internal static class CursorRenderer
     public static SizeF LabelSize(string label, float s) =>
         new(Math.Min(MessageMaxWidth * s, Width(label, FontFor(s)) + 2 * LabelPadX * s), LineDip * s + 2 * LabelPadY * s);
 
-    public static void DrawLabel(Graphics g, RectangleF box, string label, float s, Color accent)
+    public static void DrawLabel(Graphics g, RectangleF box, string label, float s, Color accent, float alpha = 1)
     {
-        using var fill = new SolidBrush(accent);
+        var a = Math.Clamp(alpha, 0, 1);
+        using var fill = new SolidBrush(Color.FromArgb((int)Math.Round(accent.A * a), accent));
         FillRounded(g, fill, box, BubbleRadius * s);
-        g.DrawString(label, FontFor(s), Brushes.White,
+        using var text = new SolidBrush(Color.FromArgb((int)Math.Round(255 * a), Color.White));
+        g.DrawString(label, FontFor(s), text,
             new RectangleF(box.X + LabelPadX * s, box.Y + LabelPadY * s, box.Width - 2 * LabelPadX * s, LineDip * s), LineFormat);
     }
 

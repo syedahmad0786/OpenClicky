@@ -49,6 +49,19 @@ public interface IOverlayController : IDisposable
     /// <summary>Microphone peak level (0..1) for the listening bars; fed about every 100 ms while listening.</summary>
     void ShowMicLevel(double level) { }
 
+    /// <summary>
+    /// Shows the whole drawing (<paramref name="parts"/> in virtual-screen px, a snapshot the caller will not change). New parts
+    /// reveal as <paramref name="animations"/> say, with starts relative to this call; erased parts fade. Empty parts clear it.
+    /// The drawing stays up across turns until it is cleared; <see cref="Hide"/> hides it only until the next Show*.
+    /// </summary>
+    void ShowDrawing(IReadOnlyList<DrawPart> parts, IReadOnlyList<PartAnimation> animations) { }
+
+    /// <summary>Ends every running reveal or erase at once (a new talk press): the drawing shows its final state.</summary>
+    void FinishDrawing() { }
+
+    /// <summary>True while the last <see cref="ShowDrawing"/> had parts. Any thread.</summary>
+    bool HasDrawing => false;
+
     /// <summary>Every overlay window that exists now (capture exclusion, own-window lists).</summary>
     IReadOnlyList<nint> WindowHandles => [];
 }
