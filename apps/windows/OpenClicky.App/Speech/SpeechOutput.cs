@@ -51,14 +51,13 @@ internal sealed class SpeechOutput : ITtsClient
     public Task SpeakAsync(string text, CancellationToken cancellationToken = default)
     {
         if (!Enabled || string.IsNullOrWhiteSpace(text)) return Task.CompletedTask;
-        try { ReplySpeechStarting?.Invoke(); }
-        catch (Exception ex) when (ex is not OutOfMemoryException) { _log("speech_starting_handler_error=" + ex.GetType().Name); }
+        RenderDevices.RaiseEach(ReplySpeechStarting, h => h(), _log, "speech_starting");
         return SpeakCoreAsync(text, null, cancellationToken);
     }
 
     /// <summary>
     /// Says the preview line with <paramref name="voiceId"/> at the current speed. Like the test sound, it stops whatever is
-    /// playing first, including a reply's current sentence (the reply's later sentences still play).
+    /// playing first: a reply's current sentence and every sentence of it still waiting to play are dropped.
     /// </summary>
     public async Task PreviewAsync(string voiceId)
     {
@@ -130,8 +129,7 @@ internal sealed class SpeechOutput : ITtsClient
         finally
         {
             // A throwing subscriber must not replace the playback outcome (completion, cancellation or the real error).
-            try { SpeechEnded?.Invoke(); }
-            catch (Exception ex) when (ex is not OutOfMemoryException) { _log("speech_ended_handler_error=" + ex.GetType().Name); }
+            RenderDevices.RaiseEach(SpeechEnded, h => h(), _log, "speech_ended");
         }
     }
 

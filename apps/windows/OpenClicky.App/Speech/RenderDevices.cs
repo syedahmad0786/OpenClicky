@@ -72,7 +72,7 @@ internal static class RenderDevices
                 if (selected.State == DeviceState.Active) return selected;
                 selected.Dispose();
             }
-            catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or ArgumentException) { selected?.Dispose(); } // unplugged: the default plays
+            catch (Exception ex) when (ex is not OutOfMemoryException) { selected?.Dispose(); } // unplugged or unreadable: the default plays
         }
         return enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
     }
@@ -97,10 +97,9 @@ internal static class RenderDevices
     {
         using var owned = source;
         cancellationToken.ThrowIfCancellationRequested();
-        using var output = new WaveOutEvent { DeviceNumber = device, DesiredLatency = 150 };
+        using var output = OpenOutput(init, device);
         var stopped = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         output.PlaybackStopped += (_, e) => { if (e.Exception is { } error) stopped.TrySetException(error); else stopped.TrySetResult(); };
-        init(output);
         output.Play();
         using (cancellationToken.Register(() => { try { output.Stop(); } catch (Exception ex) when (ex is NAudio.MmException or ObjectDisposedException) { } }))
         {
@@ -121,9 +120,43 @@ internal static class RenderDevices
         }
     }
 
-    private static void Raise(Action<string> handler, string word)
+    /// <summary>An initialised WaveOut on <paramref name="device"/>, or on the default device when the chosen one went away
+    /// after it was looked up (unplugged between <see cref="WaveOutNumber"/> and Init).</summary>
+    private static WaveOutEvent OpenOutput(Action<WaveOutEvent> init, int device)
     {
-        try { handler(word); }
-        catch (Exception ex) when (ex is not OutOfMemoryException) { DebugLog.Append("speech_word_handler_error=" + ex.GetType().Name); }
+        var output = new WaveOutEvent { DeviceNumber = device, DesiredLatency = 150 };
+        try
+        {
+            init(output);
+            return output;
+        }
+        catch (NAudio.MmException ex) when (device != -1)
+        {
+            output.Dispose();
+            DebugLog.Append("speech_device_fallback=" + ex.Result);
+            var fallback = new WaveOutEvent { DeviceNumber = -1, DesiredLatency = 150 };
+            try { init(fallback); }
+            catch { fallback.Dispose(); throw; }
+            return fallback;
+        }
+        catch
+        {
+            output.Dispose();
+            throw;
+        }
+    }
+
+    private static void Raise(Action<string> handler, string word) =>
+        RaiseEach(handler, h => h(word), DebugLog.Append, "speech_word");
+
+    /// <summary>Calls every subscriber in turn, so one that throws stops neither the others nor the speech.</summary>
+    internal static void RaiseEach<T>(T? handlers, Action<T> invoke, Action<string> log, string what) where T : Delegate
+    {
+        if (handlers is null) return;
+        foreach (var handler in handlers.GetInvocationList())
+        {
+            try { invoke((T)handler); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { log($"{what}_handler_error={ex.GetType().Name}"); }
+        }
     }
 }
