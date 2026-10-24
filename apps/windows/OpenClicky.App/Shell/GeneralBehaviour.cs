@@ -20,10 +20,6 @@ internal static class GeneralBehaviour
         else key.DeleteValue(RunValue, throwOnMissingValue: false);
     }
 
-    /// <summary>Excludes a window of this process from screen capture (or includes it again). False when Windows refused.</summary>
-    public static bool ApplyCaptureExclusion(nint hwnd, bool exclude) =>
-        hwnd != 0 && SetWindowDisplayAffinity(hwnd, exclude ? WDA_EXCLUDEFROMCAPTURE : WDA_NONE);
-
     /// <summary>AppsUseLightTheme = 0 means dark; missing means the Windows default (light).</summary>
     public static ShellTheme ReadTheme()
     {

@@ -15,10 +15,12 @@ public sealed class DrawingCueTracker
     public void Update(string rawPartial)
     {
         ArgumentNullException.ThrowIfNull(rawPartial);
-        var ops = DrawCommandParser.Parse(rawPartial, partial: true).Ops;
+        // Figure blocks go first, as in StreamingReplySpeech.Clean: a DRAW tag inside figure JSON never becomes an op.
+        var text = FigureBlockParser.Strip(rawPartial);
+        var ops = DrawCommandParser.Parse(text, partial: true).Ops;
         lock (_gate)
             for (var i = _ops.Count; i < ops.Count; i++)
-                _ops.Add((ops[i], StreamingReplySpeech.CountSentenceEnds(StreamingReplySpeech.Clean(rawPartial[..ops[i].Offset]))));
+                _ops.Add((ops[i], StreamingReplySpeech.CountSentenceEnds(StreamingReplySpeech.Clean(text[..ops[i].Offset]))));
     }
 
     /// <summary>The untaken ops, in order, cued at or before the given 0-based sentence.</summary>

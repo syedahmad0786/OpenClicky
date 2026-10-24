@@ -74,6 +74,36 @@ public class FigureBlockParserTests
     }
 
     [Fact]
+    public void ClosingFenceOnlyAtLineStart()
+    {
+        // A "```" inside the JSON does not close the block; the backtick title also drops the figure.
+        var (text, figures) = FigureBlockParser.Parse("a. ```figure\n{\"title\":\"x ``` y\",\"box\":[0,0,20,20],\"parts\":[{\"kind\":\"box\"}]}\n``` b.");
+        Assert.Equal("a. b.", text);
+        Assert.Empty(figures);
+        // A one-line block closes on its own line and keeps the rest of the reply.
+        (text, figures) = FigureBlockParser.Parse("a. ```figure {\"box\":[0,0,20,20],\"parts\":[{\"kind\":\"box\"}]}``` b.\nmore.");
+        Assert.Equal("a. b.\nmore.", text);
+        Assert.Single(figures);
+        Assert.Equal("a. b.", FigureBlockParser.Parse("a. ```figure\n``` b.").Text); // an empty block
+    }
+
+    [Fact]
+    public void IdlessFigureNeverReplacesAnEarlierOne()
+    {
+        var document = new DrawingDocument();
+        var block = Block(Gear).Replace("\"id\":\"f1\",", "");
+        foreach (var turn in new[] { block, block.Replace("{\"box", "{\"id\":\"Bad Id!\",\"box") })
+        {
+            var figure = Assert.Single(FigureBlockParser.Parse(turn).Figures);
+            Assert.Null(figure.Id);
+            var op = FigureBlockParser.ToOp(figure);
+            document.Apply([(op, op, 1f)], TimeSpan.FromSeconds(1));
+        }
+        var ids = document.Parts.Where(p => p.Op.Kind == DrawOpKind.Figure).Select(p => p.Id).ToArray();
+        Assert.Equal(2, ids.Distinct().Count());
+    }
+
+    [Fact]
     public void TriangleBudgetEnforced()
     {
         // A 12-coil spring is 4,608 triangles: four fit in 20,000, five do not.

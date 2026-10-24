@@ -293,13 +293,12 @@ internal sealed partial class TrayApplicationContext : IShellHost
         }
     }
 
-    /// <summary>"Show in screen recordings" off excludes the shell and the companion overlay windows that exist now.</summary>
+    /// <summary>"Show in screen recordings" off excludes the shell and every companion overlay window, figures opened later included.</summary>
     private void ApplyCaptureExclusion()
     {
         var exclude = !_settings.ShowInScreenRecordings;
         if (_shellSurface is not null) _shellSurface.Window.ExcludeFromCapture = exclude;
-        foreach (var hwnd in _overlay.WindowHandles)
-            if (hwnd != 0 && !GeneralBehaviour.ApplyCaptureExclusion(hwnd, exclude)) Log("overlay_capture_affinity_failed");
+        _overlay.SetCaptureExclusion(exclude);
     }
 
     private async Task CheckUpdatesAsync(bool announce)

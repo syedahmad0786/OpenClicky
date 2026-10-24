@@ -36,6 +36,18 @@ public class DrawingCueTrackerTests
     }
 
     [Fact]
+    public void DrawTagInsideFigureJsonIsNoOp()
+    {
+        var cues = new DrawingCueTracker();
+        const string Figure = "One. ```figure\n{\"title\":\"[DRAW:dot id=x x=1 y=1]\",\"box\":[0,0,20,20]";
+        cues.Update(Figure); // still being written
+        Assert.Empty(cues.TakeAll());
+        cues.Update(Figure + ",\"parts\":[{\"kind\":\"box\"}]}\n``` Two. [DRAW:dot id=b x=2 y=2]");
+        Assert.Empty(cues.TakeThrough(1));
+        Assert.Equal(["b"], cues.TakeAll().Select(o => o.Id));
+    }
+
+    [Fact]
     public void TakeAllReturnsRemaining()
     {
         var cues = new DrawingCueTracker();

@@ -103,6 +103,9 @@ public sealed class BuddyOverlayController : IOverlayController
     /// <summary>One window per figure part, by part id. A changed part (an edit, an undo) gets a new window; a gone one closes.</summary>
     private readonly Dictionary<string, (DrawPart Part, FigureWindow Window)> _figures = [];
     private nint[] _figureHandles = [];
+    /// <summary>"Show in screen recordings" off: every overlay window, a figure window from when it opens, is excluded from capture.</summary>
+    private bool _excludeFromCapture;
+    private readonly Action<string>? _log;
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 16 };
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private CancellationTokenSource? _selectionCancellation;
@@ -158,6 +161,7 @@ public sealed class BuddyOverlayController : IOverlayController
     public BuddyOverlayController(Action<string>? log = null)
     {
         _ = _ui.Handle;
+        _log = log;
         _cursorWindow = new("OpenClicky Companion", log);
         _drawingWindow = new("OpenClicky Drawing", log);
         _drawing = new(log);
@@ -218,6 +222,21 @@ public sealed class BuddyOverlayController : IOverlayController
     /// </summary>
     public IReadOnlyList<nint> WindowHandles => _disposed ? []
         : [_cursorWindow.Handle, _drawingWindow.Handle, _catcher.Handle, _drawing.Handle, .. _buttonCatchers.Select(c => c.Handle), .. _figureHandles];
+
+    /// <summary>
+    /// Excludes every overlay window from screen capture (WDA_EXCLUDEFROMCAPTURE), or includes them again, now and for each
+    /// figure window opened later. A window Windows refuses is logged.
+    /// </summary>
+    public void SetCaptureExclusion(bool exclude) => Post(() =>
+    {
+        _excludeFromCapture = exclude;
+        foreach (var hwnd in WindowHandles) ApplyCaptureExclusion(hwnd);
+    });
+
+    private void ApplyCaptureExclusion(nint hwnd)
+    {
+        if (hwnd != 0 && !SetWindowDisplayAffinity(hwnd, _excludeFromCapture ? WdaExcludeFromCapture : WdaNone)) _log?.Invoke("overlay_capture_affinity_failed");
+    }
 
     /// <summary>The model's drawing window. Smoke / diagnostics only.</summary>
     public IntPtr DrawingHandle => _drawing.Handle;
@@ -641,6 +660,7 @@ public sealed class BuddyOverlayController : IOverlayController
             var reveal = animations.FirstOrDefault(a => !a.Erase && a.Part.Id == part.Id && a.Part.Seq == part.Seq);
             var window = new FigureWindow(part.Op.Figure!, bounds, _accent, _style.ReducedMotion, reveal?.Start);
             _figures[part.Id] = (part, window);
+            if (_excludeFromCapture) ApplyCaptureExclusion(window.Handle); // before it is first shown
             if (!_hidden) window.ShowAt();
         }
         _figureHandles = _figures.Values.Select(f => f.Window.Handle).ToArray();
@@ -1073,6 +1093,11 @@ public sealed class BuddyOverlayController : IOverlayController
         }
         return visible;
     }
+
+    private const uint WdaNone = 0, WdaExcludeFromCapture = 0x11;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool SetWindowDisplayAffinity(nint hwnd, uint affinity);
 
     private enum Mode
     {

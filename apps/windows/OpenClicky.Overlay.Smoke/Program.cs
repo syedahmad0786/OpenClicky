@@ -280,7 +280,7 @@ internal static class Program
             Console.Error.WriteLine("FAIL: figure " + figureFailure);
             return 27;
         }
-        Console.WriteLine("PASS: a figure opens its own click-through window over its box without taking focus, paints, follows Hide, and closes with the drawing");
+        Console.WriteLine("PASS: a figure opens its own click-through window over its box without taking focus, paints, follows Hide, closes with the drawing, and is excluded from capture when recordings are off");
 
         var dockFailure = ValidateDockAndDetach(overlay, fixture, vs, targetX, targetY);
         if (dockFailure is not null)
@@ -841,10 +841,27 @@ internal static class Program
             overlay.ShowDrawing([], []);
             if (!PumpUntil(() => overlay.WindowHandles.Count == baseline && !NativeMethods.IsWindow(hwnd), TimeSpan.FromSeconds(2)))
                 return "clearing the drawing left the figure window";
+
+            // "Show in screen recordings" off: the overlay windows, and a figure window opened afterwards, are excluded from
+            // capture; turning it back on includes that figure again. (After the pixel check: an excluded window is not grabbed.)
+            const uint ExcludeFromCapture = 0x11;
+            overlay.SetCaptureExclusion(true);
+            if (!NativeMethods.GetWindowDisplayAffinity(overlay.WindowHandles[0], out var affinity) || affinity != ExcludeFromCapture)
+                return $"capture exclusion left the cursor window at affinity 0x{affinity:X}";
+            overlay.ShowDrawing([part], []);
+            if (!PumpUntil(() => overlay.WindowHandles.Count == baseline + 1, TimeSpan.FromSeconds(2))) return "no second figure window";
+            var later = overlay.WindowHandles[^1];
+            if (!NativeMethods.GetWindowDisplayAffinity(later, out affinity) || affinity != ExcludeFromCapture)
+                return $"a figure window opened with capture exclusion on has affinity 0x{affinity:X}";
+            overlay.SetCaptureExclusion(false);
+            if (!NativeMethods.GetWindowDisplayAffinity(later, out affinity) || affinity != 0)
+                return $"turning capture exclusion off left the figure window at affinity 0x{affinity:X}";
+            Console.WriteLine("figure_capture_affinity=0x11 then 0x0");
             return null;
         }
         finally
         {
+            overlay.SetCaptureExclusion(false);
             overlay.ShowDrawing([], []);
             overlay.Hide();
             Cursor.Position = saved;
@@ -1141,5 +1158,9 @@ internal static class Program
 
         [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")]
         public static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int index);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool GetWindowDisplayAffinity(IntPtr hWnd, out uint affinity);
     }
 }

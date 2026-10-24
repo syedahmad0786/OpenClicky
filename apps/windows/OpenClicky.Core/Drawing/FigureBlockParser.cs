@@ -46,12 +46,18 @@ public static partial class FigureBlockParser
         while (start >= 0)
         {
             kept.Add(raw[at..start]);
-            var content = raw.IndexOf('\n', start);
-            var end = content < 0 ? -1 : raw.IndexOf("```", content + 1, StringComparison.Ordinal);
-            if (end < 0) { at = raw.Length; break; } // still being written, or never closed: the rest is the block
+            // A block closes at a fence that starts a line, so a "```" inside its JSON does not end it. A one-line block
+            // ("```figure {…}```") closes at the first fence on its own line instead of swallowing the rest of the reply.
+            var body = start + Fence.Length;
+            var lineEnd = raw.IndexOf('\n', body);
+            var inline = raw.IndexOf("```", body, (lineEnd < 0 ? raw.Length : lineEnd) - body, StringComparison.Ordinal);
+            var close = lineEnd < 0 ? -1 : raw.IndexOf("\n```", lineEnd, StringComparison.Ordinal);
+            int content, end;
+            if (inline >= 0) (content, end, at) = (body, inline, inline + 3);
+            else if (close >= 0) (content, end, at) = (Math.Min(lineEnd + 1, close), close, close + 4); // an empty block is the same newline
+            else { at = raw.Length; break; } // still being written, or never closed: the rest is the block
             if (figures is not null && figures.Count < MaxFigures && end - content <= MaxBlockChars
-                && Read(raw[(content + 1)..end], figures.Count) is { } figure) figures.Add(figure);
-            at = end + 3;
+                && Read(raw[content..end]) is { } figure) figures.Add(figure);
             start = raw.IndexOf(Fence, at, StringComparison.OrdinalIgnoreCase);
         }
         var rest = raw[at..];
@@ -71,15 +77,16 @@ public static partial class FigureBlockParser
         return partial;
     }
 
-    private static FigureSpec? Read(string json, int index)
+    private static FigureSpec? Read(string json)
     {
         try
         {
             using var document = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 8 });
             var root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object) return null;
+            // No id, or an invalid one: null, so the drawing assigns a fresh one and it never replaces an earlier figure.
             var id = root.TryGetProperty("id", out var idValue) && idValue.ValueKind == JsonValueKind.String && IdPattern().IsMatch(idValue.GetString()!)
-                ? idValue.GetString()! : $"figure{index + 1}";
+                ? idValue.GetString()! : null;
             if (!root.TryGetProperty("box", out var boxValue) || Numbers(boxValue, 4) is not { } b
                 || b.Any(v => v < 0 || v > MaxBoxValue) || b[2] < MinBoxSide || b[3] < MinBoxSide) return null;
             int? screen = null;
@@ -160,11 +167,11 @@ public static partial class FigureBlockParser
         return values;
     }
 
-    /// <summary>A label or title: 1–60 characters with no control or bidi characters (it is shown on screen).</summary>
+    /// <summary>A label or title: 1–60 characters with no control, bidi or backtick characters (it is shown on screen).</summary>
     private static bool Text(JsonElement e, out string? text)
     {
         text = e.ValueKind == JsonValueKind.String ? e.GetString()!.Trim() : null;
-        return text is { Length: > 0 and <= DrawCommandParser.MaxLabel } && !text.Any(c => char.IsControl(c) || DrawCommandParser.IsBidiControl(c));
+        return text is { Length: > 0 and <= DrawCommandParser.MaxLabel } && !text.Any(c => c == '`' || char.IsControl(c) || DrawCommandParser.IsBidiControl(c));
     }
 
     [GeneratedRegex("^[a-z0-9_-]{1,24}$")]

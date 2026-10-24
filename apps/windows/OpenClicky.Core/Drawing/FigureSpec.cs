@@ -20,5 +20,5 @@ public sealed record FigurePart(
     IReadOnlyDictionary<string, double> Params,
     IReadOnlyList<Vector2>? Profile);
 
-/// <summary>A 3D figure floating over <see cref="Box"/> (screenshot pixels until mapped, like any draw op).</summary>
-public sealed record FigureSpec(string Id, Box Box, int? Screen, bool Spin, string? Title, IReadOnlyList<FigurePart> Parts);
+/// <summary>A 3D figure floating over <see cref="Box"/> (screenshot pixels until mapped, like any draw op). A null id is assigned by the drawing.</summary>
+public sealed record FigureSpec(string? Id, Box Box, int? Screen, bool Spin, string? Title, IReadOnlyList<FigurePart> Parts);
