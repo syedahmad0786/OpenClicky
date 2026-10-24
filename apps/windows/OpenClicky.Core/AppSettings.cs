@@ -93,6 +93,8 @@ public sealed class AppSettings
     public HotkeyBinding TextHotkey { get; set; } = HotkeyBinding.DefaultText;
     public HotkeyBinding DictateHotkey { get; set; } = HotkeyBinding.DefaultDictate;
     public HotkeyBinding HandsFreeHotkey { get; set; } = HotkeyBinding.DefaultHandsFree;
+    /// <summary>Shortcut settings schema; 0 when absent. <see cref="HotkeyMigration"/> moves it to 2.</summary>
+    public int ShortcutsVersion { get; set; }
     public bool CursorHidden { get; set; }
     public bool ScreenHighlight { get; set; } = true;
     public bool ShakeToDetach { get; set; } = true;
