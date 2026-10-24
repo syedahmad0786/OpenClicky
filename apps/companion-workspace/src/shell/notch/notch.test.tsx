@@ -364,3 +364,20 @@ it("a host-opened panel stays open once the pointer enters it", () => {
   act(() => { vi.advanceTimersByTime(60_000); });
   expect(root()).toHaveClass("notch--open");
 });
+
+it("composer.focus (text mode) focuses the chat field, also when it arrives before the chat tab is shown", () => {
+  const host = mockHost();
+  const { rerender } = render(<Notch state={closed()} />);
+  host.send({ kind: "composer.focus" }); // the host posts it right after opening the Chat tab
+  rerender(<Notch state={open("chat")} />);
+  const field = screen.getByRole("textbox", { name: "Message OpenClicky" });
+  expect(field).toHaveFocus();
+  expect(host.posts("surface.focus").at(-1)).toEqual({ kind: "surface.focus", wanted: true });
+
+  field.blur();
+  fireEvent.click(screen.getByRole("button", { name: "Home" }));
+  fireEvent.click(screen.getByRole("button", { name: "Chat" }));
+  expect(screen.getByRole("textbox", { name: "Message OpenClicky" })).not.toHaveFocus(); // taken once, not on every visit
+  host.send({ kind: "composer.focus" });
+  expect(screen.getByRole("textbox", { name: "Message OpenClicky" })).toHaveFocus();
+});

@@ -6,19 +6,14 @@ using OpenClicky.Core.Settings;
 
 namespace OpenClicky.Input;
 
-public sealed class ShortcutEndedEventArgs(bool cancelled) : EventArgs
-{
-    /// <summary>A tap, another key, Esc or Stop ended it: discard rather than send.</summary>
-    public bool Cancelled { get; } = cancelled;
-}
-
 /// <summary>
 /// Hosts <see cref="ShortcutStateMachine"/> on a <c>WH_KEYBOARD_LL</c> hook (UI thread). Pressed/Released are talk;
 /// Released carries <see cref="ShortcutEndedEventArgs"/>. Events are posted to the UI SynchronizationContext captured
 /// in <see cref="Start"/> so handlers never run inside (and stall) the hook. Only a binding's non-modifier key (and
 /// non-modifier keys while recording) is swallowed; injected input passes through.
 /// Mouse clicks arrive through <see cref="NotifyMouseButton"/> (no mouse hook: it would put every mouse move behind the UI thread).
-/// Change from <see cref="PushToTalkHotkeyMonitor"/>: <see cref="Cancelled"/> fires on Esc only while an action is active.
+/// Unlike the old push-to-talk monitor, <see cref="Cancelled"/> fires on Esc only while an action is active;
+/// <see cref="EscapePressed"/> fires on every physical Esc press (never swallowed).
 /// </summary>
 public sealed class ShortcutMonitor : IPushToTalkMonitor
 {
@@ -26,6 +21,7 @@ public sealed class ShortcutMonitor : IPushToTalkMonitor
     private const int WmKeyDown = 0x0100, WmKeyUp = 0x0101, WmSysKeyDown = 0x0104, WmSysKeyUp = 0x0105;
     private const int LlkhfInjected = 0x10;
     private const ushort VkUnassignedMask = 0xE8;
+    private const int VkEscape = 0x1B;
 
     private readonly NativeMethods.HookProc _keyboardProc;
     private readonly ShortcutStateMachine _machine;
@@ -33,6 +29,8 @@ public sealed class ShortcutMonitor : IPushToTalkMonitor
     private SynchronizationContext? _context;
     private Action<HotkeyBinding?>? _recordDone;
     private IntPtr _keyboardHook;
+    private ShortcutBindings? _pendingBindings;
+    private bool _escapeDown;
     private bool _disposed;
 
     public ShortcutMonitor(ShortcutBindings? bindings = null)
@@ -48,15 +46,23 @@ public sealed class ShortcutMonitor : IPushToTalkMonitor
         };
     }
 
-    /// <summary>Unchanged chords keep running; an active shortcut whose chord changed ends cancelled.</summary>
+    /// <summary>Set on the UI thread. While a shortcut is pending, held or on, the new bindings wait until it ends.</summary>
     public ShortcutBindings Bindings
     {
-        get => _machine.Bindings;
+        get => _pendingBindings ?? _machine.Bindings;
         set
         {
-            _machine.Bindings = value;
-            if (_machine.NeedsTick) _timer.Start(); // delivers the queued End on the next tick
+            _pendingBindings = value;
+            ApplyPendingBindings();
         }
+    }
+
+    private void ApplyPendingBindings()
+    {
+        if (_pendingBindings is not { } bindings || !_machine.Idle) return;
+        _pendingBindings = null;
+        _machine.Bindings = bindings;
+        if (_machine.NeedsTick) _timer.Start();
     }
 
     /// <summary>Ignored: shortcuts come from <see cref="Bindings"/>. Kept for <see cref="IPushToTalkMonitor"/>.</summary>
@@ -69,6 +75,8 @@ public sealed class ShortcutMonitor : IPushToTalkMonitor
     public event EventHandler? DictateStarted;
     public event EventHandler<ShortcutEndedEventArgs>? DictateEnded;
     public event EventHandler? HandsFreeToggled;
+    /// <summary>Every physical Esc press (not repeats), whether or not a shortcut is active. Esc is never swallowed.</summary>
+    public event EventHandler? EscapePressed;
 
     public void Start()
     {
@@ -109,14 +117,7 @@ public sealed class ShortcutMonitor : IPushToTalkMonitor
             if (nCode >= 0 && (down || message is WmKeyUp or WmSysKeyUp))
             {
                 var data = Marshal.PtrToStructure<NativeMethods.KbdLlHookStruct>(lParam);
-                var injected = (data.Flags & LlkhfInjected) != 0;
-                var now = Environment.TickCount64;
-                if (!injected) DropMissedKeyUps(data.VkCode, now);
-                var commands = _machine.OnKey(data.VkCode, down, injected, now);
-                var swallow = _machine.SwallowLastKey;
-                Run(commands); // MaskStartMenu is sent here, before this Win key-up is passed on
-                if (_machine.NeedsTick) _timer.Start();
-                if (swallow) return 1;
+                if (HandleKey(data.VkCode, down, (data.Flags & LlkhfInjected) != 0, Environment.TickCount64)) return 1;
             }
         }
         catch (Exception ex)
@@ -124,6 +125,22 @@ public sealed class ShortcutMonitor : IPushToTalkMonitor
             Trace.TraceError($"ShortcutMonitor keyboard hook: {ex}"); // never break the user's keyboard
         }
         return NativeMethods.CallNextHookEx(_keyboardHook, nCode, wParam, lParam);
+    }
+
+    /// <summary>One keyboard event from the hook; returns true when it must be swallowed.</summary>
+    internal bool HandleKey(int vk, bool down, bool injected, long now)
+    {
+        if (!injected) DropMissedKeyUps(vk, now);
+        if (!injected && vk == VkEscape)
+        {
+            if (down && !_escapeDown && !_machine.IsRecording) Post(() => EscapePressed?.Invoke(this, EventArgs.Empty));
+            _escapeDown = down;
+        }
+        var commands = _machine.OnKey(vk, down, injected, now);
+        var swallow = _machine.SwallowLastKey;
+        Run(commands); // MaskStartMenu is sent here, before this Win key-up is passed on
+        if (_machine.NeedsTick) _timer.Start();
+        return swallow;
     }
 
     /// <summary>
@@ -137,13 +154,16 @@ public sealed class ShortcutMonitor : IPushToTalkMonitor
         if (_machine.NeedsTick) _timer.Start();
     }
 
+    /// <summary>The OS key state (tests replace it: their keys are not really held).</summary>
+    internal Func<int, bool> IsKeyDown { get; set; } = vk => (NativeMethods.GetAsyncKeyState(vk) & 0x8000) != 0;
+
     /// <summary>The hook misses key-ups on the secure desktop (UAC, Win+L, Ctrl+Alt+Del) and some focus changes;
     /// release any passed-through key the OS no longer reports down (what it held ends cancelled). Swallowed keys
     /// are covered inside the state machine by their auto-repeat going quiet (the OS never saw them go down).</summary>
     private void DropMissedKeyUps(int currentVk, long now)
     {
         foreach (var vk in _machine.PressedPassedKeys)
-            if (vk != currentVk && (NativeMethods.GetAsyncKeyState(vk) & 0x8000) == 0)
+            if (vk != currentVk && !IsKeyDown(vk))
                 Run(_machine.ReleaseMissed(vk, now));
     }
 
@@ -160,6 +180,7 @@ public sealed class ShortcutMonitor : IPushToTalkMonitor
             }
             else Post(() => Raise(command));
         }
+        ApplyPendingBindings();
     }
 
     internal void Raise(ShortcutCommand command)

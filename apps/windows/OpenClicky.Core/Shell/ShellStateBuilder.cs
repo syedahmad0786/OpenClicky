@@ -73,7 +73,7 @@ public static class ShellStateBuilder
             IsHex(settings.AccentColor) ? settings.AccentColor.ToUpperInvariant() : DefaultAccent,
             inputs.ReducedMotion,
             new ShellUser(Cut(DisplayName(settings, inputs.AccountDisplayName, inputs.FallbackUserName), 80)),
-            new ShellHotkeys(Keys(settings.PushToTalk), [], [], []),
+            Hotkeys(Input.ShortcutBindings.From(settings)),
             new ShellStatus(inputs.Phase, cards.Count(j => j.State == JobState.Working), cards.Count(j => j.State == JobState.NeedsYou)),
             inputs.Notch,
             featured,
@@ -168,6 +168,10 @@ public static class ShellStateBuilder
         if (letters.Length > 0) return char.ToUpper(letters[0], CultureInfo.InvariantCulture) + letters[1..].ToLowerInvariant();
         return fallback;
     }
+
+    private static ShellHotkeys Hotkeys(Input.ShortcutBindings b) => new(Keys(b.Talk), Keys(b.Text), Keys(b.Dictate), Keys(b.HandsFree));
+
+    private static IReadOnlyList<string> Keys(HotkeyBinding binding) => binding.Keys.Take(6).Select(k => Cut(k, 24)).ToList();
 
     internal static IReadOnlyList<string> Keys(HotkeyChord chord) =>
         chord.DisplayName.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Take(6).Select(k => Cut(k, 24)).ToList();

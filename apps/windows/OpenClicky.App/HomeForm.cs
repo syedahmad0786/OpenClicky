@@ -320,7 +320,7 @@ internal sealed class HomeForm : Form
         _composer.Controls.Add(_transcript, 0, 3);
         _composer.Controls.Add(actions, 0, 4);
         _main.Controls.Add(_composer, 0, 2);
-        _shortcut = AppTheme.Label($"Hold {settings.PushToTalk.DisplayName} in any app to talk. Closing this window keeps your buddy in the tray.", 8);
+        _shortcut = AppTheme.Label($"Hold {settings.TalkHotkey.DisplayName} in any app to talk. Closing this window keeps your buddy in the tray.", 8);
         _shortcut.Dock = DockStyle.Fill;
         _shortcut.TextAlign = ContentAlignment.MiddleLeft;
         _main.Controls.Add(_shortcut, 0, 3);
@@ -448,7 +448,7 @@ internal sealed class HomeForm : Form
         _listen.Enabled = active || !_busy;
     }
     public void TurnOffGuide() => _guide.Checked = false;
-    public void RefreshShortcut() => _shortcut.Text = $"Hold {_settings.PushToTalk.DisplayName} in any app to talk. Closing this window keeps your buddy in the tray.";
+    public void RefreshShortcut() => _shortcut.Text = $"Hold {_settings.TalkHotkey.DisplayName} in any app to talk. Closing this window keeps your buddy in the tray.";
     public void RestoreFromMinimized()
     {
         if (WindowState == FormWindowState.Minimized)

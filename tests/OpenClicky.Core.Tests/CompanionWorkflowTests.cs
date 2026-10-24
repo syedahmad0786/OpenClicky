@@ -1195,6 +1195,43 @@ public class CompanionWorkflowTests
         public byte[] StopToWav() { IsRecording = false; return []; }
         public void Dispose() { }
     }
+    [Fact]
+    public void CancelledTalkReleaseDropsTheTurnSilently()
+    {
+        var hotkey = new RaisingHotkey();
+        var mic = new Mic();
+        var talkCalls = 0;
+        var messages = new List<string>();
+        using var talk = new TalkOrchestrator(hotkey, new Overlay(), new Capture(), mic, () => null,
+            () => { talkCalls++; return null; }, new Tts(), () => new AppSettings { PersistConversationHistory = false }, log: _ => { });
+        talk.MessageReceived += (_, text) => messages.Add(text);
+        talk.Start();
+
+        hotkey.Press();
+        Assert.Equal(CompanionVoiceState.Listening, talk.State); // the listening state may show
+        hotkey.Release(cancelled: true);
+        Assert.Equal(CompanionVoiceState.Idle, talk.State);
+        Assert.False(mic.IsRecording);
+        Assert.Empty(messages);
+        Assert.Equal(0, talkCalls);
+
+        hotkey.Press();
+        hotkey.Release(cancelled: false); // control: a real release does run the turn
+        Assert.True(messages.Count + talkCalls > 0);
+    }
+
+    private sealed class RaisingHotkey : IPushToTalkMonitor
+    {
+        public HotkeyChord Chord { get; set; } = HotkeyChord.Default;
+        public event EventHandler? Pressed;
+        public event EventHandler? Released;
+        public void Press() => Pressed?.Invoke(this, EventArgs.Empty);
+        public void Release(bool cancelled) => Released?.Invoke(this, new ShortcutEndedEventArgs(cancelled));
+        public void Start() { }
+        public void Stop() { }
+        public void Dispose() { }
+    }
+
     private sealed class Hotkey : IPushToTalkMonitor
     {
         public HotkeyChord Chord { get; set; } = HotkeyChord.Default;

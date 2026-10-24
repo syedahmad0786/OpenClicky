@@ -6,16 +6,28 @@ import { MicIcon } from "./icons";
 
 const MAX_TEXT = 8_000; // host limit for text.submit
 
-export function ChatTab({ state, draft, onDraft }: { state: ShellState; draft: string; onDraft: (text: string) => void }) {
+interface ChatTabProps {
+  state: ShellState; draft: string; onDraft: (text: string) => void;
+  /** The host asked for the field (composer.focus, text mode); call onComposerFocused once it has focus. */
+  focusComposer?: boolean; onComposerFocused?: () => void;
+}
+
+export function ChatTab({ state, draft, onDraft, focusComposer, onComposerFocused }: ChatTabProps) {
   const { rows } = state.chat;
   const talk = state.hotkeys.talk;
   const list = useRef<HTMLDivElement>(null);
   const focused = useRef(false);
+  const input = useRef<HTMLTextAreaElement>(null);
   const tail = rows.at(-1);
 
   // A field that unmounts while focused (tab switch, collapse) fires no blur: hand the keyboard focus back here.
   useEffect(() => () => { if (focused.current) postPage({ kind: "surface.focus", wanted: false }); }, []);
   useEffect(() => { if (list.current) list.current.scrollTop = list.current.scrollHeight; }, [rows.length, tail?.text]);
+  useEffect(() => {
+    if (!focusComposer) return;
+    input.current?.focus();
+    onComposerFocused?.();
+  }, [focusComposer, onComposerFocused]);
 
   const submit = () => {
     const text = draft.trim();
@@ -47,7 +59,7 @@ export function ChatTab({ state, draft, onDraft }: { state: ShellState; draft: s
           {talk.length ? `Hold ${talk.join(" + ")} to talk` : "Talk"}
         </PillButton>
         <textarea
-          className="notch-chat__input" rows={1} maxLength={MAX_TEXT} placeholder="Ask OpenClicky…" aria-label="Message OpenClicky"
+          ref={input} className="notch-chat__input" rows={1} maxLength={MAX_TEXT} placeholder="Ask OpenClicky…" aria-label="Message OpenClicky"
           value={draft} onChange={(e) => onDraft(e.target.value)} onKeyDown={onKeyDown}
           onPointerDown={() => postPage({ kind: "surface.focus", wanted: true })}
           onFocus={() => { focused.current = true; postPage({ kind: "surface.focus", wanted: true }); }}

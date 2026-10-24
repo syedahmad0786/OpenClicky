@@ -43,6 +43,8 @@ describe("shell contract", () => {
     expect(parseHostMessage({ kind: "shell.state", state: fixture })?.kind).toBe("shell.state");
     expect(parseHostMessage({ kind: "chat.delta", rowId: "r", text: "hi" })?.kind).toBe("chat.delta");
     expect(parseHostMessage({ kind: "caption.word", text: "hi" })?.kind).toBe("caption.word");
+    expect(parseHostMessage({ kind: "composer.focus" })?.kind).toBe("composer.focus");
+    expect(parseHostMessage({ kind: "composer.focus", text: "x" })).toBeNull();
     expect(parseHostMessage({ kind: "session.bootstrap", token: "t".repeat(32) })?.kind).toBe("session.bootstrap");
   });
 

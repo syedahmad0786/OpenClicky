@@ -33,15 +33,11 @@ public static class SettingsPatch
 
     private static readonly Dictionary<string, HotkeySlot> Hotkeys = new()
     {
-        // sub-project B: the talk shortcut is read-only and mirrors the live PushToTalk chord (see HotkeyBinding.LiveTalk);
-        // when B switches the monitor to TalkHotkey, read s.TalkHotkey here and let shortcuts.talk be patched again.
-        ["shortcuts.talk"] = new("Talk", HotkeyBinding.LiveTalk, (s, b) => s.TalkHotkey = b, HotkeyBinding.DefaultTalk),
+        ["shortcuts.talk"] = new("Talk", s => s.TalkHotkey, (s, b) => s.TalkHotkey = b, HotkeyBinding.DefaultTalk),
         ["shortcuts.text"] = new("Text mode", s => s.TextHotkey, (s, b) => s.TextHotkey = b, HotkeyBinding.DefaultText),
         ["shortcuts.dictate"] = new("Dictate", s => s.DictateHotkey, (s, b) => s.DictateHotkey = b, HotkeyBinding.DefaultDictate),
         ["shortcuts.handsFree"] = new("Hands-free dictation", s => s.HandsFreeHotkey, (s, b) => s.HandsFreeHotkey = b, HotkeyBinding.DefaultHandsFree),
     };
-
-    private const string TalkLocked = "Changing this shortcut arrives with the new shortcuts update.";
 
     /// <summary>
     /// <paramref name="confirmed"/> is true only after the user accepted the native warning for Auto/Full access;
@@ -67,7 +63,6 @@ public static class SettingsPatch
             return PatchResult.Applied;
         }
 
-        if (key == "shortcuts.talk") return Reject(TalkLocked, out error); // sub-project B: remove to allow editing Talk.
         if (Hotkeys.TryGetValue(key, out var hotkey)) return ApplyHotkey(s, hotkey, value, out error);
 
         switch (key)

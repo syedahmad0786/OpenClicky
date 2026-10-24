@@ -199,6 +199,7 @@ export const hostMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("chat.delta"), rowId: id, text: text(8_000) }).strict(),
   z.object({ kind: z.literal("caption.word"), text: text(200) }).strict(),
   z.object({ kind: z.literal("mic.level"), level: z.number().min(0).max(1) }).strict(),
+  z.object({ kind: z.literal("composer.focus") }).strict(),
 ]);
 
 export type HostMessage = z.infer<typeof hostMessageSchema>;

@@ -24,7 +24,7 @@ public class ShellSettingsBuilderTests
         Assert.True(v.Dictation.AutoDetect);
         Assert.Equal("en", v.Dictation.Language);
         Assert.Empty(v.Dictation.Dictionary);
-        Assert.Equal(["Win", "Alt", "Space"], Keys(v.Shortcuts.Talk)); // sub-project B: the live PushToTalk chord, not TalkHotkey
+        Assert.Equal(["Ctrl", "Alt"], Keys(v.Shortcuts.Talk));
         Assert.Equal(HotkeyTrigger.Hold, v.Shortcuts.Talk.Trigger);
         Assert.Equal(["Ctrl"], Keys(v.Shortcuts.Text));
         Assert.Equal(HotkeyTrigger.DoubleTap, v.Shortcuts.Text.Trigger);
@@ -42,11 +42,20 @@ public class ShellSettingsBuilderTests
     }
 
     [Fact]
-    public void TalkShortcutFollowsTheLivePushToTalkChord()
+    public void TalkShortcutShowsTalkHotkeyNotTheLegacyChord()
     {
-        var s = new AppSettings { PushToTalk = new HotkeyChord(Win: false, Alt: false, Control: true, Shift: true, VirtualKey: 0x4B) };
+        var s = new AppSettings
+        {
+            PushToTalk = new HotkeyChord(Win: false, Alt: false, Control: true, Shift: true, VirtualKey: 0x4B),
+            TalkHotkey = new HotkeyBinding(["Ctrl", "Shift", "K"], HotkeyTrigger.Hold),
+            TextHotkey = new HotkeyBinding(["F9"], HotkeyTrigger.DoubleTap),
+        };
         var shown = Build(s).Shortcuts.Talk;
         Assert.Equal(["Ctrl", "Shift", "K"], Keys(shown));
+        var hotkeys = ShellStateBuilder.Build(new ShellInputs(s, [], [], [], ShellPhase.Idle, DateTimeOffset.UtcNow)).Hotkeys;
+        Assert.Equal(["F9"], hotkeys.Text);
+        Assert.Equal(["Ctrl", "Win"], hotkeys.Dictate);
+        Assert.Equal(["Ctrl", "Win"], hotkeys.HandsFree);
         Assert.Equal(HotkeyTrigger.Hold, shown.Trigger);
         Assert.Equal(ShellStateBuilder.Build(new ShellInputs(s, [], [], [], ShellPhase.Idle, DateTimeOffset.UtcNow)).Hotkeys.Talk, shown.Keys);
     }

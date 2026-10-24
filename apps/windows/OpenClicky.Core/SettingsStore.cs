@@ -40,6 +40,11 @@ public static class SettingsStore
             var settings = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions) ?? new AppSettings();
             settings.PushToTalk = HotkeyChord.NormalizeOrDefault(settings.PushToTalk);
             SettingsPatch.Normalize(settings); // repair a hand-edited settings.json
+            if (HotkeyMigration.Apply(settings))
+            {
+                try { Save(settings, path); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { } // migrated in memory; retried on the next load
+            }
             return settings;
         }
         catch

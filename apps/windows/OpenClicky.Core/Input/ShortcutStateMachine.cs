@@ -98,6 +98,8 @@ public sealed class ShortcutStateMachine
     /// <summary>Pending hold, running hold or toggle, swallowed key, recording or queued command: keep ticking
     /// (the host also checks for missed key-ups on each tick).</summary>
     public bool NeedsTick => IsRecording || _queued.Count > 0 || _swallowed.Count > 0 || _slots.Any(s => s.Pending || s.Held || s.On);
+    /// <summary>No shortcut is pending, held or toggled on: <see cref="Bindings"/> can change without ending one.</summary>
+    public bool Idle => !_slots.Any(s => s.Pending || s.Held || s.On);
     public bool IsRecording => _recording is not null;
     public HotkeyBinding? Recorded { get; private set; }
     public bool RecordingTimedOut { get; private set; }

@@ -10,7 +10,9 @@ public enum PhysicalUserActivityCategory
     Keyboard,
 }
 
-public sealed record PhysicalUserActivity(PhysicalUserActivityCategory Category, DateTimeOffset TimestampUtc, bool MayChangeScreen = false);
+/// <param name="MouseButtonDown">A mouse button went down (left, right, middle, X1 or X2).</param>
+public sealed record PhysicalUserActivity(PhysicalUserActivityCategory Category, DateTimeOffset TimestampUtc, bool MayChangeScreen = false,
+    bool MouseButtonDown = false);
 
 /// <summary>Reports hardware keyboard or mouse activity through WM_INPUT without recording input content.</summary>
 public sealed class PhysicalUserActivityMonitor : IDisposable
@@ -64,7 +66,9 @@ public sealed class PhysicalUserActivityMonitor : IDisposable
             ref size, (uint)headerSize);
         if (read == uint.MaxValue || read < headerSize || size < headerSize
             || !RawInputClassifier.TryClassifyHeader(bytes, out var category)) return;
-        UserActivity?.Invoke(new(category, DateTimeOffset.UtcNow, RawInputClassifier.MayChangeScreen(bytes.AsSpan(0, (int)read), category)));
+        var input = bytes.AsSpan(0, (int)read);
+        UserActivity?.Invoke(new(category, DateTimeOffset.UtcNow, RawInputClassifier.MayChangeScreen(input, category),
+            RawInputClassifier.MouseButtonDown(input, category)));
     }
 
     public void Dispose()
@@ -121,6 +125,14 @@ internal static class RawInputClassifier
         return category == PhysicalUserActivityCategory.Mouse
             ? BinaryPrimitives.ReadUInt16LittleEndian(input[(offset + 4)..]) != 0
             : (BinaryPrimitives.ReadUInt16LittleEndian(input[(offset + 2)..]) & 1) == 0;
+    }
+
+    /// <summary>RI_MOUSE_{LEFT,RIGHT,MIDDLE}_BUTTON_DOWN and RI_MOUSE_BUTTON_{4,5}_DOWN in usButtonFlags.</summary>
+    internal static bool MouseButtonDown(ReadOnlySpan<byte> input, PhysicalUserActivityCategory category)
+    {
+        var offset = 8 + IntPtr.Size * 2;
+        return category == PhysicalUserActivityCategory.Mouse && input.Length >= offset + 6
+            && (BinaryPrimitives.ReadUInt16LittleEndian(input[(offset + 4)..]) & 0x155) != 0;
     }
 
     internal static bool TryClassifyHeader(

@@ -8,9 +8,12 @@ import { GearIcon } from "./icons";
 import { TabSwitcher } from "./TabSwitcher";
 
 /** The open panel: tab bar on top, the active tab below. */
-interface PeekProps { state: ShellState; tab: NotchTab; onTab: (tab: NotchTab) => void; draft: string; onDraft: (text: string) => void }
+interface PeekProps {
+  state: ShellState; tab: NotchTab; onTab: (tab: NotchTab) => void; draft: string; onDraft: (text: string) => void;
+  focusComposer?: boolean; onComposerFocused?: () => void;
+}
 
-export function Peek({ state, tab, onTab, draft, onDraft }: PeekProps) {
+export function Peek({ state, tab, onTab, draft, onDraft, focusComposer, onComposerFocused }: PeekProps) {
   return (
     <div className="notch-peek">
       <header className="notch-peek__bar">
@@ -19,7 +22,7 @@ export function Peek({ state, tab, onTab, draft, onDraft }: PeekProps) {
       </header>
       <div className="notch-peek__tab" key={tab}>
         {tab === "home" ? <HomeTab state={state} onOpenSettings={() => onTab("settings")} />
-          : tab === "chat" ? <ChatTab state={state} draft={draft} onDraft={onDraft} />
+          : tab === "chat" ? <ChatTab state={state} draft={draft} onDraft={onDraft} focusComposer={focusComposer} onComposerFocused={onComposerFocused} />
           : tab === "settings" ? <SettingsPanel state={state} />
           : <DocumentTab doc={state.document} onClose={() => onTab("home")} />}
       </div>

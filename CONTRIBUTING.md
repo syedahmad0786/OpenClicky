@@ -12,7 +12,7 @@ Linux/macOS agents can build/test with `EnableWindowsTargeting` (already in `Dir
 
 ## Scope
 
-MVP: Talk + POINT overlay + confirmed Agent, client-only BYO OpenRouter keys, remappable Win+Alt+Space, EXE/MSIX.
+MVP: Talk + POINT overlay + confirmed Agent, client-only BYO OpenRouter keys, remappable hold-Ctrl+Alt talk shortcut, EXE/MSIX.
 
 Clean-room only — MIT Clicky + public HeyClicky UX. No commercial binary reverse-engineering.
 

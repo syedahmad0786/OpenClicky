@@ -21,6 +21,22 @@ public class RawInputClassifierTests
     }
 
     [Theory]
+    [InlineData(PhysicalUserActivityCategory.Mouse, 0x0001, true)]  // left down
+    [InlineData(PhysicalUserActivityCategory.Mouse, 0x0004, true)]  // right down
+    [InlineData(PhysicalUserActivityCategory.Mouse, 0x0100, true)]  // X2 down
+    [InlineData(PhysicalUserActivityCategory.Mouse, 0x0002, false)] // left up
+    [InlineData(PhysicalUserActivityCategory.Mouse, 0x0400, false)] // wheel
+    [InlineData(PhysicalUserActivityCategory.Keyboard, 0x0001, false)]
+    public void OnlyButtonDownCountsAsAClick(PhysicalUserActivityCategory category, ushort flags, bool expected)
+    {
+        var offset = 8 + IntPtr.Size * 2;
+        var input = new byte[offset + 32];
+        BinaryPrimitives.WriteUInt16LittleEndian(input.AsSpan(offset + 4), flags);
+        Assert.Equal(expected, RawInputClassifier.MouseButtonDown(input, category));
+        Assert.False(RawInputClassifier.MouseButtonDown(input.AsSpan(0, offset), category));
+    }
+
+    [Theory]
     [InlineData(0, PhysicalUserActivityCategory.Mouse)]
     [InlineData(1, PhysicalUserActivityCategory.Keyboard)]
     public void HardwareDeviceHeader_IsClassified(uint type, PhysicalUserActivityCategory expected)

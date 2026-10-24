@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type FocusEvent } from "react";
-import { postPage } from "../bridge";
+import { listenToHost, postPage } from "../bridge";
 import { NotchCards } from "../cards/NotchCards";
 import type { NotchTab, ShellState } from "../contract";
 import { JobDeck } from "../deck/JobDeck";
@@ -24,6 +24,10 @@ export function Notch({ state }: { state: ShellState }) {
   const [phase, setPhaseState] = useState<Phase>(state.notch.open ? "open" : "collapsed");
   const [tab, setTab] = useState<NotchTab>(state.notch.tab);
   const [draft, setDraft] = useState(""); // lives here so it survives tab switches and collapsing
+  // Text mode: composer.focus may arrive before the chat tab is on the page, so it waits here until ChatTab takes it.
+  const [focusComposer, setFocusComposer] = useState(false);
+  const composerFocusTaken = useCallback(() => setFocusComposer(false), []);
+  useEffect(() => listenToHost((m) => { if (m.kind === "composer.focus") setFocusComposer(true); }), []);
   const root = useRef<HTMLDivElement>(null);
   const phaseRef = useRef(phase);
   const tabRef = useRef(tab);
@@ -103,7 +107,8 @@ export function Notch({ state }: { state: ShellState }) {
       >
         {/* The panel carries the corner radii, so it is the reported region. */}
         <div className="notch__panel" data-region>
-          {expanded ? <Peek state={state} tab={tab} onTab={changeTab} draft={draft} onDraft={setDraft} /> : null}
+          {expanded ? <Peek state={state} tab={tab} onTab={changeTab} draft={draft} onDraft={setDraft}
+            focusComposer={focusComposer} onComposerFocused={composerFocusTaken} /> : null}
         </div>
         {phase === "open" && tab === "home" ? <JobDeck jobs={state.jobs} featuredId={state.featured?.id ?? null} /> : null}
       </div>

@@ -117,7 +117,8 @@ public class ShellStateBuilderTests
         Assert.Equal("Ahmad", state.User.DisplayName);
         Assert.Equal("#3380FF", state.Accent);
         Assert.Equal(1, state.Status.JobsWorking);
-        Assert.Equal(["Win", "Alt", "Space"], state.Hotkeys.Talk);
+        Assert.Equal(["Ctrl", "Alt"], state.Hotkeys.Talk);
+        Assert.Equal(["Ctrl"], state.Hotkeys.Text);
 
         settings.DisplayName = "Sam";
         Assert.Equal("Sam", ShellStateBuilder.Build(new ShellInputs(settings, [], [], [], ShellPhase.Idle, Now)).User.DisplayName);

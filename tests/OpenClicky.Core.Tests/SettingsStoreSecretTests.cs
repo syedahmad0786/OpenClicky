@@ -50,6 +50,7 @@ public class SettingsStoreSecretTests
         ["DictationLanguage"] = "fr",
         ["SpeechSpeed"] = 1.25,
         ["LocalProxyBaseUrl"] = "http://127.0.0.1:9999",
+        ["ShortcutsVersion"] = 3, // already migrated: Load must not move the custom PushToTalk onto TalkHotkey
     };
 
     private static IEnumerable<PropertyInfo> PersistedProperties() =>

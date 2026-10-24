@@ -111,16 +111,16 @@ public class SettingsServiceTests
     }
 
     [Fact]
-    public void ResetHotkeysRestoresDefaultsAndKeepsTalk()
+    public void ResetHotkeysRestoresAllFourDefaults()
     {
         var rig = new Rig();
         rig.Settings.TextHotkey = new HotkeyBinding(["Alt", "T"], HotkeyTrigger.Hold);
-        var talk = rig.Settings.TalkHotkey;
+        rig.Settings.TalkHotkey = new HotkeyBinding(["Win", "Alt", "Space"], HotkeyTrigger.Hold);
         Assert.True(rig.Service.Change(SettingsActionArgs.ResetHotkeys));
+        Assert.True(rig.Settings.TalkHotkey.SameChord(HotkeyBinding.DefaultTalk));
         Assert.True(rig.Settings.TextHotkey.SameChord(HotkeyBinding.DefaultText));
         Assert.True(rig.Settings.DictateHotkey.SameChord(HotkeyBinding.DefaultDictate));
         Assert.True(rig.Settings.HandsFreeHotkey.SameChord(HotkeyBinding.DefaultHandsFree));
-        Assert.Same(talk, rig.Settings.TalkHotkey);
     }
 
     [Theory]
@@ -275,18 +275,6 @@ public class SettingsServiceTests
     }
 
     [Theory]
-    [InlineData(new[] { 0xA2, 0x5B }, new[] { "Ctrl", "Win" })]
-    [InlineData(new[] { 0x11, 0x12, 0x4B }, new[] { "Ctrl", "Alt", "K" })]
-    [InlineData(new[] { 0xA0, 0x20 }, new[] { "Shift", "Space" })]
-    [InlineData(new[] { 0x7B }, new[] { "F12" })]
-    [InlineData(new[] { 0x35, 0xA5 }, new[] { "5", "Alt" })]
-    public void VirtualKeysMapToShortcutTokens(int[] keys, string[] tokens) =>
-        Assert.Equal(tokens, SettingsActionArgs.KeyTokens(keys));
-
-    [Fact]
-    public void UnsupportedVirtualKeysMapToNull() => Assert.Equal([null], SettingsActionArgs.KeyTokens([0x1B]));
-
-    [Theory]
     [InlineData("talk", "shortcuts.talk")]
     [InlineData("text", "shortcuts.text")]
     [InlineData("dictate", "shortcuts.dictate")]
@@ -296,12 +284,22 @@ public class SettingsServiceTests
     public void HotkeyRowsMapToPatchKeys(string? row, string? key) => Assert.Equal(key, SettingsActionArgs.HotkeyKey(row));
 
     [Fact]
-    public void RecordedChordKeepsTheRowTrigger()
+    public void RecordedBindingBecomesAPatchThatApplies()
     {
         var s = new AppSettings();
-        var value = SettingsActionArgs.RecordedHotkey(s, "handsFree", [0xA2, 0xA0]);
-        Assert.Equal("""{"keys":["Ctrl","Shift"],"trigger":"doubleTap"}""", value!.Value.GetRawText());
-        Assert.Null(SettingsActionArgs.RecordedHotkey(s, "nope", [0xA2]));
+        var value = SettingsActionArgs.HotkeyPatchValue(new HotkeyBinding(["Ctrl", "Shift"], HotkeyTrigger.DoubleTap));
+        Assert.Equal("""{"keys":["Ctrl","Shift"],"trigger":"doubleTap"}""", value.GetRawText());
+        Assert.Equal(PatchResult.Applied, SettingsPatch.TryApply(s, "shortcuts.handsFree", value, out _));
+        Assert.True(s.HandsFreeHotkey.SameChord(new HotkeyBinding(["Ctrl", "Shift"], HotkeyTrigger.DoubleTap)));
+        Assert.Equal(OpenClicky.Core.Input.ShortcutAction.HandsFree, SettingsActionArgs.HotkeyAction("handsFree"));
+        Assert.Null(SettingsActionArgs.HotkeyAction("nope"));
+    }
+
+    [Fact]
+    public void BindingDisplayNameIsNotPersisted()
+    {
+        Assert.Equal("Ctrl+Alt", HotkeyBinding.DefaultTalk.DisplayName);
+        Assert.DoesNotContain("isplayName", JsonSerializer.Serialize(HotkeyBinding.DefaultTalk));
     }
 
     [Fact]

@@ -88,7 +88,6 @@ public sealed class AppSettings
     public string DictationLanguage { get; set; } = "en";
     /// <summary>At most 50 words of 40 characters, de-duplicated ignoring case.</summary>
     public List<string> DictionaryWords { get; set; } = [];
-    /// <summary>Shown on the settings page; the push-to-talk monitor still follows <see cref="PushToTalk"/> until sub-project B.</summary>
     public HotkeyBinding TalkHotkey { get; set; } = HotkeyBinding.DefaultTalk;
     public HotkeyBinding TextHotkey { get; set; } = HotkeyBinding.DefaultText;
     public HotkeyBinding DictateHotkey { get; set; } = HotkeyBinding.DefaultDictate;

@@ -114,6 +114,14 @@ public sealed class ShellController : IDisposable
         catch (Exception ex) when (ex is not OutOfMemoryException) { _host.Trace("shell_level_error=" + ex.GetType().Name); }
     }
 
+    /// <summary>Text mode: asks the page to focus the chat field (the page holds it until the Chat tab is shown).</summary>
+    public void PostComposerFocus()
+    {
+        if (_surface is null) return;
+        try { _surface.Post("""{"kind":"composer.focus"}"""); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { _host.Trace("shell_focus_error=" + ex.GetType().Name); }
+    }
+
     public void SetUpdate(ShellUpdate update)
     {
         _update = update;

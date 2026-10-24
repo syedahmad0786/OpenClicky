@@ -12,7 +12,7 @@ Windows 11 x64. Extract the complete portable folder and open **OpenClicky.exe**
 
 - Connect through **Settings → Connection → ChatGPT plan → Continue with ChatGPT**. Complete official sign-in yourself and choose a model available to your account.
 - Select and test your microphone under **Voice & shortcut**, then download local English Whisper.
-- Click the companion once for continuous conversation. Click again to stop; hold **Win+Alt+Space** for one request.
+- Click the companion once for continuous conversation. Click again to stop; hold **Ctrl+Alt** for one request (double-tap **Ctrl** to type, hold **Ctrl+Win** to dictate).
 - Ask **“Open Calculator”**, **“Show me how to…”**, or request a chart in the same Chat.
 - Use **Dictate into app**, **Clipboard shelf**, **Memory**, **Notes** and **Tasks** from that workspace.
 

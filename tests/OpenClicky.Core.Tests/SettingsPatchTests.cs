@@ -115,8 +115,8 @@ public class SettingsPatchTests
         var s = new AppSettings();
         var before = Snapshot(s);
 
-        // sub-project B: Talk is the live PushToTalk chord (Win+Alt+Space, hold); same keys in any order and the same trigger conflict.
-        Assert.Equal(PatchResult.Rejected, Apply(s, "shortcuts.text", "{\"keys\":[\"space\",\"win\",\"alt\"],\"trigger\":\"hold\"}", out var error));
+        // Talk defaults to hold Ctrl+Alt; same keys in any order and the same trigger conflict.
+        Assert.Equal(PatchResult.Rejected, Apply(s, "shortcuts.text", "{\"keys\":[\"alt\",\"ctrl\"],\"trigger\":\"hold\"}", out var error));
         Assert.Contains("Talk", error);
         Assert.Equal(before, Snapshot(s));
 
@@ -124,7 +124,7 @@ public class SettingsPatchTests
         Assert.Equal(PatchResult.Rejected, Apply(s, "shortcuts.handsFree", "{\"keys\":[\"Win\",\"Ctrl\"],\"trigger\":\"hold\"}", out error));
         Assert.Contains("Dictate", error);
         Assert.Equal(PatchResult.Applied, Apply(s, "shortcuts.dictate", "{\"keys\":[\"Ctrl\",\"Win\"],\"trigger\":\"hold\"}", out error));
-        Assert.Equal(PatchResult.Applied, Apply(s, "shortcuts.text", "{\"keys\":[\"Ctrl\",\"Alt\"],\"trigger\":\"hold\"}", out error));
+        Assert.Equal(PatchResult.Applied, Apply(s, "shortcuts.text", "{\"keys\":[\"Win\",\"Alt\",\"Space\"],\"trigger\":\"hold\"}", out error));
     }
 
     [Fact]
@@ -140,13 +140,14 @@ public class SettingsPatchTests
     }
 
     [Fact]
-    public void TalkShortcutIsReadOnlyUntilSubProjectB()
+    public void TalkShortcutIsEditable()
     {
         var s = new AppSettings();
-        var before = Snapshot(s);
-        Assert.Equal(PatchResult.Rejected, Apply(s, "shortcuts.talk", "{\"keys\":[\"Ctrl\",\"Shift\"],\"trigger\":\"hold\"}", out var error));
-        Assert.Equal("Changing this shortcut arrives with the new shortcuts update.", error);
-        Assert.Equal(before, Snapshot(s));
+        Assert.Equal(PatchResult.Applied, Apply(s, "shortcuts.talk", "{\"keys\":[\"Shift\",\"Ctrl\"],\"trigger\":\"hold\"}", out _));
+        Assert.Equal(["Ctrl", "Shift"], s.TalkHotkey.Keys);
+        Assert.Equal(HotkeyChord.Default, s.PushToTalk); // the legacy chord is no longer what talk follows
+        Assert.Equal(PatchResult.Rejected, Apply(s, "shortcuts.talk", "{\"keys\":[\"Win\",\"Ctrl\"],\"trigger\":\"hold\"}", out var error));
+        Assert.Contains("Dictate", error);
     }
 
     [Fact]

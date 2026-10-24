@@ -16,6 +16,8 @@ public sealed class TalkOrchestrator : IDisposable
     private readonly List<(string user, string assistant)> _history = new();
     private readonly SemaphoreSlim _turnGate = new(1, 1);
     private CancellationTokenSource? _turnCts;
+    /// <summary>The turn the talk shortcut's last press started (null when the press joined one already listening).</summary>
+    private CancellationTokenSource? _shortcutTurn;
     private CompanionVoiceState _state;
     private bool _disposed;
     private ILiveSttClient? _liveStt;
@@ -337,8 +339,25 @@ public sealed class TalkOrchestrator : IDisposable
         WalkthroughChanged?.Invoke(Walkthrough.View);
     }
 
-    private void OnPressed(object? sender, EventArgs e) => BeginListening();
-    private async void OnReleased(object? sender, EventArgs e) => await EndListeningAsync();
+    private void OnPressed(object? sender, EventArgs e)
+    {
+        var before = _turnCts;
+        BeginListening();
+        _shortcutTurn = ReferenceEquals(_turnCts, before) ? null : _turnCts;
+    }
+
+    /// <summary>A cancelled release (a tap, another key, Esc) drops the turn this press started without a word;
+    /// a conversation that was running carries on listening.</summary>
+    private async void OnReleased(object? sender, EventArgs e)
+    {
+        var started = Interlocked.Exchange(ref _shortcutTurn, null);
+        if (e is ShortcutEndedEventArgs { Cancelled: true })
+        {
+            if (started is not null && ReferenceEquals(_turnCts, started)) CancelCurrentTurn();
+            return;
+        }
+        await EndListeningAsync();
+    }
     private async void OnUtteranceEnded() => await EndListeningAsync();
     private void OnListeningFailed(Exception error)
     {

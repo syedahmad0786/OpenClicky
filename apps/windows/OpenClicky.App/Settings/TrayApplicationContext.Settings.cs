@@ -14,14 +14,12 @@ namespace OpenClicky.App;
 /// <summary>The notch settings page: settings.section / settings.patch / settings.action from <see cref="ShellController"/>.</summary>
 internal sealed partial class TrayApplicationContext
 {
-    private const string TalkLocked = "Changing this shortcut arrives with the new shortcuts update.";
     private SettingsService? _settingsService;
     private SettingsRuntimeProbe? _settingsProbe;
     /// <summary>Last connector.test outcome per key; shown until the connector is tested again or removed.</summary>
     private readonly Dictionary<string, (ConnectorStatus Status, int? Tools)> _connectorChecks = new(StringComparer.Ordinal);
     private NAudioMicrophoneRecorder? _micTest;
     private System.Windows.Forms.Timer? _micTestTimer;
-    private HotkeyRecorder? _hotkeyRecorder;
     private bool _accountBusy, _whisperBusy;
     /// <summary>One native modal at a time from the notch: a double click must not stack warnings, prompts or pickers.</summary>
     private bool _settingsModalOpen;
@@ -106,6 +104,7 @@ internal sealed partial class TrayApplicationContext
                 break;
             case "microphone.deviceId": StopMicTest(); RefreshConnection(); break; // the recorders read the device id on each start
             case var account when account.StartsWith("account.", StringComparison.Ordinal): RefreshConnection(); break;
+            case var shortcut when shortcut.StartsWith("shortcuts.", StringComparison.Ordinal): ApplyShortcutBindings(); break;
         }
     }
 
@@ -161,7 +160,7 @@ internal sealed partial class TrayApplicationContext
                 break;
             case "recordHotkey": RecordHotkey(arg); break;
             case "resetHotkeys":
-                if (NotchSettings.Change(SettingsActionArgs.ResetHotkeys)) _shell?.AddToast("Shortcuts reset. Talk keeps its current shortcut until the new shortcuts update.");
+                if (NotchSettings.Change(SettingsActionArgs.ResetHotkeys)) { ApplyShortcutBindings(); _shell?.AddToast("Shortcuts reset."); }
                 break;
             case "openLogs": Launch(new ProcessStartInfo("explorer.exe", $"\"{Path.GetDirectoryName(DebugLog.LogPath)}\"")); break;
             default: Log("settings: action not handled: " + action); break;
@@ -454,22 +453,29 @@ internal sealed partial class TrayApplicationContext
         RequestShellPush();
     }
 
-    /// <summary>Records the next chord for a shortcut row (7 s) and applies it as a settings.patch, so conflicts toast.</summary>
+    /// <summary>
+    /// Records the next chord for a shortcut row through the shortcut monitor (7 s; no shortcut fires while it records)
+    /// and applies it as a settings.patch, so validation and conflicts toast. A paused monitor listens just for this.
+    /// </summary>
     private void RecordHotkey(string? row)
     {
-        if (row == "talk") { _shell?.AddToast(TalkLocked); RequestShellPush(); return; }
-        if (SettingsActionArgs.HotkeyKey(row) is not { } key) return;
-        _hotkeyRecorder?.Dispose();
-        _hotkeyRecorder = new HotkeyRecorder(TimeSpan.FromSeconds(7), keys =>
+        if (SettingsActionArgs.HotkeyKey(row) is not { } key || SettingsActionArgs.HotkeyAction(row) is not { } action) return;
+        var resume = _settings.Paused;
+        if (resume)
         {
-            _hotkeyRecorder = null;
-            if (keys is null || SettingsActionArgs.RecordedHotkey(_settings, row, keys) is not { } value)
+            try { _hotkey.Start(); }
+            catch (InvalidOperationException ex) { Log("hotkey_record_error=" + ex.Message); _shell?.AddToast("The keyboard could not be watched for a new shortcut."); RequestShellPush(); return; }
+        }
+        _hotkey.Record(action, binding =>
+        {
+            if (resume && _settings.Paused) _hotkey.Stop();
+            if (binding is null)
             {
                 _shell?.AddToast("No shortcut recorded.");
                 RequestShellPush();
                 return;
             }
-            NotchSettings.Patch(key, value);
+            NotchSettings.Patch(key, SettingsActionArgs.HotkeyPatchValue(binding));
         });
     }
 
@@ -477,7 +483,6 @@ internal sealed partial class TrayApplicationContext
     {
         StopMicTest();
         _tts.Stop();
-        _hotkeyRecorder?.Dispose();
         _settingsProbe?.Dispose();
     }
 }

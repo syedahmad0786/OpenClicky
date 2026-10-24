@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using OpenClicky.Core.Input;
 using OpenClicky.Core.Shell;
 
 namespace OpenClicky.Core.Settings;
@@ -192,19 +193,6 @@ public static class SettingsActionArgs
         }).ToList();
     }
 
-    /// <summary>Virtual-key codes as shortcut tokens (left/right modifiers fold together); null for an unsupported key.</summary>
-    public static IReadOnlyList<string?> KeyTokens(IEnumerable<int> virtualKeys) => virtualKeys.Select(vk => vk switch
-    {
-        0x11 or 0xA2 or 0xA3 => "Ctrl",
-        0x12 or 0xA4 or 0xA5 => "Alt",
-        0x10 or 0xA0 or 0xA1 => "Shift",
-        0x5B or 0x5C => "Win",
-        0x20 => "Space",
-        >= 0x30 and <= 0x39 or >= 0x41 and <= 0x5A => ((char)vk).ToString(),
-        >= 0x70 and <= 0x7B => "F" + (vk - 0x6F),
-        _ => (string?)null,
-    }).ToList();
-
     public static string? HotkeyKey(string? row) => row switch
     {
         "talk" => "shortcuts.talk",
@@ -214,25 +202,23 @@ public static class SettingsActionArgs
         _ => null,
     };
 
-    /// <summary>The settings.patch value for a recorded chord on <paramref name="row"/>, keeping that row's trigger; null for an unknown row.</summary>
-    public static JsonElement? RecordedHotkey(AppSettings s, string? row, IEnumerable<int> virtualKeys)
+    public static ShortcutAction? HotkeyAction(string? row) => row switch
     {
-        HotkeyBinding? current = row switch
-        {
-            "talk" => HotkeyBinding.LiveTalk(s),
-            "text" => HotkeyBinding.OrDefault(s.TextHotkey, HotkeyBinding.DefaultText),
-            "dictate" => HotkeyBinding.OrDefault(s.DictateHotkey, HotkeyBinding.DefaultDictate),
-            "handsFree" => HotkeyBinding.OrDefault(s.HandsFreeHotkey, HotkeyBinding.DefaultHandsFree),
-            _ => null,
-        };
-        if (current is null) return null;
-        var trigger = current.Trigger == HotkeyTrigger.Hold ? "hold" : "doubleTap";
-        return JsonSerializer.SerializeToElement(new { keys = KeyTokens(virtualKeys), trigger });
-    }
+        "talk" => ShortcutAction.Talk,
+        "text" => ShortcutAction.Text,
+        "dictate" => ShortcutAction.Dictate,
+        "handsFree" => ShortcutAction.HandsFree,
+        _ => null,
+    };
 
-    /// <summary>Text, dictate and hands-free back to their defaults. Talk stays the live chord until sub-project B.</summary>
+    /// <summary>The settings.patch value for a recorded binding, so it goes through the same validation and conflict check.</summary>
+    public static JsonElement HotkeyPatchValue(HotkeyBinding binding) =>
+        JsonSerializer.SerializeToElement(new { keys = binding.Keys, trigger = binding.Trigger == HotkeyTrigger.Hold ? "hold" : "doubleTap" });
+
+    /// <summary>All four shortcuts back to their defaults.</summary>
     public static void ResetHotkeys(AppSettings s)
     {
+        s.TalkHotkey = HotkeyBinding.DefaultTalk;
         s.TextHotkey = HotkeyBinding.DefaultText;
         s.DictateHotkey = HotkeyBinding.DefaultDictate;
         s.HandsFreeHotkey = HotkeyBinding.DefaultHandsFree;

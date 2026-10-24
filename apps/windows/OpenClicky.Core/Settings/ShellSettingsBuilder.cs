@@ -58,7 +58,7 @@ public static class ShellSettingsBuilder
             new SettingsMicrophone(micId, mics, runtime.Whisper, runtime.WhisperProgress),
             new SettingsDictation(s.DictationAutoDetect, SettingsCatalog.Languages.Any(l => l.Code == s.DictationLanguage) ? s.DictationLanguage : "en", SettingsCatalog.Languages, s.DictionaryWords ?? []),
             new SettingsShortcuts(
-                HotkeyBinding.LiveTalk(s).ToView(), // sub-project B: show s.TalkHotkey once the monitor follows it
+                HotkeyBinding.OrDefault(s.TalkHotkey, HotkeyBinding.DefaultTalk).ToView(),
                 HotkeyBinding.OrDefault(s.TextHotkey, HotkeyBinding.DefaultText).ToView(),
                 HotkeyBinding.OrDefault(s.DictateHotkey, HotkeyBinding.DefaultDictate).ToView(),
                 HotkeyBinding.OrDefault(s.HandsFreeHotkey, HotkeyBinding.DefaultHandsFree).ToView()),

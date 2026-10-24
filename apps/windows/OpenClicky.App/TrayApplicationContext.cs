@@ -3,6 +3,7 @@ using OpenClicky.Capture;
 using OpenClicky.App.Speech;
 using OpenClicky.Core;
 using OpenClicky.Core.Agent;
+using OpenClicky.Core.Input;
 using OpenClicky.Input;
 using OpenClicky.Overlay;
 using OpenClicky.Providers;
@@ -15,7 +16,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
     private readonly NotifyIcon _tray;
     private AppSettings _settings;
     private readonly ISecretStore _secrets = new WindowsCredentialSecretStore();
-    private readonly PushToTalkHotkeyMonitor _hotkey;
+    private readonly ShortcutMonitor _hotkey;
     private readonly PhysicalUserActivityMonitor _physicalInput = new();
     private readonly BuddyOverlayController _overlay;
     private readonly TalkOrchestrator _talk;
@@ -87,7 +88,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
 
         _settings = LoadSettingsWithSecrets();
         IgnoreLegacyFixtureTranscript();
-        _hotkey = new PushToTalkHotkeyMonitor(_settings.PushToTalk);
+        _hotkey = new ShortcutMonitor(ShortcutBindings.From(_settings));
         _overlay = new BuddyOverlayController();
         _capture = new WgcScreenCaptureService(Log, () => _settings.ForceGdiCapture);
         _mic = CreateMic();
@@ -237,15 +238,20 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         _routineTimer.Tick += (_, _) => { RunDueRoutine(); RequestShellPush(); };
         _routineTimer.Start();
         _home.Disposed += (_, _) => _routineTimer.Dispose();
-        _hotkey.Cancelled += (_, _) => Stop();
+        // Esc (never swallowed) stops OpenClicky only while it is doing something; a cancelled shortcut ends itself.
+        _hotkey.EscapePressed += (_, _) => { if (IsBusy) Stop(); };
         _hotkey.Pressed += (_, _) => _submissionCts?.Cancel();
         _hotkey.Pressed += (_, _) => PauseTask();
+        _hotkey.TextMode += (_, _) => OpenTextMode();
+        _hotkey.DictateStarted += (_, _) => BeginShortcutDictation(handsFree: false);
+        _hotkey.DictateEnded += (_, e) => EndShortcutDictation(e.Cancelled);
+        _hotkey.HandsFreeToggled += (_, _) => ToggleHandsFreeDictation();
 
         _tray = new NotifyIcon
         {
             Icon = AppTheme.Icon,
             Visible = true,
-            Text = $"OpenClicky — hold {_settings.PushToTalk.DisplayName}",
+            Text = $"OpenClicky — hold {TalkShortcutName}",
         };
 
         _tray.ContextMenuStrip = BuildTrayMenu();
@@ -253,7 +259,10 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         _tray.DoubleClick += (_, _) => ShowHome();
         WireShellEvents();
 
+        // _home's handle exists and the WinForms context is current: the monitor captures it in Start, so shortcut
+        // handlers run from the message loop, never inside the keyboard hook.
         _talk.Start();
+        LogShortcuts("shortcut_monitor_started");
         if (_settings.Paused) _hotkey.Stop();
         if (LocalWhisperModel.IsAvailable) _ = Task.Run(async () =>
         {
@@ -263,6 +272,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         });
         _physicalInput.UserActivity += activity =>
         {
+            if (activity.MouseButtonDown) _hotkey.NotifyMouseButton(); // Ctrl+click is not a Ctrl tap
             PauseTaskUnlessConfirming();
             if (activity.MayChangeScreen && !_confirm.IsDialogOpen
                 && _talk.State is CompanionVoiceState.Processing or CompanionVoiceState.Pointing or CompanionVoiceState.Responding)
@@ -272,7 +282,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         catch (Exception ex) { Log("takeover_monitor_error=" + ex.GetType().Name); ClassicMessage("Automatic pause on physical input is unavailable. Use Stop before taking over a running task."); }
         _companionDock.Show();
         if (_settings.AwarenessEnabled) _guideTimer.Start();
-        Log($"tray ready — hold {_settings.PushToTalk.DisplayName}");
+        Log($"tray ready — hold {TalkShortcutName}");
         if (string.IsNullOrWhiteSpace(_settings.OpenRouterApiKey)
             && !ProviderFactory.IsChatGptSignedIn(_secrets))
         {
@@ -1212,6 +1222,77 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         _home.SetStatus("Dictation closed · microphone stopped");
     }
 
+    private string TalkShortcutName => ShortcutBindings.From(_settings).Talk.DisplayName;
+
+    /// <summary>Esc stops only what is running: a task, a voice turn or its speech, dictation, a conversation or a walkthrough.</summary>
+    private bool IsBusy => _taskCts is not null || _submissionCts is not null || _dictationActive || _talk.ConversationActive
+        || _talk.State != CompanionVoiceState.Idle || _talk.Walkthrough.View.Active;
+
+    /// <summary>After a settings change: the monitor applies new bindings once no shortcut is held.</summary>
+    private void ApplyShortcutBindings()
+    {
+        _hotkey.Bindings = ShortcutBindings.From(_settings);
+        _tray.Text = $"OpenClicky — hold {TalkShortcutName}";
+        _home.RefreshShortcut();
+        RequestShellPush();
+        LogShortcuts("shortcut_bindings");
+    }
+
+    private void LogShortcuts(string what)
+    {
+        var b = _hotkey.Bindings;
+        static string Name(Core.Settings.HotkeyBinding h) => h.DisplayName + (h.Trigger == Core.Shell.HotkeyTrigger.Hold ? " (hold)" : " (double-tap)");
+        Log($"{what} talk={Name(b.Talk)} text={Name(b.Text)} dictate={Name(b.Dictate)} handsFree={Name(b.HandsFree)}");
+    }
+
+    /// <summary>Text mode shortcut: the notch Chat tab with its field focused (the classic window without the shell).</summary>
+    private void OpenTextMode()
+    {
+        if (_shell is not { IsActive: true }) { ShowClassic(); return; }
+        _shell.OpenNotch(Core.Shell.NotchTab.Chat);
+        _shellSurface?.Window.ActivateForInput();
+        _shell.PostComposerFocus();
+    }
+
+    private bool _dictationHeld;
+
+    /// <summary>Dictate shortcut down (or hands-free on): dictate into the focused field; each phrase is inserted as it ends.</summary>
+    private void BeginShortcutDictation(bool handsFree)
+    {
+        if (_dictationActive) return;
+        BeginDictationAtCurrentTarget();
+        if (!_dictationActive) return;
+        _dictationHeld = !handsFree;
+    }
+
+    /// <summary>Dictate shortcut up: a tap or Esc discards; otherwise the last phrase is inserted, then dictation closes.</summary>
+    private void EndShortcutDictation(bool cancelled)
+    {
+        if (!_dictationHeld) return;
+        _dictationHeld = false;
+        if (cancelled) { if (_dictationActive) CancelDictation(); return; }
+        _ = FinishShortcutDictationAsync();
+    }
+
+    private void ToggleHandsFreeDictation()
+    {
+        if (_dictationHeld) return; // the hold owns this dictation; its release ends it
+        if (_dictationActive) _ = FinishShortcutDictationAsync();
+        else BeginShortcutDictation(handsFree: true);
+    }
+
+    private async Task FinishShortcutDictationAsync()
+    {
+        var target = _dictationTarget;
+        _talk.StopConversationAfterCurrentTurn(); // no new phrase after this one
+        if (_talk.State == CompanionVoiceState.Listening) await _talk.EndListeningAsync();
+        // ponytail: polls for the in-flight insert to finish (max 30 s); a TalkOrchestrator "turn finished" task if this needs precision.
+        for (var waited = 0; _talk.State != CompanionVoiceState.Idle && waited < 30_000; waited += 50) await Task.Delay(50);
+        // A failed insert switched auto-insert off and left the draft in the classic window for review: keep that open.
+        if (_dictationActive && ReferenceEquals(target, _dictationTarget) && _dictationAutoInsert && _talk.State == CompanionVoiceState.Idle)
+            CancelDictation();
+    }
+
     private sealed class SteeredPlanner(IAgentPlanner planner, Func<string> steering) : IAgentPlanner
     {
         public Task<AgentPlanStep> NextStepAsync(string task, IReadOnlyList<ScreenCaptureResult> screens,
@@ -1309,15 +1390,11 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         _talk.Cancel();
         IgnoreLegacyFixtureTranscript();
         _tts.Enabled = _settings.SpeakReplies;
-        // LL hook reads Chord on each key event — assign is enough (no Unhook/re-hook).
-        _hotkey.Chord = HotkeyChord.NormalizeOrDefault(_settings.PushToTalk);
-        _settings.PushToTalk = _hotkey.Chord;
-        _tray.Text = $"OpenClicky — hold {_settings.PushToTalk.DisplayName}";
-        _home.RefreshShortcut();
+        ApplyShortcutBindings();
         RefreshConnection();
         ResetShellChat();
         Log(
-            $"settings_applied hotkey={_settings.PushToTalk.DisplayName} provider={_settings.AuthProvider} " +
+            $"settings_applied hotkey={TalkShortcutName} provider={_settings.AuthProvider} " +
             $"openrouter_key={(string.IsNullOrEmpty(_settings.OpenRouterApiKey) ? "missing" : "set")} " +
             $"chatgpt={(ProviderFactory.IsChatGptSignedIn(_secrets) ? "signed-in" : "out")}");
     }

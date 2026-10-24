@@ -291,6 +291,16 @@ public class ShellControllerTests
     }
 
     [Fact]
+    public async Task TextModeOpensChatAndAsksThePageToFocusTheField()
+    {
+        var (controller, _, surface) = await Started();
+        controller.OpenNotch(NotchTab.Chat);
+        controller.PostComposerFocus();
+        Assert.Equal(new ShellNotch(NotchTab.Chat, true, ShellContract.DefaultSection), controller.Notch);
+        Assert.Equal(["""{"kind":"composer.focus"}"""], surface.Posted.Where(p => p.Contains("composer.focus")));
+    }
+
+    [Fact]
     public async Task PostsMicLevelsClamped()
     {
         var (controller, _, surface) = await Started();

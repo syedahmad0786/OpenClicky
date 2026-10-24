@@ -11,8 +11,6 @@ internal sealed class SettingsForm : Form
     private readonly AppSettings _settings;
     private readonly ISecretStore _secrets;
     private readonly Action _onApplied;
-    private readonly TextBox _hotkeyBox;
-    private readonly Label _hotkeyHint;
     private readonly TextBox _proxyBox;
     private readonly CheckBox _useProxy;
     private readonly RadioButton _providerOpenRouter;
@@ -34,7 +32,6 @@ internal sealed class SettingsForm : Form
     private readonly TextBox _denyExtraBox;
     private readonly TextBox _logBox;
     private readonly Action? _clearHistory;
-    private HotkeyChord _draft;
     private bool _signInBusy;
     private readonly CheckBox _windowsSpeech;
     private readonly CheckBox _speakReplies;
@@ -53,7 +50,6 @@ internal sealed class SettingsForm : Form
         _secrets = secrets;
         _onApplied = onApplied;
         _clearHistory = onClearHistory;
-        _draft = settings.PushToTalk;
         _settings.EnsureChatGptHostId();
         Text = "OpenClicky Settings";
         AppTheme.Apply(this);
@@ -166,14 +162,7 @@ internal sealed class SettingsForm : Form
             finally { if (!IsDisposed) downloadVoice.Enabled = true; }
         };
         voice.Controls.Add(downloadVoice);
-        _hotkeyBox = Field(voice, "Shortcut · click the field and press your combination", _draft.DisplayName);
-        _hotkeyBox.ReadOnly = true;
-        _hotkeyBox.KeyDown += HotkeyBoxOnKeyDown;
-        var reset = AppTheme.Button("Reset to Win+Alt+Space");
-        reset.Click += (_, _) => { _draft = HotkeyChord.Default; _hotkeyBox.Text = _draft.DisplayName; SetHotkeyHint(null); };
-        voice.Controls.Add(reset);
-        _hotkeyHint = AppTheme.Label("Default: Win+Alt+Space. Use a modifier and a key.", 9);
-        voice.Controls.Add(_hotkeyHint);
+        voice.Controls.Add(AppTheme.Label("Change shortcuts in Settings → Shortcuts", 9));
         _windowsSpeech = new CheckBox { Text = "Use local speech recognition", Checked = settings.UseWindowsSpeech, AutoSize = true, Margin = new Padding(0,12,0,10) };
         voice.Controls.Add(_windowsSpeech);
         string languages;
@@ -451,9 +440,6 @@ internal sealed class SettingsForm : Form
     /// <summary>Every control from the live settings; the model lists from the session cache (empty until fetched).</summary>
     private void LoadFromSettings()
     {
-        _draft = HotkeyChord.NormalizeOrDefault(_settings.PushToTalk);
-        _hotkeyBox.Text = _draft.DisplayName;
-        SetHotkeyHint(null);
         _providerChatGpt.Checked = _settings.AuthProvider == AuthProvider.ChatGPT;
         _providerOpenRouter.Checked = !_providerChatGpt.Checked;
         _apiKeyBox.Text = "";
@@ -498,7 +484,6 @@ internal sealed class SettingsForm : Form
 
     private void ApplyFormToSettings(bool persistSecrets)
     {
-        _settings.PushToTalk = _draft;
         _settings.AuthProvider = _providerChatGpt.Checked ? AuthProvider.ChatGPT : AuthProvider.OpenRouter;
         // Only a newly typed key is saved; empty keeps the saved key (Remove key deletes it).
         if (SettingsActionArgs.TypedSecret(_apiKeyBox.Text) is { } key && _providerOpenRouter.Checked)
@@ -531,18 +516,6 @@ internal sealed class SettingsForm : Form
     private void Save()
     {
         StopMicrophoneTest();
-        if (!_draft.TryValidate(out var hotkeyError))
-        {
-            SetHotkeyHint(hotkeyError, isError: true);
-            MessageBox.Show(
-                hotkeyError ?? "Invalid hotkey.",
-                Text,
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Warning);
-            _hotkeyBox.Focus();
-            return;
-        }
-
         try
         {
             if (_useProxy.Checked) ProviderFactory.ResolveBaseUrl(new AppSettings { UseLocalProxy = true, LocalProxyBaseUrl = _proxyBox.Text });
@@ -550,11 +523,10 @@ internal sealed class SettingsForm : Form
             SettingsStore.Save(_settings);
             LoadFromSettings(); // the typed key is now saved: clear the box and show "Saved"
             _onApplied();
-            SetHotkeyHint($"Active now: {_draft.DisplayName}.", isError: false);
             MessageBox.Show(
             _settings.AuthProvider == AuthProvider.ChatGPT && !ProviderFactory.IsChatGptSignedIn(_secrets)
                 ? "Saved. Click Continue with ChatGPT to connect your account."
-                : $"Saved. Push-to-talk is now {_draft.DisplayName}.",
+                : "Saved.",
             Text,
             MessageBoxButtons.OK,
             MessageBoxIcon.Information);
@@ -570,56 +542,4 @@ internal sealed class SettingsForm : Form
         if (e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; Hide(); }
         base.OnFormClosing(e);
     }
-
-    private void HotkeyBoxOnKeyDown(object? sender, KeyEventArgs e)
-    {
-        e.SuppressKeyPress = true;
-        e.Handled = true;
-        if (e.KeyCode is Keys.ControlKey or Keys.ShiftKey or Keys.Menu or Keys.LWin or Keys.RWin)
-        {
-            return;
-        }
-
-        // Esc clears the draft so Save can reject empty bindings with clear UX.
-        if (e.KeyCode == Keys.Escape && !e.Alt && !e.Control && !e.Shift)
-        {
-            const int vkLWinClear = 0x5B;
-            const int vkRWinClear = 0x5C;
-            var winHeld =
-                (GetAsyncKeyState(vkLWinClear) & 0x8000) != 0
-                || (GetAsyncKeyState(vkRWinClear) & 0x8000) != 0;
-            if (!winHeld)
-            {
-                _draft = new HotkeyChord(false, false, false, false, 0);
-                _hotkeyBox.Text = _draft.DisplayName;
-                SetHotkeyHint("Hotkey cleared. Press a shortcut or Reset default before Save.", isError: true);
-                return;
-            }
-        }
-
-        const int vkLWin = 0x5B;
-        const int vkRWin = 0x5C;
-        var winDown = (GetAsyncKeyState(vkLWin) & 0x8000) != 0 || (GetAsyncKeyState(vkRWin) & 0x8000) != 0;
-        var candidate = new HotkeyChord(winDown, e.Alt, e.Control, e.Shift, e.KeyValue);
-        if (!candidate.TryValidate(out var error))
-        {
-            SetHotkeyHint(error, isError: true);
-            return;
-        }
-
-        _draft = candidate;
-        _hotkeyBox.Text = _draft.DisplayName;
-        SetHotkeyHint($"Will use {_draft.DisplayName} after Save.", isError: false);
-    }
-
-    private void SetHotkeyHint(string? message, bool isError = false)
-    {
-        _hotkeyHint.Text = string.IsNullOrWhiteSpace(message)
-            ? "Default: Win+Alt+Space. Needs a modifier + key. Esc clears."
-            : message;
-        _hotkeyHint.ForeColor = isError ? Color.Firebrick : SystemColors.GrayText;
-    }
-
-    [System.Runtime.InteropServices.DllImport("user32.dll")]
-    private static extern short GetAsyncKeyState(int vKey);
 }

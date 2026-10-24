@@ -6,7 +6,7 @@ Open **OpenClicky.exe** from the complete extracted folder on Windows 11 x64. Ke
 
 1. Open **Settings → Connection → ChatGPT plan → Continue with ChatGPT**. Complete the official sign-in yourself, enable plan usage, and choose an available model.
 2. In **Settings → Voice & shortcut**, select your actual microphone, save it, and use **Test microphone**. Download the local English Whisper model once.
-3. Left-click the small companion once, or click **Start conversation**. Speak, pause, and speak again after its reply. Click again to stop. **Win+Alt+Space** gives a single hold-to-talk request.
+3. Left-click the small companion once, or click **Start conversation**. Speak, pause, and speak again after its reply. Click again to stop. Hold **Ctrl+Alt** for a single hold-to-talk request.
 4. Type in the same Chat if voice is unavailable. Screen requests give you three seconds to bring the target app forward. If OpenClicky still has focus, bring the intended app forward and retry when prompted; its own window is not a screen target. Local note and task-control commands respond immediately. Self-contained chart/calculator/diagram/3D requests stay in the workspace without capturing a screen.
 
 If the saved microphone is disconnected, reconnect it or explicitly choose another. OpenClicky does not silently change your device. Live transcription and replies have measurable delays; the three-second response target is not yet met on this laptop.
