@@ -44,9 +44,16 @@ internal static class Program
             return 12;
         }
 
+        var messageFailure = ValidateMessageBubble();
+        if (messageFailure is not null)
+        {
+            Console.Error.WriteLine("FAIL: message bubble " + messageFailure);
+            return 13;
+        }
+
         if (args.Contains("--geometry-only", StringComparer.OrdinalIgnoreCase))
         {
-            Console.WriteLine("PASS: region and response bubble geometry");
+            Console.WriteLine("PASS: region, response bubble and message bubble geometry");
             return 0;
         }
 
@@ -192,6 +199,17 @@ internal static class Program
             return 4;
         }
 
+        // The real destination: the cursor window Windows shows must cover the POINT target.
+        if (!NativeMethods.GetWindowRect(overlay.WindowHandle, out var cursorRect)
+            || cursorRect.Left > targetX || cursorRect.Top > targetY || cursorRect.Right <= targetX || cursorRect.Bottom <= targetY)
+        {
+            Console.Error.WriteLine(
+                $"FAIL: cursor window [{cursorRect.Left},{cursorRect.Top},{cursorRect.Right},{cursorRect.Bottom}] does not contain ({targetX},{targetY})");
+            return 5;
+        }
+
+        Console.WriteLine($"cursor_window=[{cursorRect.Left},{cursorRect.Top},{cursorRect.Right - cursorRect.Left}x{cursorRect.Bottom - cursorRect.Top}]");
+
         if (!overlay.TryGetBuddyVirtualPoint(out var buddyX, out var buddyY))
         {
             Console.Error.WriteLine("FAIL: TryGetBuddyVirtualPoint returned false after settle");
@@ -228,6 +246,24 @@ internal static class Program
         }
 
         return 0;
+    }
+
+    /// <summary>Six lines at most with "…" when cut, never wider than 300 DIP, and the 4 s hold then 400 ms fade.</summary>
+    private static string? ValidateMessageBubble()
+    {
+        const float scale = 1.5f;
+        var cut = CursorRenderer.LayoutMessage(string.Join(' ', Enumerable.Repeat("the companion explains this part of the screen", 40)), scale);
+        if (cut.Lines.Length is 0 or > CursorRenderer.MessageMaxLines) return $"line count {cut.Lines.Length}";
+        if (!cut.Lines[^1][^1].EndsWith('…')) return "cut text has no trailing ellipsis";
+        if (cut.Size.Width > 300 * scale) return $"width {cut.Size.Width} > {300 * scale}";
+        var whole = CursorRenderer.LayoutMessage("Short line.", scale);
+        if (whole.Lines.Length != 1 || whole.Lines[0][^1].EndsWith('…')) return "short text was cut";
+        static bool Near(float actual, float expected) => Math.Abs(actual - expected) < 0.001f;
+        if (!Near(BuddyOverlayController.MessageAlpha(4, 0, null, false), 1) || !Near(BuddyOverlayController.MessageAlpha(4.4, 0, null, false), 0))
+            return "hold/fade timing";
+        if (!Near(BuddyOverlayController.MessageAlpha(1, 0, 1, false), 1) || !Near(BuddyOverlayController.MessageAlpha(1.4, 0, 1, false), 0))
+            return "idle fade timing";
+        return null;
     }
 
     private static string? ValidateResponseBubblePlacement()
@@ -306,6 +342,18 @@ internal static class Program
 
     private static class NativeMethods
     {
+        [StructLayout(LayoutKind.Sequential)]
+        public struct Rect
+        {
+            public int Left;
+            public int Top;
+            public int Right;
+            public int Bottom;
+        }
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern bool GetWindowRect(IntPtr hWnd, out Rect lpRect);
+
         [DllImport("user32.dll")]
         public static extern IntPtr GetForegroundWindow();
 

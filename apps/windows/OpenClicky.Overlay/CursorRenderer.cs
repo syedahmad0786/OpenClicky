@@ -100,14 +100,15 @@ internal static class CursorRenderer
         return new(centroid.X - r, centroid.Y - r, 2 * r, 2 * r);
     }
 
-    /// <summary>Three dots orbiting the centroid (still when <paramref name="still"/>); each one's alpha peaks a beat after the previous.</summary>
+    /// <summary>Three dots orbiting the centroid; each one's alpha peaks a beat after the previous. <paramref name="still"/> (reduced
+    /// motion): no orbit and no pulse.</summary>
     public static void DrawDots(Graphics g, PointF centroid, float s, double seconds, bool still, Color accent)
     {
         var orbit = still ? 0 : seconds / OrbitSeconds * 2 * Math.PI;
         for (var i = 0; i < 3; i++)
         {
             var angle = orbit + i * 2 * Math.PI / 3 - Math.PI / 2;
-            var pulse = 0.5 + 0.5 * Math.Cos(2 * Math.PI * (seconds - i * DotBeatSeconds) / OrbitSeconds);
+            var pulse = still ? 1 : 0.5 + 0.5 * Math.Cos(2 * Math.PI * (seconds - i * DotBeatSeconds) / OrbitSeconds);
             using var brush = new SolidBrush(Color.FromArgb((int)(255 * (0.3 + 0.7 * pulse)), accent));
             var x = centroid.X + (float)Math.Cos(angle) * DotOrbit * s;
             var y = centroid.Y + (float)Math.Sin(angle) * DotOrbit * s;

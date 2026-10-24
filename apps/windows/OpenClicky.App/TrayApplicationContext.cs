@@ -89,7 +89,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         _settings = LoadSettingsWithSecrets();
         IgnoreLegacyFixtureTranscript();
         _hotkey = new ShortcutMonitor(ShortcutBindings.From(_settings));
-        _overlay = new BuddyOverlayController();
+        _overlay = new BuddyOverlayController(Log);
         _capture = new WgcScreenCaptureService(Log, () => _settings.ForceGdiCapture);
         _mic = CreateMic();
         _tts = new SpeechOutput(() => _settings, _secrets, text => OnUi(() => _shell?.AddToast(text)), Log);
@@ -177,6 +177,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         _talk.StateChanged += state => OnUi(() =>
         {
             if (state == CompanionVoiceState.Processing && _talk.Walkthrough.View.Busy) _walkthroughForm.Hide();
+            if (state is CompanionVoiceState.Listening or CompanionVoiceState.Processing) ApplyCompanionStyle(); // Windows' reduced-motion setting may have changed
             _home.SetState(state);
             _home.SetConversationActive(_talk.ConversationActive);
             _companionDock.SetState(state, _talk.ConversationActive);
@@ -828,7 +829,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             if (!await initialization.ConfigureAwait(false)) return;
             var host = new WindowsDesktopToolHost(_capture, _confirm, ExecuteMappedAsync,
                 _taskControl.WaitAsync, () => _taskSteering, p => RecordProgress(id, p),
-                () => OnUi(_overlay.Hide), AgentDenyList.ParseExtraFragments(_settings.AgentDenyListExtra));
+                _overlay.Hide, AgentDenyList.ParseExtraFragments(_settings.AgentDenyListExtra));
             if (access == AgentAccessMode.Auto)
             {
                 RecordProgress(id, new(0, "planning", "Preparing a task plan for your approval"));
@@ -1541,8 +1542,12 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             var bounds = ForegroundWindowInfo.GetBounds();
             if (bounds is not { Width: > 0, Height: > 0 } region)
                 throw new InvalidOperationException("Select a visible app before testing capture.");
-            var primary = await _capture.CaptureRegionJpegAsync(region)
-                ?? throw new InvalidOperationException("The current window could not be captured.");
+            _overlay.Hide();
+            await Task.Delay(IOverlayController.HideSettleMilliseconds);
+            ScreenCaptureResult? captured;
+            try { captured = await _capture.CaptureRegionJpegAsync(region); }
+            finally { if (_talk.State == CompanionVoiceState.Idle && _taskCts is null) _overlay.ShowIdle(); }
+            var primary = captured ?? throw new InvalidOperationException("The current window could not be captured.");
             Log($"manual_capture_bytes={primary.JpegBytes.Length} magic={(primary.LooksLikeJpeg ? "FFD8" : "????")} backend={_capture.LastBackend}");
             MessageBox.Show(
                 $"Captured {primary.JpegBytes.Length} bytes ({primary.PixelWidth}x{primary.PixelHeight}).\nJPEG magic OK: {primary.LooksLikeJpeg}\nBackend: {_capture.LastBackend} (WGC supported: {_capture.GraphicsCaptureSupported})",

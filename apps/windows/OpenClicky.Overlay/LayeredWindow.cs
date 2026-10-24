@@ -17,8 +17,15 @@ internal sealed class LayeredWindow : NativeWindow, IDisposable
     private const uint SwpNoSize = 0x0001, SwpNoMove = 0x0002, SwpNoActivate = 0x0010, SwpShowWindow = 0x0040;
     private static readonly nint HwndTopMost = -1;
 
-    public LayeredWindow(string title)
+    private readonly Action<string>? _log;
+    private readonly string _title;
+    private bool _failing;
+
+    /// <param name="log">Diagnostics: the window title and Win32 error codes only, never content.</param>
+    public LayeredWindow(string title, Action<string>? log = null)
     {
+        _log = log;
+        _title = title;
         CreateHandle(new CreateParams
         {
             Caption = title,
@@ -27,31 +34,38 @@ internal sealed class LayeredWindow : NativeWindow, IDisposable
         });
     }
 
-    public bool Visible => Handle != 0 && IsWindowVisible(Handle);
-
     /// <summary>Shows <paramref name="bitmap"/> (32 bpp with alpha) with its top-left at <paramref name="screenTopLeft"/> (virtual-screen px).</summary>
     public void Present(Bitmap bitmap, Point screenTopLeft)
     {
-        var screenDc = GetDC(0);
-        var memDc = CreateCompatibleDC(screenDc);
-        // GDI+ hands back a premultiplied 32 bpp DIB, which is what ULW_ALPHA expects.
+        // GDI+ hands back a premultiplied 32 bpp DIB, which is what ULW_ALPHA expects. Taken first: if it throws, no
+        // GDI handle is held yet.
         var hBitmap = bitmap.GetHbitmap(Color.FromArgb(0));
-        var old = SelectObject(memDc, hBitmap);
+        nint screenDc = 0, memDc = 0, old = 0;
+        bool updated;
+        var error = 0;
         try
         {
+            screenDc = GetDC(0);
+            memDc = CreateCompatibleDC(screenDc);
+            old = SelectObject(memDc, hBitmap);
             var size = new NativeSize(bitmap.Width, bitmap.Height);
             var source = new NativePoint(0, 0);
             var destination = new NativePoint(screenTopLeft.X, screenTopLeft.Y);
             var blend = new BlendFunction { BlendOp = AcSrcOver, SourceConstantAlpha = 255, AlphaFormat = AcSrcAlpha };
-            UpdateLayeredWindow(Handle, screenDc, ref destination, ref size, memDc, ref source, 0, ref blend, UlwAlpha);
+            updated = UpdateLayeredWindow(Handle, screenDc, ref destination, ref size, memDc, ref source, 0, ref blend, UlwAlpha);
+            if (!updated) error = Marshal.GetLastWin32Error();
         }
         finally
         {
-            SelectObject(memDc, old);
+            if (old != 0) SelectObject(memDc, old);
+            if (memDc != 0) DeleteDC(memDc);
+            if (screenDc != 0) ReleaseDC(0, screenDc);
             DeleteObject(hBitmap);
-            DeleteDC(memDc);
-            ReleaseDC(0, screenDc);
         }
+
+        // One line per failure streak: this runs every frame.
+        if (!updated && !_failing) _log?.Invoke($"overlay_present_failed window={_title} win32={error}");
+        _failing = !updated;
 
         if (!IsWindowVisible(Handle))
             SetWindowPos(Handle, HwndTopMost, 0, 0, 0, 0, SwpNoMove | SwpNoSize | SwpNoActivate | SwpShowWindow);

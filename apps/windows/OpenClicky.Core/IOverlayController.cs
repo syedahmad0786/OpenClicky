@@ -19,10 +19,17 @@ public interface IOverlayController : IDisposable
     Task<Rectangle?> SelectRegionAsync(CancellationToken cancellationToken = default) =>
         Task.FromResult<Rectangle?>(null);
 
-    /// <summary>Hides every overlay window until the next Show* or <see cref="ShowIdle"/> (used before a capture). Keeps the drawing.</summary>
+    /// <summary>
+    /// Hides every overlay window until the next Show* or <see cref="ShowIdle"/> (used before a capture). Keeps the drawing.
+    /// Synchronous: the windows are hidden when it returns; wait <see cref="HideSettleMilliseconds"/> before capturing.
+    /// </summary>
     void Hide();
 
-    /// <summary>The resting companion: the cursor is visible and following, with no bubble; the drawing is kept.</summary>
+    /// <summary>Time for the desktop compositor to drop hidden overlay windows from what a capture sees.</summary>
+    const int HideSettleMilliseconds = 120;
+
+    /// <summary>The resting companion: the cursor is visible and following with no new bubble (the last spoken line fades
+    /// out); the drawing is kept.</summary>
     void ShowIdle() { }
 
     void ApplyStyle(CompanionStyle style) { }

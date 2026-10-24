@@ -90,8 +90,9 @@ public sealed class AgentOrchestrator
                 }
             }
             Progress(step, "planning", "Looking at the current screen");
-            // Hide buddy so it does not pollute the vision / UIA capture.
+            // Hide the companion (and any drawing) so it does not pollute the vision / UIA capture; let DWM drop it first.
             _overlay.Hide();
+            await Task.Delay(IOverlayController.HideSettleMilliseconds, cancellationToken).ConfigureAwait(false);
             var capturedWindow = _foregroundWindow?.Invoke();
             var capturedRevision = _revision?.Invoke();
             var capturedBounds = _foregroundBounds?.Invoke();

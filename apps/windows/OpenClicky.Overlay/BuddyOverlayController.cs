@@ -75,8 +75,7 @@ public sealed class BuddyOverlayController : IOverlayController
 
     /// <summary>Marshals calls onto the thread that owns the windows (the one that constructed the controller).</summary>
     private readonly Control _ui = new();
-    private readonly LayeredWindow _cursorWindow = new("OpenClicky Companion");
-    private readonly LayeredWindow _drawingWindow = new("OpenClicky Drawing");
+    private readonly LayeredWindow _cursorWindow, _drawingWindow;
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 16 };
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private CancellationTokenSource? _selectionCancellation;
@@ -95,6 +94,8 @@ public sealed class BuddyOverlayController : IOverlayController
     private string? _line;
     private bool _lineInstant;
     private double _lineStart;
+    /// <summary>When the companion went idle while a line showed: the line fades from then instead of holding.</summary>
+    private double? _lineIdleAt;
     private CursorRenderer.MessageLayout? _lineLayout;
     private double _micLevel;
     private readonly float[] _bars = new float[CursorRenderer.BarCount];
@@ -105,9 +106,12 @@ public sealed class BuddyOverlayController : IOverlayController
     /// <summary>What the last still cursor frame showed; an unchanged still frame is not redrawn.</summary>
     private (Pt Tip, float Scale, Mode Mode, string? Label, Color Accent) _lastStill;
 
-    public BuddyOverlayController()
+    /// <param name="log">Diagnostics (window names and Win32 codes only).</param>
+    public BuddyOverlayController(Action<string>? log = null)
     {
         _ = _ui.Handle;
+        _cursorWindow = new("OpenClicky Companion", log);
+        _drawingWindow = new("OpenClicky Drawing", log);
         _accent = ParseAccent(_style.AccentHex);
         _timer.Tick += (_, _) => Frame();
     }
@@ -129,7 +133,7 @@ public sealed class BuddyOverlayController : IOverlayController
     /// <summary>Companion tip in virtual-screen pixels during / after a POINT; false when not pointing.</summary>
     public bool TryGetBuddyVirtualPoint(out int virtualX, out int virtualY)
     {
-        var (ok, x, y) = InvokeRead(() => _mode != Mode.Pointing && _pointTarget is null || _spring is null
+        var (ok, x, y) = InvokeRead(() => (_mode != Mode.Pointing && _pointTarget is null) || _spring is null
             ? (false, 0, 0)
             : (true, (int)MathF.Round(_spring.Position.X), (int)MathF.Round(_spring.Position.Y)));
         virtualX = x;
@@ -194,7 +198,7 @@ public sealed class BuddyOverlayController : IOverlayController
     public void ShowIdle() => Post(() =>
     {
         ClearPointing();
-        SetLine(null, false);
+        if (_line is not null) _lineIdleAt ??= Now; // the last spoken line fades out rather than vanishing
         _mode = Mode.Idle;
         Show();
     });
@@ -329,6 +333,7 @@ public sealed class BuddyOverlayController : IOverlayController
         _line = string.IsNullOrWhiteSpace(text) ? null : text;
         _lineInstant = instant;
         _lineStart = Now;
+        _lineIdleAt = null;
         _lineLayout = null;
     }
 
@@ -438,12 +443,23 @@ public sealed class BuddyOverlayController : IOverlayController
         if (_lineLayout is null || _lineLayout.Scale != s) _lineLayout = CursorRenderer.LayoutMessage(_line, s);
         var words = _lineLayout.WordCount;
         var instant = _lineInstant || _style.ReducedMotion;
-        var revealed = instant ? words : Math.Min(words, 1 + (int)((now - _lineStart) / WordSeconds));
+        var revealedBy = Math.Min(now, _lineIdleAt ?? now);
+        var revealed = instant ? words : Math.Min(words, 1 + (int)((revealedBy - _lineStart) / WordSeconds));
         var lastWord = _lineStart + (instant ? 0 : Math.Max(0, words - 1) * WordSeconds);
-        var fade = _style.ReducedMotion ? ReducedFadeSeconds : FadeSeconds;
-        var alpha = (float)Math.Clamp(1 - (now - lastWord - HoldSeconds) / fade, 0, 1);
+        var alpha = MessageAlpha(now, lastWord, _lineIdleAt, _style.ReducedMotion);
         if (alpha <= 0) SetLine(null, false);
         return (revealed, alpha);
+    }
+
+    /// <summary>
+    /// Message bubble opacity: 1 until <see cref="HoldSeconds"/> after the last word (or until the companion went idle, if
+    /// sooner), then a linear fade over 400 ms (120 ms with reduced motion).
+    /// </summary>
+    internal static float MessageAlpha(double now, double lastWordAt, double? idleAt, bool reducedMotion)
+    {
+        var fadeStart = Math.Min(lastWordAt + HoldSeconds, idleAt ?? double.PositiveInfinity);
+        var fade = reducedMotion ? ReducedFadeSeconds : FadeSeconds;
+        return (float)Math.Clamp(1 - (now - fadeStart) / fade, 0, 1);
     }
 
     /// <summary>Repaints the marks while their pen reveal runs (350 ms each, one after another); false once they are still.</summary>

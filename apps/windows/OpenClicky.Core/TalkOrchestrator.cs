@@ -691,6 +691,8 @@ public sealed class TalkOrchestrator : IDisposable
             if (selfContainedVisual) screens = [];
             else if (selectedRegion is { } region)
             {
+                // A region capture is not own-window-excluded: the overlay hidden above must leave the frame first.
+                await Task.Delay(IOverlayController.HideSettleMilliseconds, token).ConfigureAwait(false);
                 var selected = await Task.Run(() => _capture.CaptureRegionJpegAsync(region, token), token).ConfigureAwait(false);
                 if (selected is null) throw new InvalidOperationException("The selected screen area could not be captured.");
                 screens = [selected with { Label = "screen 1 — user-selected area. Only these visible pixels were shared. Use :screen1 for marks." }];

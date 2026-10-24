@@ -44,7 +44,8 @@ internal sealed class WindowsDesktopToolHost : IDesktopToolHost
     {
         _progress(new(_step, "observing", includeScreens ? "Inspecting the current app" : "Reading current app controls", includeScreens ? "observe_screen" : "uia"));
         await _beforeTool(token).ConfigureAwait(false);
-        _hideOverlay();
+        _hideOverlay(); // synchronous: the companion and any drawing are hidden when it returns
+        if (includeScreens) await Task.Delay(IOverlayController.HideSettleMilliseconds, token).ConfigureAwait(false);
         var state = ReadContext();
         IReadOnlyList<ScreenCaptureResult> screens = [];
         if (includeScreens)
