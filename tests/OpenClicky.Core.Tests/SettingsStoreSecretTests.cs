@@ -6,6 +6,25 @@ namespace OpenClicky.Core.Tests;
 public class SettingsStoreSecretTests
 {
     [Fact]
+    public void Save_ToAReadOnlySettingsFileLeavesNoTemporaryCopy()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"openclicky-settings-{Guid.NewGuid():N}.json");
+        File.WriteAllText(path, "{}");
+        File.SetAttributes(path, FileAttributes.ReadOnly);
+        try
+        {
+            Assert.ThrowsAny<Exception>(() => SettingsStore.Save(new AppSettings(), path));
+            Assert.False(File.Exists(path + ".tmp"));
+            Assert.Equal("{}", File.ReadAllText(path));
+        }
+        finally
+        {
+            File.SetAttributes(path, FileAttributes.Normal);
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void Save_StripsApiKeyFromDisk()
     {
         var path = Path.Combine(Path.GetTempPath(), $"openclicky-settings-{Guid.NewGuid():N}.json");

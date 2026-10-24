@@ -65,8 +65,18 @@ public static class SettingsStore
         var disk = CloneWithoutSecrets(settings);
         var json = JsonSerializer.Serialize(disk, JsonOptions);
         var temporary = path + ".tmp";
-        File.WriteAllText(temporary, json);
-        File.Move(temporary, path, overwrite: true);
+        try
+        {
+            File.WriteAllText(temporary, json);
+            File.Move(temporary, path, overwrite: true);
+        }
+        catch
+        {
+            // A read-only settings.json or folder: do not leave the half-done copy behind.
+            try { File.Delete(temporary); }
+            catch (Exception cleanup) when (cleanup is IOException or UnauthorizedAccessException) { }
+            throw;
+        }
     }
 
     /// <summary>Settings properties that hold secrets and must never reach settings.json.</summary>
