@@ -2,6 +2,14 @@ using OpenClicky.Core.Shell;
 
 namespace OpenClicky.Core.CompanionCursor;
 
+/// <summary>When the walkthrough card is added (shown, to the front) rather than updated where it is.</summary>
+public static class WalkthroughCardPolicy
+{
+    /// <param name="cardStep">The step the card was last added for; -1 when no walkthrough card is up.</param>
+    /// <returns>True when the walkthrough just started, or a new step (not a reload of the current one) arrived.</returns>
+    public static bool AddsCard(int cardStep, WalkthroughView view) => view.Active && (cardStep < 0 || !view.Busy && view.Step != cardStep);
+}
+
 /// <summary>The companion's notch cards and their actions (C11 and C12 add theirs here).</summary>
 public static class CompanionCards
 {

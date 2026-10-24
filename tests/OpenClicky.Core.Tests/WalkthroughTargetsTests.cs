@@ -101,6 +101,35 @@ public class WalkthroughTargetsTests
     }
 
     [Fact]
+    public void IdleClockStartsWhenTheWalkthroughStartsAndRestartsDuringATask()
+    {
+        var watch = new WalkthroughTargetWatch();
+        watch.Activate(0); // active, nothing pointed yet
+        watch.Activate(50_000); // already running: unchanged
+        Assert.Equal(TargetEvent.None, watch.Tick(599_999));
+        Assert.Equal(TargetEvent.GuideTimedOut, watch.Tick(600_000));
+
+        watch.Activate(1_000_000);
+        watch.RestartIdle(1_500_000); // an agent task ran until here
+        Assert.Equal(TargetEvent.None, watch.Tick(1_600_000));
+        Assert.Equal(TargetEvent.GuideTimedOut, watch.Tick(2_100_000));
+    }
+
+    [Fact]
+    public void WalkthroughCardAddedOnlyForAStartOrANewStep()
+    {
+        static WalkthroughView V(int step, bool busy = false, bool active = true) => new(active, busy, step, false, "Goal", "Do it", "Step");
+        Assert.True(WalkthroughCardPolicy.AddsCard(-1, V(0, busy: true))); // started
+        Assert.False(WalkthroughCardPolicy.AddsCard(0, V(0, busy: true)));
+        Assert.True(WalkthroughCardPolicy.AddsCard(0, V(1))); // step 1 arrived
+        Assert.False(WalkthroughCardPolicy.AddsCard(1, V(1, busy: true))); // loading the next one: update in place
+        Assert.False(WalkthroughCardPolicy.AddsCard(1, V(1))); // a wait or recheck reply, a status: update in place
+        Assert.True(WalkthroughCardPolicy.AddsCard(1, V(2)));
+        Assert.True(WalkthroughCardPolicy.AddsCard(3, V(2))); // Back
+        Assert.False(WalkthroughCardPolicy.AddsCard(-1, V(2, active: false)));
+    }
+
+    [Fact]
     public void AppSwitchAllowedOnlyRightAfterAnAdvance()
     {
         var watch = new WalkthroughTargetWatch();

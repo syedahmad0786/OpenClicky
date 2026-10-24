@@ -15,8 +15,18 @@ public static class ForegroundWindowInfo
         _ = GetWindowThreadProcessId(window, out var processId);
         return processId == Environment.ProcessId;
     }
-    /// <summary>True when the window under (<paramref name="x"/>, <paramref name="y"/>) belongs to OpenClicky (click-through windows are skipped).</summary>
-    public static bool IsCurrentProcessWindowAt(int x, int y) => IsCurrentProcessWindow(WindowFromPoint(new NativePoint { X = x, Y = y }));
+    /// <summary>
+    /// True when the window under (<paramref name="x"/>, <paramref name="y"/>) is part of an OpenClicky window: its top-level
+    /// root or that root's owner is ours. A child another process renders inside our window (WebView2's msedgewebview2 child)
+    /// counts as ours; click-through (layered + transparent) windows are skipped by the hit test.
+    /// </summary>
+    public static bool IsCurrentProcessWindowAt(int x, int y)
+    {
+        var window = WindowFromPoint(new NativePoint { X = x, Y = y });
+        if (window == IntPtr.Zero) return false;
+        var root = GetAncestor(window, GaRoot);
+        return IsCurrentProcessWindow(root == IntPtr.Zero ? window : root) || IsCurrentProcessWindow(GetAncestor(window, GaRootOwner));
+    }
 
     /// <summary>The process that owns <paramref name="window"/>, or 0.</summary>
     public static uint ProcessIdOf(IntPtr window)
@@ -81,6 +91,11 @@ public static class ForegroundWindowInfo
 
     [DllImport("user32.dll")]
     private static extern IntPtr WindowFromPoint(NativePoint point);
+
+    private const uint GaRoot = 2, GaRootOwner = 3;
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetAncestor(IntPtr window, uint flags);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct WindowRect { public int Left, Top, Right, Bottom; }

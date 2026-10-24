@@ -148,7 +148,7 @@ public class CompanionWorkflowTests
     [Fact]
     public async Task WalkthroughStepPointSnapsAndArmsItsTarget()
     {
-        var replies = new Queue<string>(["[GUIDE:hover] Rest on Save. [POINT:50,25:Save]", "[GUIDE:wait] Not yet. [POINT:50,25:Save]", "Sure. [POINT:50,25:Save]"]);
+        var replies = new Queue<string>(["[GUIDE:hover] Rest on Save. [POINT:50,25:Save]", "[GUIDE:wait] Not yet. [POINT:50,25:Save]", "Created.", "Sure. [POINT:50,25:Save]"]);
         var overlay = new Overlay();
         var snaps = new List<(int, int)>();
         var targets = new List<GuidedTarget>();
@@ -168,6 +168,8 @@ public class CompanionWorkflowTests
         Assert.Single(targets);
         talk.StopWalkthrough(WalkthroughTargetWatch.ClickedElsewhereReason);
 
+        await talk.SubmitTextAsync("Create an interactive calculator with Research 3", remember: false); // a visual turn leaves the reason
+        Assert.DoesNotContain("The last walkthrough ended", systems[^1]);
         await talk.SubmitTextAsync("where is save", remember: false); // every POINT snaps; the reason reaches this turn once
         Assert.Equal([(100, 50), (100, 50), (100, 50)], snaps);
         Assert.Single(targets);

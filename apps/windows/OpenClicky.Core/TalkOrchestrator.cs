@@ -855,7 +855,7 @@ public sealed class TalkOrchestrator : IDisposable
             { ReportAssistantMessage("The app changed during capture. Ask again for a fresh view."); return; }
             context += AppKnowledge.WindowContext(bounds, screens);
             if (!selfContainedVisual) context += DrawingContext();
-            if (Walkthrough.TakeEndReason() is { } endReason && !selfContainedVisual)
+            if (!selfContainedVisual && Walkthrough.TakeEndReason() is { } endReason)
                 context += $"\nThe last walkthrough ended because {endReason}. Mention it only if it helps.\n";
             _log($"screen_capture_ms={captureClock.ElapsedMilliseconds} walkthrough={walkthrough is not null}");
             if (walkthrough is not null) WalkthroughChanged?.Invoke(Walkthrough.View);

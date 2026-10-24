@@ -44,7 +44,13 @@ public sealed class WalkthroughTargetWatch
 
     public GuidedTarget? Target => _target;
 
-    /// <summary>A new step's target. The guide's idle clock starts at the first arm and restarts at each advance.</summary>
+    /// <summary>The walkthrough is active: its idle clock starts now unless it already runs (it restarts at each advance).</summary>
+    public void Activate(long nowMs) => _idleSince ??= nowMs;
+
+    /// <summary>The idle clock starts over (an agent task is running: its time is not the user's idleness).</summary>
+    public void RestartIdle(long nowMs) => _idleSince = nowMs;
+
+    /// <summary>A new step's target. The idle clock starts here too if <see cref="Activate"/> was not called.</summary>
     public void Arm(GuidedTarget t, long nowMs)
     {
         ArgumentNullException.ThrowIfNull(t);

@@ -12,5 +12,6 @@
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="OpenClicky.Input.Tests" />
+    <InternalsVisibleTo Include="OpenClicky.Agent.Smoke" />
   </ItemGroup>
 </Project>

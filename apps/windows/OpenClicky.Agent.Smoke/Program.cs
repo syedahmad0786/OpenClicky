@@ -348,6 +348,92 @@ internal static class Program
         return 0;
     }
 
+    /// <summary>
+    /// Own-window recognition against the foreign fixture: an own click-through (layered + transparent) window laid over the
+    /// fixture's button is not "ours" (and the snapper still fits the button through it); the fixture's window reparented as a
+    /// child of an own form is "ours" although the window under the point belongs to the fixture's process, as WebView2's
+    /// renderer child does inside the classic home window. Only window styles and parents change; nothing is clicked or typed.
+    /// </summary>
+    private static int OwnWindowChecks(Process fixture, string title, float[] button)
+    {
+        int cx = (int)button[0], cy = (int)button[1];
+        using (var glass = new ClickThroughForm { TopMost = true, ShowInTaskbar = false, StartPosition = FormStartPosition.Manual,
+                   FormBorderStyle = FormBorderStyle.None, Opacity = 0.4, BackColor = Color.Magenta,
+                   Location = new Point((int)button[2] - 20, (int)button[3] - 20), Size = new Size((int)button[4] + 40, (int)button[5] + 40) })
+        {
+            glass.Show();
+            Pump(300);
+            var covers = glass.Bounds.Contains(cx, cy) && GetAncestor(WindowFromPoint(new NativePoint { X = cx, Y = cy }), 2) != glass.Handle;
+            var ours = ForegroundWindowInfo.IsCurrentProcessWindowAt(cx, cy);
+            var through = UiaControlSnapper.Snap(cx, cy, TimeSpan.FromSeconds(2));
+            Console.WriteLine($"snap click_through_over_fixture covers={covers} ours={ours} button={(through is { } b ? $"{b.X},{b.Y},{b.W},{b.H}" : "none")}");
+            if (!covers || ours) { Console.Error.WriteLine("FAIL: an own click-through window counted as an OpenClicky click target"); return 45; }
+            // Non-vacuous: without WS_EX_TRANSPARENT the same window is on top at that point and takes the hit.
+            const int GwlExStyle = -20;
+            SetWindowLongPtr(glass.Handle, GwlExStyle, (IntPtr)(GetWindowLongPtr(glass.Handle, GwlExStyle).ToInt64() & ~0x20L));
+            Pump(100);
+            var opaqueHit = GetAncestor(WindowFromPoint(new NativePoint { X = cx, Y = cy }), 2) == glass.Handle;
+            Console.WriteLine($"snap same_window_without_transparent_takes_hit={opaqueHit}");
+            if (!opaqueHit) { Console.Error.WriteLine("FAIL: the click-through window was not on top of the fixture's button"); return 45; }
+            if (through is not { } t || t.X != button[2] || t.Y != button[3] || t.W != button[4] || t.H != button[5])
+            { Console.Error.WriteLine("FAIL: the snapper did not see the button through an own click-through window"); return 48; }
+        }
+
+        var foreign = FindWindow(null, title);
+        if (foreign == IntPtr.Zero) { Console.Error.WriteLine("FAIL: fixture window not found"); return 46; }
+        var area = Screen.PrimaryScreen!.WorkingArea;
+        using var host = new FixtureForm { TopMost = true, ShowInTaskbar = false, StartPosition = FormStartPosition.Manual,
+            Location = new Point(area.Left + 60, area.Top + 60), Size = new Size(520, 340) };
+        host.Show();
+        Pump(100);
+        const int GwlStyle = -16;
+        const long WsChild = 0x40000000, WsPopup = 0x80000000;
+        SetWindowLongPtr(foreign, GwlStyle, (IntPtr)((GetWindowLongPtr(foreign, GwlStyle).ToInt64() & ~WsPopup) | WsChild));
+        SetParent(foreign, host.Handle);
+        SetWindowPos(foreign, IntPtr.Zero, 0, 0, 0, 0, 0x0001 | 0x0004 | 0x0010 | 0x0020); // NOSIZE NOZORDER NOACTIVATE FRAMECHANGED
+        Pump(400);
+        GetWindowRect(foreign, out var r);
+        int px = (r.Left + r.Right) / 2, py = (r.Top + r.Bottom) / 2;
+        var under = WindowFromPoint(new NativePoint { X = px, Y = py });
+        var underPid = ForegroundWindowInfo.ProcessIdOf(under);
+        var inOwnRoot = ForegroundWindowInfo.IsCurrentProcessWindowAt(px, py);
+        Console.WriteLine($"snap foreign_child_in_own_window under_pid={(underPid == fixture.Id ? "fixture" : underPid.ToString())} ours={inOwnRoot}");
+        if (underPid != fixture.Id || !inOwnRoot)
+        { Console.Error.WriteLine("FAIL: a child another process renders inside an own window was not recognised as OpenClicky's"); return 46; }
+        return 0;
+    }
+
+    private static void Pump(int ms)
+    {
+        var until = Environment.TickCount64 + ms;
+        while (Environment.TickCount64 < until) { Application.DoEvents(); Thread.Sleep(15); }
+    }
+
+    private sealed class ClickThroughForm : Form
+    {
+        protected override bool ShowWithoutActivation => true;
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                var p = base.CreateParams;
+                p.ExStyle |= 0x00080000 | 0x00000020 | 0x00000080 | 0x08000000; // LAYERED TRANSPARENT TOOLWINDOW NOACTIVATE, as the overlay
+                return p;
+            }
+        }
+    }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)] private struct NativePoint { public int X, Y; }
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)] private struct NativeRect { public int Left, Top, Right, Bottom; }
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(NativePoint point);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] private static extern IntPtr FindWindow(string? cls, string title);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr SetParent(IntPtr child, IntPtr parent);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern IntPtr SetWindowLongPtr(IntPtr hwnd, int index, IntPtr value);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hwnd, out NativeRect rect);
+
     /// <summary>The fixture's "name cx cy x y w h" lines once all three controls are reported and painted, or null after 20 s.</summary>
     private static async Task<Dictionary<string, float[]>?> ReadFixtureAsync(Process fixture)
     {
@@ -390,6 +476,7 @@ internal static class Program
                 if (denied && (button is not null || plain is not null)) { Console.Error.WriteLine("FAIL: the snapper read a deny-listed window"); return 42; }
                 if (!denied && (!Same(button, layout["button"]) || !Same(plain, layout["plain"])))
                 { Console.Error.WriteLine("FAIL: the snapper did not fit the button and the text box (the control check)"); return 43; }
+                if (!denied && OwnWindowChecks(fixture, title, layout["button"]) is var failed and not 0) return failed;
             }
             finally
             {
@@ -400,15 +487,26 @@ internal static class Program
         // A window of this process: refused before UI Automation is asked anything.
         var area = Screen.PrimaryScreen!.WorkingArea;
         using (var own = new FixtureForm { TopMost = true, ShowInTaskbar = false, StartPosition = FormStartPosition.Manual,
-                   Location = new Point(area.Left + 60, area.Top + 60), Size = new Size(300, 120) })
+                   Location = new Point(area.Left + 60, area.Top + 60), Size = new Size(460, 260) })
         {
-            var ownButton = new Button { Text = "Own button", Location = new Point(10, 10), Size = new Size(120, 36) };
+            // Laid out as the fixture was, so the button sits where the fixture's button was just hit.
+            var ownButton = new Button { Text = "Own button", Location = new Point(20, 140), Size = new Size(160, 36) };
             own.Controls.Add(ownButton);
             own.Show();
-            Application.DoEvents();
-            var centre = ownButton.PointToScreen(new Point(60, 18));
+            Pump(300);
+            var centre = ownButton.PointToScreen(new Point(80, 18));
+            var background = own.PointToScreen(new Point(300, 160));
+            // Non-vacuous: both points really are over this window (another app's topmost window there fails the smoke, not passes it).
+            bool OnOwn(Point p) => GetAncestor(WindowFromPoint(new NativePoint { X = p.X, Y = p.Y }), 2) == own.Handle;
+            if (!OnOwn(centre) || !OnOwn(background))
+            { Console.Error.WriteLine("FAIL: the own fixture window is covered by another window at its test points"); return 47; }
+            // Non-vacuous: the point really is over this process's window (a child button), which the shared check refuses.
+            var refused = UiaTextHarvester.RefusedAt(centre.X, centre.Y, Environment.ProcessId, null);
+            var ownChild = ForegroundWindowInfo.IsCurrentProcessWindowAt(centre.X, centre.Y);
+            var ownForm = ForegroundWindowInfo.IsCurrentProcessWindowAt(background.X, background.Y);
             var snapped = UiaControlSnapper.Snap(centre.X, centre.Y, TimeSpan.FromSeconds(1));
-            Console.WriteLine($"snap own_window button={Show(snapped)}");
+            Console.WriteLine($"snap own_window refused={refused} own_child={ownChild} own_form={ownForm} button={Show(snapped)}");
+            if (!refused || !ownChild || !ownForm) { Console.Error.WriteLine("FAIL: OpenClicky's own form or child control was not recognised as its own"); return 47; }
             if (snapped is not null) { Console.Error.WriteLine("FAIL: the snapper read OpenClicky's own window"); return 44; }
         }
         Console.WriteLine("PASS: snapper fits real controls, never a password box, a deny-listed window or its own window");

@@ -51,6 +51,8 @@ internal sealed partial class TrayApplicationContext
     private readonly WalkthroughTargetWatch _walkthroughWatch = new();
     /// <summary>The app being guided (0 until the first check): the foreground moving to another one ends the walkthrough.</summary>
     private uint _guidedProcessId;
+    /// <summary>The step the shell's walkthrough card was last added for; -1 while no walkthrough card is up.</summary>
+    private int _walkthroughCardStep = -1;
 
     /// <summary>UI thread, once: arms the watch from each step that pointed, and feeds it physical clicks and a 100 ms tick.</summary>
     private void WireWalkthroughWatch()
@@ -75,8 +77,10 @@ internal sealed partial class TrayApplicationContext
         {
             _walkthroughWatch.Reset();
             _guidedProcessId = 0;
+            return;
         }
-        else if (view.Busy) _walkthroughWatch.Disarm();
+        _walkthroughWatch.Activate(Environment.TickCount64);
+        if (view.Busy) _walkthroughWatch.Disarm();
     }
 
     /// <summary>
@@ -96,7 +100,8 @@ internal sealed partial class TrayApplicationContext
     {
         if (!_talk.Walkthrough.View.Active) return;
         var now = Environment.TickCount64;
-        if (_taskCts is not null) { _walkthroughWatch.Disarm(); return; }
+        // While a task runs nothing is armed, and its time does not count as the user's idleness: the clock starts over after it.
+        if (_taskCts is not null) { _walkthroughWatch.Disarm(); _walkthroughWatch.RestartIdle(now); return; }
         if (_walkthroughWatch.Target is { IsHover: true })
         {
             var p = System.Windows.Forms.Cursor.Position;
@@ -145,13 +150,26 @@ internal sealed partial class TrayApplicationContext
         if (_talk.Walkthrough.View is { Active: true, Busy: false } && _taskCts is null) await MoveWalkthroughAsync(WalkthroughMove.Next);
     }
 
-    /// <summary>UI thread: in shell mode the step card stands in for the classic walkthrough window.</summary>
+    /// <summary>
+    /// UI thread: in shell mode the step card stands in for the classic walkthrough window. It is added (to the front) when the
+    /// walkthrough starts and when a new step arrives; any other change updates it in place, so a card the user dismissed
+    /// stays dismissed until the next step.
+    /// </summary>
     private bool ShowWalkthroughCard(WalkthroughView view)
     {
         if (_shell is not { IsActive: true } shell) return false;
         _walkthroughForm.Hide();
-        if (view.Active) shell.AddCard(CompanionCards.Walkthrough(view));
-        else shell.RemoveCard(CompanionCards.WalkthroughId);
+        if (!view.Active)
+        {
+            shell.RemoveCard(CompanionCards.WalkthroughId);
+            _walkthroughCardStep = -1;
+        }
+        else if (WalkthroughCardPolicy.AddsCard(_walkthroughCardStep, view))
+        {
+            shell.AddCard(CompanionCards.Walkthrough(view));
+            _walkthroughCardStep = view.Step;
+        }
+        else shell.UpdateCard(CompanionCards.Walkthrough(view));
         return true;
     }
 

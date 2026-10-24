@@ -48,19 +48,26 @@ public static class UiaControlSnapper
     {
         if (UiaTextHarvester.RefusedAt(x, y, own, extras)) return null;
         var chain = new List<SnapCandidate>();
+        // One cross-process round trip per level: the four properties come with the element instead of one call each.
+        var cache = new CacheRequest { TreeScope = TreeScope.Element };
+        cache.Add(AutomationElement.BoundingRectangleProperty);
+        cache.Add(AutomationElement.ControlTypeProperty);
+        cache.Add(AutomationElement.ProcessIdProperty);
+        cache.Add(AutomationElement.IsPasswordProperty);
         try
         {
+            using var _ = cache.Activate(); // this thread only: FromPoint fills the cache too
             var element = AutomationElement.FromPoint(new System.Windows.Point(x, y));
-            if (element is null || element.Current.IsPassword) return null;
+            if (element is null || element.Cached.IsPassword) return null;
             var root = AutomationElement.RootElement;
             for (var depth = 0; element is not null && depth < MaxDepth && clock.Elapsed < budget; depth++)
             {
                 if (Automation.Compare(element, root)) break;
-                var current = element.Current;
-                var r = current.BoundingRectangle;
+                var cached = element.Cached;
+                var r = cached.BoundingRectangle;
                 chain.Add(new(new Box((float)r.X, (float)r.Y, (float)r.Width, (float)r.Height),
-                    Interactive.Contains(current.ControlType), current.ProcessId == own));
-                element = TreeWalker.ControlViewWalker.GetParent(element);
+                    Interactive.Contains(cached.ControlType), cached.ProcessId == own));
+                element = TreeWalker.ControlViewWalker.GetParent(element, cache);
             }
         }
         catch (Exception ex) when (ex is ElementNotAvailableException or COMException or InvalidOperationException or ArgumentException) { }
