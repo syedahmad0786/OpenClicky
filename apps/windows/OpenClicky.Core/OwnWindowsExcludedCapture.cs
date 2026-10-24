@@ -49,19 +49,23 @@ public sealed class OwnWindowsExcludedCapture : IScreenCaptureService
         try
         {
             IReadOnlyList<OwnWindow> own;
+            var listFailed = false;
             try { own = _windows(); }
-            catch (Exception ex) when (ex is not OutOfMemoryException) { _log("capture_own_windows_error=" + ex.GetType().Name); own = []; }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                // Unknown windows count as failed ones: at least the buddy overlay is hidden.
+                _log("capture_own_windows_error=" + ex.GetType().Name);
+                own = [];
+                listFailed = true;
+            }
 
             var scope = new DisplayAffinityScope(own.Select(w => w.Handle), _getAffinity, _setAffinity);
             try
             {
-                if (scope.Failed.Count > 0)
-                {
-                    _log($"capture_affinity_failed={scope.Failed.Count}");
-                    if (own.Any(w => w.IsBuddyOverlay && scope.Failed.Contains(w.Handle))) _hideOverlay();
-                }
+                if (scope.Failed.Count > 0) _log($"capture_affinity_failed={scope.Failed.Count}");
+                if (listFailed || own.Any(w => w.IsBuddyOverlay && scope.Failed.Contains(w.Handle))) _hideOverlay();
                 // ponytail: fixed 120 ms; DWM has no "frame presented" signal for a display-affinity change.
-                if (scope.ChangedCount > 0 || scope.Failed.Count > 0) await _delay(_settle, cancellationToken).ConfigureAwait(false);
+                if (scope.ChangedCount > 0 || scope.Failed.Count > 0 || listFailed) await _delay(_settle, cancellationToken).ConfigureAwait(false);
                 return await _inner.CaptureAllMonitorsJpegAsync(cancellationToken).ConfigureAwait(false);
             }
             finally

@@ -43,6 +43,45 @@ public sealed class CaptureExclusionTests
         Assert.Equal([0, 1000, 2000, 3000], capped.Select(s => s.MonitorLeft));
     }
 
+    [Fact]
+    public void ProtectedWindows_DropEveryDisplayTheyTouchAndRenumberTheRest()
+    {
+        var screens = new[]
+        {
+            Screen(0, 0, true, "screen 1 of 3 — cursor"),
+            Screen(1000, 0, false, "screen 2 of 3 — secondary screen"),
+            Screen(2000, 0, false, "screen 3 of 3 — secondary screen"),
+        };
+        // Bitwarden on the middle display, behind or beside the foreground app; harmless titles anywhere are ignored.
+        var kept = MonitorCap.WithoutProtectedWindows(screens,
+            [new("Bitwarden", (1100, 50, 400, 300)), new("Notepad", (2100, 50, 400, 300))]);
+        Assert.Equal([0, 2000], kept.Select(s => s.MonitorLeft));
+        Assert.Equal(["screen 1 of 2 — cursor", "screen 2 of 2 — secondary screen"], kept.Select(s => s.Label));
+
+        // A window spanning two displays drops both; one edge-touching (no overlap) drops nothing more.
+        Assert.Equal([0], MonitorCap.WithoutProtectedWindows(screens, [new("PayPal - Wallet", (1800, 0, 400, 300)), new("Chase online", (-400, 0, 400, 300))])
+            .Select(s => s.MonitorLeft));
+        // The user's extra fragments count too; covering every display leaves nothing to send.
+        Assert.Empty(MonitorCap.WithoutProtectedWindows(screens, [new("Payroll portal", (0, 0, 3000, 500))], ["payroll"]));
+        Assert.Same(screens, MonitorCap.WithoutProtectedWindows(screens, [new("Payroll portal", (0, 0, 3000, 500))]));
+        Assert.Same(screens, MonitorCap.WithoutProtectedWindows(screens, []));
+    }
+
+    [Fact]
+    public async Task OwnWindowsCapture_AFailedWindowListHidesTheOverlayAndSettles()
+    {
+        var hidden = 0;
+        var settles = new List<TimeSpan>();
+        var inner = new FakeCapture();
+        var capture = new OwnWindowsExcludedCapture(inner, () => throw new InvalidOperationException("shutting down"),
+            _ => 0u, (_, _) => true, () => hidden++, _ => { }, delay: (t, _) => { settles.Add(t); return Task.CompletedTask; });
+
+        Assert.Single(await capture.CaptureAllMonitorsJpegAsync());
+        Assert.Equal(1, hidden);
+        Assert.Equal([TimeSpan.FromMilliseconds(120)], settles);
+        Assert.Equal(1, inner.Calls);
+    }
+
     private sealed class FakeWindows
     {
         public Dictionary<nint, uint> Affinity = [];

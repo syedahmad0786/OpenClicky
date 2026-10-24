@@ -2,7 +2,10 @@ using System.Text.RegularExpressions;
 
 namespace OpenClicky.Core;
 
-/// <summary>Bounds the number of screenshots a Talk turn sends.</summary>
+/// <summary>A visible, non-minimised, non-cloaked top-level window of another process: its title and on-screen bounds.</summary>
+public readonly record struct VisibleWindow(string Title, (int X, int Y, int Width, int Height) Bounds);
+
+/// <summary>Decides which screenshots a Talk turn sends: never a display showing a protected window, at most four.</summary>
 public static class MonitorCap
 {
     /// <summary>
@@ -40,8 +43,25 @@ public static class MonitorCap
             .OrderBy(s => { var (x, y) = Centre(s); return (x - ox) * (x - ox) + (y - oy) * (y - oy); })
             .ThenBy(s => s.MonitorLeft)
             .Take(max - kept.Count));
-        return kept.Select((s, i) => s with { Label = Numbering.Replace(s.Label, $"screen {i + 1} of {kept.Count}") }).ToList();
+        return Renumber(kept);
     }
+
+    /// <summary>
+    /// Drops every screen that intersects a window whose title matches the deny list, on any display (the protected-windows
+    /// promise). The rest keep their order with "screen K of N" renumbered. Empty means nothing may be sent.
+    /// </summary>
+    public static IReadOnlyList<ScreenCaptureResult> WithoutProtectedWindows(IReadOnlyList<ScreenCaptureResult> screens,
+        IEnumerable<VisibleWindow> windows, IEnumerable<string>? extraFragments = null)
+    {
+        var extras = extraFragments?.ToList();
+        var protectedBounds = windows.Where(w => AgentDenyList.IsDenied(w.Title, extras)).Select(w => w.Bounds).ToList();
+        if (protectedBounds.Count == 0) return screens;
+        var kept = screens.Where(s => !protectedBounds.Any(b => Overlap(s, b) > 0)).ToList();
+        return kept.Count == screens.Count ? screens : Renumber(kept);
+    }
+
+    private static List<ScreenCaptureResult> Renumber(List<ScreenCaptureResult> kept) =>
+        kept.Select((s, i) => s with { Label = Numbering.Replace(s.Label, $"screen {i + 1} of {kept.Count}") }).ToList();
 
     private static (double X, double Y) Centre(ScreenCaptureResult s) =>
         (s.MonitorLeft + s.MonitorWidth / 2.0, s.MonitorTop + s.MonitorHeight / 2.0);

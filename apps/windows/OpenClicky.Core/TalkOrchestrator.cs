@@ -26,6 +26,7 @@ public sealed class TalkOrchestrator : IDisposable
     private readonly Func<(int X, int Y, int Width, int Height)?>? _windowBounds;
     private readonly Func<nint>? _windowHandle;
     private readonly Func<bool>? _foregroundCaptureEligible;
+    private readonly Func<IReadOnlyList<VisibleWindow>>? _visibleWindows;
     private string? _previousApp;
     private readonly Func<string>? _userContext;
     private readonly Func<string, CancellationToken, Task<bool>>? _requestInterceptor;
@@ -48,7 +49,7 @@ public sealed class TalkOrchestrator : IDisposable
         Func<string, CancellationToken, Task<bool>>? requestInterceptor = null,
         Func<nint>? windowHandle = null, Func<bool>? canInterruptSpeech = null,
         Func<ISttClient?>? interruptionSttFactory = null, string? historyPath = null, string? memoryPath = null,
-        Func<bool>? foregroundCaptureEligible = null)
+        Func<bool>? foregroundCaptureEligible = null, Func<IReadOnlyList<VisibleWindow>>? visibleWindows = null)
     {
         _hotkey = hotkey;
         _overlay = overlay;
@@ -66,10 +67,19 @@ public sealed class TalkOrchestrator : IDisposable
         _requestInterceptor = requestInterceptor;
         _windowHandle = windowHandle;
         _foregroundCaptureEligible = foregroundCaptureEligible;
+        _visibleWindows = visibleWindows;
         _canInterruptSpeech = canInterruptSpeech;
         _interruptionSttFactory = interruptionSttFactory ?? sttFactory;
         _historyPath = historyPath;
         _memoryPath = memoryPath;
+    }
+
+    /// <summary>Other apps' visible windows; empty without a lister (tests), null when listing failed (nothing is sent then).</summary>
+    private IReadOnlyList<VisibleWindow>? VisibleWindowsOrNull()
+    {
+        if (_visibleWindows is null) return [];
+        try { return _visibleWindows(); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { _log($"visible_windows_error={ex.GetType().Name}"); return null; }
     }
 
     public CompanionVoiceState State => _state;
@@ -679,11 +689,25 @@ public sealed class TalkOrchestrator : IDisposable
             {
                 // Every display, cursor monitor first (the capture service excludes OpenClicky's own windows). The
                 // foreground window may be on any of them, so only its handle is compared before and after.
+                // A display showing a protected window (listed before and after the capture) is never sent.
+                var protectedBefore = VisibleWindowsOrNull();
                 var all = await Task.Run(() => _capture.CaptureAllMonitorsJpegAsync(token), token).ConfigureAwait(false);
                 if (all.Count == 0) throw new InvalidOperationException("The screen could not be captured. Select the area you want help with.");
                 if (handle != _windowHandle?.Invoke())
                 { ReportAssistantMessage("The app changed during capture. Ask again for a fresh view."); return; }
-                screens = MonitorCap.Apply(all, MonitorCap.Max, bounds);
+                var protectedAfter = VisibleWindowsOrNull();
+                if (protectedBefore is null || protectedAfter is null)
+                { ReportAssistantMessage("I couldn't check the screen for protected apps, so no screen was sent."); return; }
+                var allowed = MonitorCap.WithoutProtectedWindows(all, protectedBefore.Concat(protectedAfter),
+                    AgentDenyList.ParseExtraFragments(settings.AgentDenyListExtra));
+                if (allowed.Count == 0)
+                { ReportAssistantMessage("A protected app is visible on every display. No screen was sent."); return; }
+                if (allowed.Count < all.Count)
+                {
+                    _log($"protected_window_screens_skipped={all.Count - allowed.Count}");
+                    context += "\nSome displays were left out because a protected app is visible there. Do not guess what they show.\n";
+                }
+                screens = MonitorCap.Apply(allowed, MonitorCap.Max, bounds);
             }
             else { screens = []; context += "\nNo screen image is available. Do not invent visible controls; ask the user to select an area if needed.\n"; }
             if (!selfContainedVisual && _foregroundCaptureEligible is not null && !_foregroundCaptureEligible())

@@ -329,6 +329,43 @@ public class CompanionWorkflowTests
     }
 
     [Fact]
+    public async Task TalkTurn_NeverSendsADisplayShowingAProtectedWindow()
+    {
+        var monitors = Enumerable.Range(0, 2)
+            .Select(i => new ScreenCaptureResult([0xff, 0xd8], 100, 50, i * 200, 0, 200, 100, i == 0, $"screen {i + 1} of 2 - x"))
+            .ToList();
+        var seen = new List<string>();
+        string? system = null;
+        IReadOnlyList<VisibleWindow> windows = [new("1Password", (250, 10, 100, 50))];
+        var messages = new List<string>();
+        using var talk = new TalkOrchestrator(new Hotkey(), new Overlay(), new Capture { Monitors = monitors }, new Mic(), () => null,
+            () => new Talk((_, _) => Task.FromResult("ok [POINT:none]"), inspectScreens: screens => seen.AddRange(screens.Select(s => s.Label)),
+                observeSystem: text => system = text),
+            new Tts(), () => new AppSettings { PersistConversationHistory = false }, log: _ => { },
+            windowTitle: () => "Claude", windowBounds: () => (0, 0, 200, 100), visibleWindows: () => windows);
+        talk.MessageReceived += (_, text) => messages.Add(text);
+
+        await talk.SubmitTextAsync("What is on screen?", false);
+        Assert.Equal(["screen 1 of 1 - x"], seen);
+        Assert.Contains("protected app", system);
+
+        seen.Clear();
+        windows = [new("Bitwarden", (0, 0, 400, 100))]; // on every display
+        await talk.SubmitTextAsync("What is on screen?", false);
+        Assert.Empty(seen);
+        Assert.Contains(messages, text => text.Contains("No screen was sent", StringComparison.Ordinal));
+
+        var refusals = messages.Count;
+        using var failing = new TalkOrchestrator(new Hotkey(), new Overlay(), new Capture { Monitors = monitors }, new Mic(), () => null,
+            () => new Talk((_, _) => throw new Exception("must not be called")), new Tts(),
+            () => new AppSettings { PersistConversationHistory = false }, log: _ => { },
+            windowTitle: () => "Claude", windowBounds: () => (0, 0, 200, 100), visibleWindows: () => throw new InvalidOperationException());
+        failing.MessageReceived += (_, text) => messages.Add(text);
+        await failing.SubmitTextAsync("What is on screen?", false);
+        Assert.Contains(messages.Skip(refusals), text => text.Contains("no screen was sent", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task TalkTurn_GuardComparesOnlyTheForegroundHandleAroundCapture()
     {
         var providerCalls = 0;

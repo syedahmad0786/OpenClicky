@@ -120,7 +120,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             canInterruptSpeech: () => LocalWhisperModel.IsAvailable && !_dictationActive,
             interruptionSttFactory: () => new LocalWhisperSttClient(
                 new EchoCancelledMicrophoneRecorder(() => _settings.MicrophoneDeviceId, Log), _whisperRuntime, Log),
-            foregroundCaptureEligible: ForegroundWindowInfo.IsCompanionCaptureEligible);
+            foregroundCaptureEligible: ForegroundWindowInfo.IsCompanionCaptureEligible, visibleWindows: OtherVisibleWindows);
 
         _connectors = new ConnectorRegistry(_secrets);
         _home = new HomeForm(_settings, SubmitFromHomeAsync, Stop, ShowSettings, TryPointingDemoAsync, TrySandboxDemoAsync,
