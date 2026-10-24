@@ -37,7 +37,7 @@ Windows 11 x64. Extract the complete portable folder and open **OpenClicky.exe**
 
 Performance is measured separately for capture, transcription, model response and speech. Recent real model first-text times exceeded the three-second warm-response target; another routing provider has not been added without evidence that routing is the bottleneck.
 
-Multiple companions, recurring routines, account connectors and broader skill distribution remain phase two. ChatGPT sign-in does not grant access to Gmail/Slack APIs. Composio/Nango are deferred.
+**Phase two (built, not yet natively accepted):** the **Work** tab adds named companions with their own notes, saved background jobs that save files into their own `output/` folder, and daily/weekday/interval schedules. **Connections** accepts any MCP server address (your own or a provider such as Composio); read-only tools run directly and others ask first. See the [phase-two spec and gap list](docs/heyclicky-behavior-spec-2026-10-24.md) and the [feature plan](docs/feature-plan.md). ChatGPT sign-in does not grant access to Gmail/Slack APIs; each connector needs its own consent.
 
 ## Privacy and control
 
