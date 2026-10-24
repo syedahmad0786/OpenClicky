@@ -21,6 +21,26 @@ public class RawInputClassifierTests
     }
 
     [Theory]
+    [InlineData(0x11, false)] // VK_CONTROL
+    [InlineData(0x12, false)] // VK_MENU
+    [InlineData(0x10, false)] // VK_SHIFT
+    [InlineData(0x5B, false)] // VK_LWIN
+    [InlineData(0x5C, false)] // VK_RWIN
+    [InlineData(0xA2, false)] // VK_LCONTROL
+    [InlineData(0xA5, false)] // VK_RMENU
+    [InlineData(0x41, true)]  // A
+    [InlineData(0x1B, true)]  // Esc
+    [InlineData(0x0D, true)]  // Enter
+    public void BareModifierKeyDownDoesNotCountAsScreenChange(ushort vk, bool expected)
+    {
+        var offset = 8 + IntPtr.Size * 2;
+        var input = new byte[offset + 32];
+        BinaryPrimitives.WriteUInt16LittleEndian(input.AsSpan(offset + 6), vk); // RAWKEYBOARD.VKey, make (down) flags
+        Assert.Equal(expected, RawInputClassifier.MayChangeScreen(input, PhysicalUserActivityCategory.Keyboard));
+        Assert.True(RawInputClassifier.MayChangeScreen(input.AsSpan(0, offset + 6), PhysicalUserActivityCategory.Keyboard)); // no VKey: as before
+    }
+
+    [Theory]
     [InlineData(PhysicalUserActivityCategory.Mouse, 0x0001, true)]  // left down
     [InlineData(PhysicalUserActivityCategory.Mouse, 0x0004, true)]  // right down
     [InlineData(PhysicalUserActivityCategory.Mouse, 0x0100, true)]  // X2 down

@@ -121,11 +121,15 @@ internal static class RawInputClassifier
     {
         var offset = 8 + IntPtr.Size * 2;
         if (input.Length < offset + 6) return false;
-        // Only button/wheel flags or key-down state are inspected; no keys or positions are retained.
-        return category == PhysicalUserActivityCategory.Mouse
-            ? BinaryPrimitives.ReadUInt16LittleEndian(input[(offset + 4)..]) != 0
-            : (BinaryPrimitives.ReadUInt16LittleEndian(input[(offset + 2)..]) & 1) == 0;
+        // Only button/wheel flags, key-down state and whether the key is a modifier are inspected; nothing is retained.
+        if (category == PhysicalUserActivityCategory.Mouse) return BinaryPrimitives.ReadUInt16LittleEndian(input[(offset + 4)..]) != 0;
+        if ((BinaryPrimitives.ReadUInt16LittleEndian(input[(offset + 2)..]) & 1) != 0) return false; // RI_KEY_BREAK
+        // A bare Ctrl/Alt/Shift/Win down (a talk press, a text-mode double-tap, their auto-repeat) changes nothing on screen.
+        return input.Length < offset + 8 || !IsModifier(BinaryPrimitives.ReadUInt16LittleEndian(input[(offset + 6)..]));
     }
+
+    /// <summary>VK_SHIFT/CONTROL/MENU, VK_LWIN/RWIN and VK_LSHIFT..VK_RMENU.</summary>
+    private static bool IsModifier(ushort vk) => vk is >= 0x10 and <= 0x12 or 0x5B or 0x5C or >= 0xA0 and <= 0xA5;
 
     /// <summary>RI_MOUSE_{LEFT,RIGHT,MIDDLE}_BUTTON_DOWN and RI_MOUSE_BUTTON_{4,5}_DOWN in usButtonFlags.</summary>
     internal static bool MouseButtonDown(ReadOnlySpan<byte> input, PhysicalUserActivityCategory category)
