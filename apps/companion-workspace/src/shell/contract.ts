@@ -227,6 +227,9 @@ export type PageMessage =
   | { kind: "settings.action"; action: SettingsAction; arg?: string }
   | { kind: "app.quit" };
 
+/** "Hold" or "Double-tap", for hints that name the talk shortcut. */
+export const talkGesture = (state: ShellState) => (state.settings.shortcuts.talk.trigger === "doubleTap" ? "Double-tap" : "Hold");
+
 export function parseShellState(value: unknown): ShellState | null {
   const parsed = shellStateSchema.safeParse(value);
   return parsed.success ? parsed.data : null;

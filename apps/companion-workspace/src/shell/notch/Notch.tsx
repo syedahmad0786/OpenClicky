@@ -28,6 +28,7 @@ export function Notch({ state }: { state: ShellState }) {
   const [focusComposer, setFocusComposer] = useState(false);
   const composerFocusTaken = useCallback(() => setFocusComposer(false), []);
   useEffect(() => listenToHost((m) => { if (m.kind === "composer.focus") setFocusComposer(true); }), []);
+  useEffect(() => { if (phase === "collapsed") setFocusComposer(false); }, [phase]); // a stale request must not fire on a later open
   const root = useRef<HTMLDivElement>(null);
   const phaseRef = useRef(phase);
   const tabRef = useRef(tab);

@@ -1,6 +1,6 @@
 import { useEffect, useRef, type KeyboardEvent } from "react";
 import { postPage } from "../bridge";
-import type { ShellState } from "../contract";
+import { talkGesture, type ShellState } from "../contract";
 import { PillButton } from "../ui";
 import { MicIcon } from "./icons";
 
@@ -56,7 +56,7 @@ export function ChatTab({ state, draft, onDraft, focusComposer, onComposerFocuse
       </div>
       <div className="notch-chat__bar">
         <PillButton variant="primary" className="notch-chat__talk" icon={<MicIcon />} onClick={() => postPage({ kind: "talk.toggle" })}>
-          {talk.length ? `Hold ${talk.join(" + ")} to talk` : "Talk"}
+          {talk.length ? `${talkGesture(state)} ${talk.join(" + ")} to talk` : "Talk"}
         </PillButton>
         <textarea
           ref={input} className="notch-chat__input" rows={1} maxLength={MAX_TEXT} placeholder="Ask OpenClicky…" aria-label="Message OpenClicky"

@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import type { ShellState } from "../contract";
+import { talkGesture, type ShellState } from "../contract";
 import { Badge, Group, KeyCaps, PillButton, Row } from "../ui";
 import { act, ConfirmRow, Page } from "./common";
 
@@ -59,7 +59,7 @@ export function RoutinesPage({ state }: { state: ShellState }) {
     <Page title="Routines" subtitle="Things OpenClicky does on a schedule, on this PC.">
       {routines.length === 0 ? (
         <div className="settings-empty">
-          <p>Hold <KeyCaps keys={state.hotkeys.talk} /> and tell OpenClicky what to do, and when.</p>
+          <p>{talkGesture(state)} <KeyCaps keys={state.hotkeys.talk} /> and tell OpenClicky what to do, and when.</p>
           <p className="settings-empty__example">“Every weekday at 8:30, summarise my unread email.”</p>
         </div>
       ) : (

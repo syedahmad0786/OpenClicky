@@ -155,10 +155,12 @@ public sealed class TalkOrchestrator : IDisposable
     public void Cancel()
     {
         _conversationActive = false;
+        DiscardHeldListening();
         CancelTurn();
     }
 
-    private void CancelTurn()
+    /// <param name="keepMic">Reveal of a held press: the shared microphone is already recording for the new turn.</param>
+    private void CancelTurn(bool keepMic = false)
     {
         var wasListening = _state == CompanionVoiceState.Listening;
         var turn = Interlocked.Exchange(ref _turnCts, null);
@@ -169,7 +171,7 @@ public sealed class TalkOrchestrator : IDisposable
         Interlocked.Exchange(ref _liveStt, null)?.Dispose();
         Interlocked.Exchange(ref _interruptionStt, null)?.Dispose();
         TranscriptChanged?.Invoke("");
-        if (_mic.IsRecording)
+        if (!keepMic && _mic.IsRecording)
         {
             try { _mic.StopToWav(); }
             catch (Exception ex) { _log($"mic_stop_error={ex.GetType().Name}"); }
@@ -184,35 +186,130 @@ public sealed class TalkOrchestrator : IDisposable
     {
         if (_disposed || _state == CompanionVoiceState.Listening) return;
         CancelTurn();
-        _turnCts = new CancellationTokenSource();
-        try
-        {
-            var stt = _sttFactory();
-            if (requireEndpoint && stt is not ILiveSttClient)
-                throw new InvalidOperationException("Download accurate voice in Settings for hands-free conversation");
-            if (stt is ILiveSttClient live)
-            {
-                _liveStt = live;
-                live.TranscriptChanged += text =>
-                {
-                    if (!ReferenceEquals(_liveStt, live) || _state != CompanionVoiceState.Listening) return;
-                    TranscriptChanged?.Invoke(text);
-                    _overlay.ShowTranscript(text);
-                };
-                live.UtteranceEnded += OnUtteranceEnded;
-                live.ListeningFailed += OnListeningFailed;
-                live.StartListening();
-            }
-            else _mic.Start();
-            SetState(CompanionVoiceState.Listening);
-            _overlay.ShowListening();
-        }
+        try { Adopt(CreateRecorder(requireEndpoint), endOnPause: true); }
         catch (Exception ex)
         {
             _conversationActive = false;
             CancelTurn();
             ReportAssistantMessage($"Could not start your microphone: {ex.Message}. Type your request instead.");
         }
+    }
+
+    /// <summary>A live recognizer, or the shared microphone when <see cref="Live"/> is null.</summary>
+    private sealed class Recorder(ILiveSttClient? live)
+    {
+        public ILiveSttClient? Live { get; } = live;
+        public bool Started;
+    }
+
+    private Recorder CreateRecorder(bool requireEndpoint)
+    {
+        var stt = _sttFactory();
+        if (requireEndpoint && stt is not ILiveSttClient)
+            throw new InvalidOperationException("Download accurate voice in Settings for hands-free conversation");
+        return new Recorder(stt as ILiveSttClient);
+    }
+
+    private void StartRecorder(Recorder recorder)
+    {
+        if (recorder.Started) return;
+        if (recorder.Live is { } live) live.StartListening();
+        else _mic.Start();
+        recorder.Started = true;
+    }
+
+    private void DisposeRecorder(Recorder recorder)
+    {
+        if (recorder.Live is { } live) { live.Dispose(); return; }
+        if (!recorder.Started || !_mic.IsRecording) return;
+        try { _mic.StopToWav(); }
+        catch (Exception ex) { _log($"mic_stop_error={ex.GetType().Name}"); }
+    }
+
+    /// <summary>Makes <paramref name="recorder"/> the visible listening turn. A held press ends on release only, not on a pause.</summary>
+    private void Adopt(Recorder recorder, bool endOnPause)
+    {
+        _turnCts = new CancellationTokenSource();
+        if (recorder.Live is { } live)
+        {
+            _liveStt = live;
+            live.TranscriptChanged += text =>
+            {
+                if (!ReferenceEquals(_liveStt, live) || _state != CompanionVoiceState.Listening) return;
+                TranscriptChanged?.Invoke(text);
+                _overlay.ShowTranscript(text);
+            };
+            if (endOnPause) live.UtteranceEnded += OnUtteranceEnded;
+            live.ListeningFailed += OnListeningFailed;
+        }
+        StartRecorder(recorder);
+        SetState(CompanionVoiceState.Listening);
+        _overlay.ShowListening();
+    }
+
+    private Recorder? _held;
+    private Exception? _heldError;
+    private bool _heldPending;
+    private long _pressId;
+
+    /// <summary>How long after a talk press it becomes visible: the 150 ms hold plus this is the 400 ms tap window.</summary>
+    public TimeSpan HeldRevealDelay { get; set; } = TimeSpan.FromMilliseconds(250);
+
+    /// <summary>The talk shortcut's press became visible (the tray pauses a task and cancels a pending submission).</summary>
+    public event Action? HeldTalkStarted;
+
+    /// <summary>A press is recording silently and is not shown yet.</summary>
+    public bool HeldPending => _heldPending;
+
+    /// <summary>
+    /// A shortcut press: start recording with nothing visible. The current turn and its reply keep going, no overlay
+    /// shows and no error is reported until <see cref="RevealHeldListening"/>; <see cref="DiscardHeldListening"/> leaves no trace.
+    /// </summary>
+    public void BeginHeldListening()
+    {
+        if (_disposed || _heldPending || _state == CompanionVoiceState.Listening) return;
+        _heldPending = true;
+        _heldError = null;
+        try
+        {
+            var recorder = CreateRecorder(requireEndpoint: false);
+            StartRecorder(recorder);
+            _held = recorder;
+        }
+        catch (Exception ex) { _heldError = ex; _held = null; }
+    }
+
+    /// <summary>The held press is real (past the tap window, or released normally): end the previous turn and reply, then listen visibly.</summary>
+    public bool RevealHeldListening()
+    {
+        if (!_heldPending) return false;
+        _heldPending = false;
+        var recorder = Interlocked.Exchange(ref _held, null);
+        var error = _heldError;
+        _heldError = null;
+        CancelTurn(keepMic: recorder is { Live: null });
+        if (recorder is null)
+        {
+            ReportAssistantMessage($"Could not start your microphone: {error?.Message}. Type your request instead.");
+            return true;
+        }
+        try { Adopt(recorder, endOnPause: false); }
+        catch (Exception ex)
+        {
+            DisposeRecorder(recorder);
+            CancelTurn();
+            ReportAssistantMessage($"Could not start your microphone: {ex.Message}. Type your request instead.");
+        }
+        return true;
+    }
+
+    /// <summary>A cancelled press: drop the silent recording; nothing visible happens.</summary>
+    public void DiscardHeldListening()
+    {
+        if (!_heldPending) return;
+        _heldPending = false;
+        _heldError = null;
+        if (Interlocked.Exchange(ref _held, null) is { } recorder) DisposeRecorder(recorder);
     }
 
     public void StartConversation()
@@ -335,27 +432,43 @@ public sealed class TalkOrchestrator : IDisposable
     public void StopWalkthrough()
     {
         Walkthrough.Stop();
-        Cancel();
+        _conversationActive = false;
+        CancelTurn(); // a held shortcut press (recording silently) is not the walkthrough's to drop
         WalkthroughChanged?.Invoke(Walkthrough.View);
     }
 
-    private void OnPressed(object? sender, EventArgs e)
+    /// <summary>Talk press: record silently; it becomes visible only once the 400 ms tap window has passed.</summary>
+    private async void OnPressed(object? sender, EventArgs e)
     {
-        var before = _turnCts;
-        BeginListening();
-        _shortcutTurn = ReferenceEquals(_turnCts, before) ? null : _turnCts;
+        _shortcutTurn = null;
+        BeginHeldListening();
+        if (!_heldPending) return;
+        var press = ++_pressId;
+        await Task.Delay(HeldRevealDelay);
+        if (press == _pressId) RevealTalk();
     }
 
-    /// <summary>A cancelled release (a tap, another key, Esc) drops the turn this press started without a word;
-    /// a conversation that was running carries on listening.</summary>
+    private void RevealTalk()
+    {
+        if (!RevealHeldListening()) return;
+        _shortcutTurn = _state == CompanionVoiceState.Listening ? _turnCts : null;
+        HeldTalkStarted?.Invoke();
+    }
+
+    /// <summary>A cancelled release (a tap, another key, Esc) inside the tap window leaves no trace; later, it drops the
+    /// turn this press started without a word (a conversation that was running carries on listening).</summary>
     private async void OnReleased(object? sender, EventArgs e)
     {
-        var started = Interlocked.Exchange(ref _shortcutTurn, null);
+        _pressId++; // this press's reveal timer is moot
         if (e is ShortcutEndedEventArgs { Cancelled: true })
         {
+            if (_heldPending) { DiscardHeldListening(); return; }
+            var started = Interlocked.Exchange(ref _shortcutTurn, null);
             if (started is not null && ReferenceEquals(_turnCts, started)) CancelCurrentTurn();
             return;
         }
+        if (_heldPending) RevealTalk();
+        _shortcutTurn = null;
         await EndListeningAsync();
     }
     private async void OnUtteranceEnded() => await EndListeningAsync();

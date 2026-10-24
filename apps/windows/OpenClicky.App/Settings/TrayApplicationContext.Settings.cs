@@ -21,6 +21,7 @@ internal sealed partial class TrayApplicationContext
     private NAudioMicrophoneRecorder? _micTest;
     private System.Windows.Forms.Timer? _micTestTimer;
     private bool _accountBusy, _whisperBusy;
+    private int _recordGeneration;
     /// <summary>One native modal at a time from the notch: a double click must not stack warnings, prompts or pickers.</summary>
     private bool _settingsModalOpen;
 
@@ -461,6 +462,7 @@ internal sealed partial class TrayApplicationContext
     {
         if (SettingsActionArgs.HotkeyKey(row) is not { } key || SettingsActionArgs.HotkeyAction(row) is not { } action) return;
         var resume = _settings.Paused;
+        var generation = ++_recordGeneration;
         if (resume)
         {
             try { _hotkey.Start(); }
@@ -468,6 +470,7 @@ internal sealed partial class TrayApplicationContext
         }
         _hotkey.Record(action, binding =>
         {
+            if (generation != _recordGeneration) return; // replaced by a newer recording, which owns the hook now
             if (resume && _settings.Paused) _hotkey.Stop();
             if (binding is null)
             {

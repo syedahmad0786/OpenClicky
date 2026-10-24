@@ -80,4 +80,20 @@ public class ShortcutMonitorTests
         monitor.HandleKey(0x1B, true, false, 100);
         Assert.Equal(2, escapes);
     }
+
+    [Fact]
+    public void AMissedEscKeyUpDoesNotSwallowTheNextEsc()
+    {
+        var escHeld = true;
+        using var monitor = new ShortcutMonitor { IsKeyDown = vk => vk != 0x1B || escHeld };
+        var escapes = 0;
+        monitor.EscapePressed += (_, _) => escapes++;
+        monitor.HandleKey(0x1B, true, false, 0);
+        escHeld = false; // its key-up happened on the secure desktop
+        monitor.HandleKey(0x41, true, false, 500);
+        monitor.HandleKey(0x41, false, false, 520);
+        escHeld = true;
+        monitor.HandleKey(0x1B, true, false, 600);
+        Assert.Equal(2, escapes);
+    }
 }

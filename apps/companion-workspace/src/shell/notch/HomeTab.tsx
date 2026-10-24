@@ -1,5 +1,5 @@
 import { postPage } from "../bridge";
-import type { JobCard, ShellState } from "../contract";
+import { talkGesture, type JobCard, type ShellState } from "../contract";
 import { STOCK } from "../deck/JobCardView";
 import { Badge, CloseIcon, KeyCaps, PaperCard, PillButton } from "../ui";
 
@@ -58,7 +58,7 @@ export function HomeTab({ state, onOpenSettings }: { state: ShellState; onOpenSe
       <div className="notch-body">
         <h2 className="notch-home__greeting">{greetingFor(new Date().getHours(), state.user.displayName)}</h2>
         <p className="notch-home__hint">
-          {talk.length ? <>Hold <KeyCaps keys={talk} /> and ask for anything</> : "Ask for anything"}
+          {talk.length ? <>{talkGesture(state)} <KeyCaps keys={talk} /> and ask for anything</> : "Ask for anything"}
         </p>
         {state.featured ? <FeaturedJob job={state.featured} /> : null}
       </div>

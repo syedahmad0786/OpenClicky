@@ -131,6 +131,7 @@ public sealed class ShortcutMonitor : IPushToTalkMonitor
     internal bool HandleKey(int vk, bool down, bool injected, long now)
     {
         if (!injected) DropMissedKeyUps(vk, now);
+        if (_escapeDown && vk != VkEscape && !IsKeyDown(VkEscape)) _escapeDown = false; // its key-up was missed
         if (!injected && vk == VkEscape)
         {
             if (down && !_escapeDown && !_machine.IsRecording) Post(() => EscapePressed?.Invoke(this, EventArgs.Empty));

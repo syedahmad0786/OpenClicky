@@ -1196,28 +1196,63 @@ public class CompanionWorkflowTests
         public void Dispose() { }
     }
     [Fact]
-    public void CancelledTalkReleaseDropsTheTurnSilently()
+    public void CancelledTalkPressInsideTheTapWindowIsInvisible()
     {
         var hotkey = new RaisingHotkey();
         var mic = new Mic();
+        var tts = new StopCountingTts();
         var talkCalls = 0;
         var messages = new List<string>();
+        var states = new List<CompanionVoiceState>();
         using var talk = new TalkOrchestrator(hotkey, new Overlay(), new Capture(), mic, () => null,
-            () => { talkCalls++; return null; }, new Tts(), () => new AppSettings { PersistConversationHistory = false }, log: _ => { });
+            () => { talkCalls++; return null; }, tts, () => new AppSettings { PersistConversationHistory = false }, log: _ => { });
         talk.MessageReceived += (_, text) => messages.Add(text);
+        talk.StateChanged += states.Add;
+        var started = 0;
+        talk.HeldTalkStarted += () => started++;
+        talk.HeldRevealDelay = TimeSpan.FromMilliseconds(500); // xunit waits for the async press handler; the asserts below run long before
         talk.Start();
 
         hotkey.Press();
-        Assert.Equal(CompanionVoiceState.Listening, talk.State); // the listening state may show
+        Assert.True(mic.IsRecording); // recording silently
+        Assert.True(talk.HeldPending);
         hotkey.Release(cancelled: true);
-        Assert.Equal(CompanionVoiceState.Idle, talk.State);
         Assert.False(mic.IsRecording);
+        Assert.Empty(states); // no listening state, nothing reset
+        Assert.Equal(0, tts.Stops); // a reply that was speaking keeps speaking
         Assert.Empty(messages);
         Assert.Equal(0, talkCalls);
+        Assert.Equal(0, started);
 
         hotkey.Press();
-        hotkey.Release(cancelled: false); // control: a real release does run the turn
+        hotkey.Release(cancelled: false); // a normal release inside the window still sends the turn
+        Assert.Equal(1, started);
+        Assert.Contains(CompanionVoiceState.Listening, states);
         Assert.True(messages.Count + talkCalls > 0);
+    }
+
+    [Fact]
+    public void TalkPressBecomesVisibleAfterTheTapWindow()
+    {
+        var hotkey = new RaisingHotkey();
+        var mic = new Mic();
+        using var talk = new TalkOrchestrator(hotkey, new Overlay(), new Capture(), mic, () => null,
+            () => null, new Tts(), () => new AppSettings { PersistConversationHistory = false }, log: _ => { });
+        talk.HeldRevealDelay = TimeSpan.Zero; // Task.Delay(0) completes at once
+        talk.Start();
+        hotkey.Press();
+        Assert.Equal(CompanionVoiceState.Listening, talk.State);
+        Assert.True(mic.IsRecording); // the silent recording is the turn's recording
+        hotkey.Release(cancelled: true); // Esc or another key after the window: dropped without a word
+        Assert.Equal(CompanionVoiceState.Idle, talk.State);
+        Assert.False(mic.IsRecording);
+    }
+
+    private sealed class StopCountingTts : ITtsClient
+    {
+        public int Stops;
+        public Task SpeakAsync(string text, CancellationToken token = default) => Task.CompletedTask;
+        public void Stop() => Stops++;
     }
 
     private sealed class RaisingHotkey : IPushToTalkMonitor

@@ -20,6 +20,9 @@ public sealed record HotkeyBinding(IReadOnlyList<string> Keys, HotkeyTrigger Tri
 
     [JsonIgnore] public string DisplayName => string.Join("+", Keys);
 
+    /// <summary>"Hold Ctrl+Alt" or "Double-tap Ctrl".</summary>
+    [JsonIgnore] public string Gesture => (Trigger == HotkeyTrigger.Hold ? "Hold " : "Double-tap ") + DisplayName;
+
     public Hotkey ToView() => new(Keys.Take(5).ToList(), Trigger);
 
     /// <summary>Same trigger and the same keys in any order.</summary>

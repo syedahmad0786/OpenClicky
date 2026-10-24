@@ -239,19 +239,20 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         _routineTimer.Start();
         _home.Disposed += (_, _) => _routineTimer.Dispose();
         // Esc (never swallowed) stops OpenClicky only while it is doing something; a cancelled shortcut ends itself.
-        _hotkey.EscapePressed += (_, _) => { if (IsBusy) Stop(); };
-        _hotkey.Pressed += (_, _) => _submissionCts?.Cancel();
-        _hotkey.Pressed += (_, _) => PauseTask();
+        // Speech outside a turn (announcements, previews) stops too; SpeechOutput.Stop is a no-op when nothing plays.
+        _hotkey.EscapePressed += (_, _) => { _tts.Stop(); if (IsBusy) Stop(); };
+        // Only once a talk press is past the tap window: a cancelled press must leave no trace.
+        _talk.HeldTalkStarted += () => { _submissionCts?.Cancel(); PauseTask(); };
         _hotkey.TextMode += (_, _) => OpenTextMode();
-        _hotkey.DictateStarted += (_, _) => BeginShortcutDictation(handsFree: false);
-        _hotkey.DictateEnded += (_, e) => EndShortcutDictation(e.Cancelled);
+        _hotkey.DictateStarted += (_, _) => BeginHeldDictation();
+        _hotkey.DictateEnded += (_, e) => EndHeldDictation(e.Cancelled);
         _hotkey.HandsFreeToggled += (_, _) => ToggleHandsFreeDictation();
 
         _tray = new NotifyIcon
         {
             Icon = AppTheme.Icon,
             Visible = true,
-            Text = $"OpenClicky — hold {TalkShortcutName}",
+            Text = $"OpenClicky — {TalkGesture} to talk",
         };
 
         _tray.ContextMenuStrip = BuildTrayMenu();
@@ -282,7 +283,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         catch (Exception ex) { Log("takeover_monitor_error=" + ex.GetType().Name); ClassicMessage("Automatic pause on physical input is unavailable. Use Stop before taking over a running task."); }
         _companionDock.Show();
         if (_settings.AwarenessEnabled) _guideTimer.Start();
-        Log($"tray ready — hold {TalkShortcutName}");
+        Log($"tray ready — {TalkGesture} to talk");
         if (string.IsNullOrWhiteSpace(_settings.OpenRouterApiKey)
             && !ProviderFactory.IsChatGptSignedIn(_secrets))
         {
@@ -988,6 +989,18 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             if (_dictationAutoInsert && target is not null)
             {
                 if (string.IsNullOrWhiteSpace(text)) return true;
+                if (!await WaitForModifiersReleasedAsync(token).ConfigureAwait(false))
+                {
+                    _dictationAutoInsert = false; // keys still held: keep the draft for review instead of typing
+                    OnUi(() =>
+                    {
+                        if (!_dictationActive || !ReferenceEquals(target, _dictationTarget)) return;
+                        _home.AcceptDictationTranscript(text);
+                        _home.SetDictationResult("Keys were still held, so nothing was typed. Review the draft, then Insert or Cancel.", true);
+                        ShowClassic();
+                    });
+                    return true;
+                }
                 var segment = _insertedDictation.Length > 0 && !char.IsWhiteSpace(_insertedDictation[^1]) && !char.IsWhiteSpace(text[0]) ? " " + text : text;
                 var result = await target.InsertAsync(segment, _executor, token, requireCurrentFocus: true,
                     exclusions: AgentDenyList.ParseExtraFragments(_settings.AgentDenyListExtra)).ConfigureAwait(false);
@@ -1133,29 +1146,31 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
 
     private void BeginDictationAtCurrentTarget()
     {
-        if (_talk.State != CompanionVoiceState.Idle || _talk.ConversationActive || _taskCts is not null)
-        {
-            _tray.ShowBalloonTip(3000, "OpenClicky dictation", "Stop the current voice turn or task before dictating.", ToolTipIcon.Info);
-            return;
-        }
+        if (DictationBlocker(out var target) is { } error) { ReportDictationBlocker(error); return; }
         StopWalkthrough();
-        if (!LocalWhisperModel.IsAvailable)
-        {
-            const string localError = "Automatic dictation requires the local Whisper model. Download it in Settings → Voice first.";
-            _tray.ShowBalloonTip(5000, "Local dictation unavailable", localError, ToolTipIcon.Warning);
-            ShowClassic();
-            ClassicStatus(localError);
-            return;
-        }
-        if (!DictationTarget.TryCapture(out var target, out var error, AgentDenyList.ParseExtraFragments(_settings.AgentDenyListExtra)) || target is null)
-        {
-            _tray.ShowBalloonTip(5000, "Dictation target unavailable", error, ToolTipIcon.Warning);
-            ShowClassic();
-            ClassicStatus(error);
-            return;
-        }
+        StartDictation(target!);
+    }
 
-        StartDictation(target);
+    private const string DictationBusy = "Stop the current voice turn or task before dictating.";
+    private const string DictationNeedsWhisper = "Automatic dictation requires the local Whisper model. Download it in Settings → Voice first.";
+
+    /// <summary>Why dictation cannot start now (null when it can, with the focused field in <paramref name="target"/>). Shows nothing.</summary>
+    private string? DictationBlocker(out DictationTarget? target)
+    {
+        target = null;
+        if (_talk.State != CompanionVoiceState.Idle || _talk.ConversationActive || _taskCts is not null) return DictationBusy;
+        if (!LocalWhisperModel.IsAvailable) return DictationNeedsWhisper;
+        if (!DictationTarget.TryCapture(out target, out var error, AgentDenyList.ParseExtraFragments(_settings.AgentDenyListExtra)) || target is null)
+            return error;
+        return null;
+    }
+
+    private void ReportDictationBlocker(string error)
+    {
+        if (error == DictationBusy) { _tray.ShowBalloonTip(3000, "OpenClicky dictation", error, ToolTipIcon.Info); return; }
+        _tray.ShowBalloonTip(5000, error == DictationNeedsWhisper ? "Local dictation unavailable" : "Dictation target unavailable", error, ToolTipIcon.Warning);
+        ShowClassic();
+        ClassicStatus(error);
     }
 
     private void StartDictation(DictationTarget target)
@@ -1214,25 +1229,28 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
 
     private void CancelDictation()
     {
+        var hidden = DictationHidden;
         _talk.Cancel();
         _dictationAutoInsert = false;
         _dictationActive = false;
         _dictationTarget = null;
+        if (hidden) return; // a dictate hold inside its tap window never showed anything
         _home.EndDictation();
         _home.SetStatus("Dictation closed · microphone stopped");
     }
 
-    private string TalkShortcutName => ShortcutBindings.From(_settings).Talk.DisplayName;
+    /// <summary>"Hold Ctrl+Alt" or "Double-tap Ctrl+Alt".</summary>
+    private string TalkGesture => ShortcutBindings.From(_settings).Talk.Gesture;
 
     /// <summary>Esc stops only what is running: a task, a voice turn or its speech, dictation, a conversation or a walkthrough.</summary>
-    private bool IsBusy => _taskCts is not null || _submissionCts is not null || _dictationActive || _talk.ConversationActive
+    private bool IsBusy => _taskCts is not null || _submissionCts is not null || (_dictationActive && !DictationHidden) || _talk.ConversationActive
         || _talk.State != CompanionVoiceState.Idle || _talk.Walkthrough.View.Active;
 
     /// <summary>After a settings change: the monitor applies new bindings once no shortcut is held.</summary>
     private void ApplyShortcutBindings()
     {
         _hotkey.Bindings = ShortcutBindings.From(_settings);
-        _tray.Text = $"OpenClicky — hold {TalkShortcutName}";
+        _tray.Text = $"OpenClicky — {TalkGesture} to talk";
         _home.RefreshShortcut();
         RequestShellPush();
         LogShortcuts("shortcut_bindings");
@@ -1254,44 +1272,125 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         _shell.PostComposerFocus();
     }
 
-    private bool _dictationHeld;
+    private bool _dictationHeld, _dictationShown;
+    private string? _dictationHoldError;
+    private long _dictationPress;
 
-    /// <summary>Dictate shortcut down (or hands-free on): dictate into the focused field; each phrase is inserted as it ends.</summary>
-    private void BeginShortcutDictation(bool handsFree)
+    /// <summary>A dictate hold still inside its tap window: recording silently, nothing shown yet.</summary>
+    private bool DictationHidden => _dictationHeld && !_dictationShown;
+
+    /// <summary>
+    /// Dictate shortcut down: check and capture the target and record, all silently. The dictation UI (or why it cannot
+    /// start) shows only once the hold passes the 400 ms tap window or is released normally.
+    /// </summary>
+    private async void BeginHeldDictation()
     {
-        if (_dictationActive) return;
-        BeginDictationAtCurrentTarget();
-        if (!_dictationActive) return;
-        _dictationHeld = !handsFree;
+        if (_dictationActive || _dictationHeld) return;
+        _dictationHeld = true;
+        _dictationShown = false;
+        var press = ++_dictationPress;
+        _dictationHoldError = DictationBlocker(out var target);
+        if (_dictationHoldError is null)
+        {
+            _dictationTarget = target;
+            _dictationActive = true;
+            _dictationAutoInsert = true;
+            _insertedDictation = "";
+            _talk.BeginHeldListening(); // picks the local Whisper recognizer because _dictationActive is set
+        }
+        await Task.Delay(_talk.HeldRevealDelay);
+        if (press == _dictationPress) ShowHeldDictation();
     }
 
-    /// <summary>Dictate shortcut up: a tap or Esc discards; otherwise the last phrase is inserted, then dictation closes.</summary>
-    private void EndShortcutDictation(bool cancelled)
+    private void ShowHeldDictation()
+    {
+        if (!_dictationHeld || _dictationShown) return;
+        _dictationShown = true;
+        if (_dictationHoldError is { } error)
+        {
+            _dictationHeld = false;
+            ReportDictationBlocker(error);
+            return;
+        }
+        if (!_dictationActive || _dictationTarget is not { } target) return;
+        if (_talk.Walkthrough.View.Active) StopWalkthrough();
+        _home.BeginDictation(target.AppTitle, target.ControlName, automatic: true);
+        _talk.RevealHeldListening();
+    }
+
+    /// <summary>Dictate shortcut up. Cancelled inside the tap window: no trace. Otherwise the phrase is transcribed and
+    /// inserted once every key is physically up (see <see cref="WaitForModifiersReleasedAsync"/>), then dictation closes.</summary>
+    private async void EndHeldDictation(bool cancelled)
     {
         if (!_dictationHeld) return;
+        _dictationPress++; // the reveal timer of this press is moot
+        var target = _dictationTarget;
+        bool Same() => _dictationActive && target is not null && ReferenceEquals(target, _dictationTarget);
+        if (cancelled)
+        {
+            if (Same()) CancelDictation(); // silent while still hidden
+            _dictationHeld = false;
+            return;
+        }
+        ShowHeldDictation();
         _dictationHeld = false;
-        if (cancelled) { if (_dictationActive) CancelDictation(); return; }
-        _ = FinishShortcutDictationAsync();
+        if (!Same()) return;
+        try
+        {
+            await _talk.EndListeningAsync();
+            // A failed insert switched auto-insert off and left the draft in the classic window for review: keep that open.
+            if (Same() && _dictationAutoInsert) CancelDictation();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Log("dictation_hold_error=" + ex.GetType().Name);
+            if (Same()) CancelDictation();
+        }
     }
 
+    /// <summary>Hands-free shortcut: the dictation flow with a phrase inserted as each ends, until the next double-tap.</summary>
     private void ToggleHandsFreeDictation()
     {
-        if (_dictationHeld) return; // the hold owns this dictation; its release ends it
-        if (_dictationActive) _ = FinishShortcutDictationAsync();
-        else BeginShortcutDictation(handsFree: true);
+        if (_dictationHeld) return; // a hold owns this dictation; its release ends it
+        if (_dictationActive) _ = FinishHandsFreeDictationAsync();
+        else BeginDictationAtCurrentTarget();
     }
 
-    private async Task FinishShortcutDictationAsync()
+    private async Task FinishHandsFreeDictationAsync()
     {
         var target = _dictationTarget;
-        _talk.StopConversationAfterCurrentTurn(); // no new phrase after this one
-        if (_talk.State == CompanionVoiceState.Listening) await _talk.EndListeningAsync();
-        // ponytail: polls for the in-flight insert to finish (max 30 s); a TalkOrchestrator "turn finished" task if this needs precision.
-        for (var waited = 0; _talk.State != CompanionVoiceState.Idle && waited < 30_000; waited += 50) await Task.Delay(50);
-        // A failed insert switched auto-insert off and left the draft in the classic window for review: keep that open.
-        if (_dictationActive && ReferenceEquals(target, _dictationTarget) && _dictationAutoInsert && _talk.State == CompanionVoiceState.Idle)
-            CancelDictation();
+        bool Same() => _dictationActive && target is not null && ReferenceEquals(target, _dictationTarget);
+        try
+        {
+            _talk.StopConversationAfterCurrentTurn(); // no new phrase after this one
+            if (_talk.State == CompanionVoiceState.Listening) await _talk.EndListeningAsync();
+            // ponytail: polls for the in-flight insert to finish (max 30 s); a TalkOrchestrator "turn finished" task if this needs precision.
+            for (var waited = 0; _talk.State != CompanionVoiceState.Idle && waited < 30_000; waited += 50) await Task.Delay(50);
+            if (!Same()) return;
+            if (_talk.State != CompanionVoiceState.Idle) { Log("dictation_finish_timeout"); CancelDictation(); return; }
+            if (_dictationAutoInsert) CancelDictation(); // else a failed insert left its draft open for review
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Log("dictation_finish_error=" + ex.GetType().Name);
+            if (Same()) CancelDictation();
+        }
     }
+
+    /// <summary>Never type while Ctrl, Alt, Shift or Win is physically down (Ctrl+Enter would send). False if still held after 10 s.</summary>
+    private static async Task<bool> WaitForModifiersReleasedAsync(CancellationToken token)
+    {
+        int[] modifiers = [0x10, 0x11, 0x12, 0x5B, 0x5C];
+        for (var waited = 0; waited < 10_000; waited += 30)
+        {
+            if (!modifiers.Any(vk => (GetAsyncKeyState(vk) & 0x8000) != 0)) return true;
+            await Task.Delay(30, token).ConfigureAwait(false);
+        }
+        return false;
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int vKey);
 
     private sealed class SteeredPlanner(IAgentPlanner planner, Func<string> steering) : IAgentPlanner
     {
@@ -1394,7 +1493,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         RefreshConnection();
         ResetShellChat();
         Log(
-            $"settings_applied hotkey={TalkShortcutName} provider={_settings.AuthProvider} " +
+            $"settings_applied hotkey={TalkGesture} provider={_settings.AuthProvider} " +
             $"openrouter_key={(string.IsNullOrEmpty(_settings.OpenRouterApiKey) ? "missing" : "set")} " +
             $"chatgpt={(ProviderFactory.IsChatGptSignedIn(_secrets) ? "signed-in" : "out")}");
     }

@@ -381,3 +381,21 @@ it("composer.focus (text mode) focuses the chat field, also when it arrives befo
   host.send({ kind: "composer.focus" });
   expect(screen.getByRole("textbox", { name: "Message OpenClicky" })).toHaveFocus();
 });
+
+it("a composer.focus left over when the notch collapses does not fire on a later open", () => {
+  vi.useFakeTimers();
+  const host = mockHost();
+  const { rerender } = render(<Notch state={open("home")} />);
+  host.send({ kind: "composer.focus" }); // the chat tab never showed
+  rerender(<Notch state={closed()} />);
+  act(() => { vi.advanceTimersByTime(1_000); });
+  rerender(<Notch state={open("chat")} />);
+  expect(screen.getByRole("textbox", { name: "Message OpenClicky" })).not.toHaveFocus();
+});
+
+it("talk hints follow the talk trigger", () => {
+  mockHost();
+  const state = open("chat");
+  render(<Notch state={{ ...state, settings: { ...state.settings, shortcuts: { ...state.settings.shortcuts, talk: { keys: ["Ctrl", "Alt"], trigger: "doubleTap" } } } }} />);
+  expect(screen.getByRole("button", { name: "Double-tap Ctrl + Alt to talk" })).toBeInTheDocument();
+});
