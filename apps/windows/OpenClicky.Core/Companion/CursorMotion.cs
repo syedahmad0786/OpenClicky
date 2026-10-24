@@ -27,14 +27,18 @@ public sealed class CursorSpring
 
     public CursorSpring(Pt start, double stiffness = CursorConstants.Stiffness, double damping = CursorConstants.Damping)
     {
-        _k = stiffness; _c = damping; _x = start.X; _y = start.Y;
+        _k = stiffness; _c = damping;
+        _x = double.IsFinite(start.X) ? start.X : 0;
+        _y = double.IsFinite(start.Y) ? start.Y : 0;
     }
 
     public Pt Position => new((float)_x, (float)_y);
     public Pt Velocity => new((float)_vx, (float)_vy);
 
+    /// <summary>Advances toward <paramref name="target"/>; a non-finite target is ignored (position unchanged).</summary>
     public Pt Step(Pt target, double dtSeconds)
     {
+        if (!float.IsFinite(target.X) || !float.IsFinite(target.Y)) return Position;
         var left = Math.Clamp(double.IsFinite(dtSeconds) ? dtSeconds : 0, 0, MaxDt);
         while (left > 1e-9)
         {
@@ -48,7 +52,13 @@ public sealed class CursorSpring
         return Position;
     }
 
-    public void Snap(Pt p) { _x = p.X; _y = p.Y; _vx = _vy = 0; }
+    /// <summary>Jumps to <paramref name="p"/> and stops; a non-finite component keeps the previous value.</summary>
+    public void Snap(Pt p)
+    {
+        if (float.IsFinite(p.X)) _x = p.X;
+        if (float.IsFinite(p.Y)) _y = p.Y;
+        _vx = _vy = 0;
+    }
 }
 
 /// <summary>Curved fly-to path: quadratic Bezier arcing toward screen-up, ease-in-out cubic timing.</summary>
@@ -58,6 +68,12 @@ public sealed class FlightPath
 
     public FlightPath(Pt from, Pt to)
     {
+        // Non-finite endpoints degrade to a zero-length flight so Duration and At() stay finite.
+        if (!IsFinite(from) || !IsFinite(to))
+        {
+            var keep = IsFinite(to) ? to : IsFinite(from) ? from : new Pt(0, 0);
+            from = to = keep;
+        }
         _from = from; _to = to;
         double dx = to.X - from.X, dy = to.Y - from.Y;
         var dist = Math.Sqrt(dx * dx + dy * dy);
@@ -72,10 +88,13 @@ public sealed class FlightPath
         _control = new((float)((from.X + to.X) / 2 + px * off), (float)((from.Y + to.Y) / 2 + py * off));
     }
 
+    static bool IsFinite(Pt p) => float.IsFinite(p.X) && float.IsFinite(p.Y);
+
     public double DurationSeconds { get; }
 
     public Pt At(double t)
     {
+        if (double.IsNaN(t)) return _from;
         var u = Math.Clamp(t / DurationSeconds, 0, 1);
         if (u <= 0) return _from;
         if (u >= 1) return _to;
@@ -94,11 +113,18 @@ public sealed class ShakeDetector
     readonly List<(Pt P, long Ms)> _samples = [];
     long _lastFire = long.MinValue;
 
-    /// <summary>True once per shake; further shaking within the 1 s cooldown is ignored.</summary>
+    /// <summary>True once per shake; further shaking within the 1 s cooldown is ignored. A clock that goes backwards resets the detector.</summary>
     public bool Add(Pt p, long ms)
     {
+        if ((_samples.Count > 0 && ms < _samples[^1].Ms) || (_lastFire != long.MinValue && ms < _lastFire))
+        {
+            _samples.Clear();
+            _lastFire = long.MinValue;
+        }
         _samples.Add((p, ms));
-        _samples.RemoveAll(s => ms - s.Ms > WindowMs);
+        var old = 0;
+        while (ms - _samples[old].Ms > WindowMs) old++;
+        if (old > 0) _samples.RemoveRange(0, old);
         if (_lastFire != long.MinValue && ms - _lastFire < CooldownMs) return false;
 
         float path = 0;
@@ -108,7 +134,7 @@ public sealed class ShakeDetector
             path += MathF.Sqrt((b.X - a.X) * (b.X - a.X) + (b.Y - a.Y) * (b.Y - a.Y));
         }
         if (path < MinPath) return false;
-        if (Math.Max(Reversals(s => s.X), Reversals(s => s.Y)) < MinReversals) return false;
+        if (Math.Max(Reversals(true), Reversals(false)) < MinReversals) return false;
 
         _lastFire = ms;
         _samples.Clear();
@@ -116,13 +142,13 @@ public sealed class ShakeDetector
     }
 
     /// <summary>Direction flips on one axis, ignoring wiggles shorter than <see cref="MinSegment"/>.</summary>
-    int Reversals(Func<Pt, float> axis)
+    int Reversals(bool xAxis)
     {
         var count = 0; var dir = 0;
-        var anchor = axis(_samples[0].P); var extreme = anchor;
-        foreach (var (pt, _) in _samples.Skip(1))
+        var anchor = xAxis ? _samples[0].P.X : _samples[0].P.Y; var extreme = anchor;
+        for (var i = 1; i < _samples.Count; i++)
         {
-            var v = axis(pt);
+            var v = xAxis ? _samples[i].P.X : _samples[i].P.Y;
             if (dir == 0)
             {
                 if (Math.Abs(v - anchor) >= MinSegment) { dir = Math.Sign(v - anchor); extreme = v; }
@@ -161,8 +187,14 @@ public static class BubbleLayout
         return Clamp(x, tip.Y - 6, w, h, workArea);
     }
 
-    static Box Clamp(float x, float y, float w, float h, Box a) => new(
-        Math.Max(a.X, Math.Min(x, a.Right - w)),
-        Math.Max(a.Y, Math.Min(y, a.Bottom - h)),
-        w, h);
+    /// <summary>Clamps into <paramref name="a"/>; non-finite inputs fall back to the work-area origin / zero size, never NaN.</summary>
+    static Box Clamp(float x, float y, float w, float h, Box a)
+    {
+        if (!float.IsFinite(a.X) || !float.IsFinite(a.Y) || !float.IsFinite(a.W) || !float.IsFinite(a.H)) a = new Box(0, 0, 0, 0);
+        w = float.IsFinite(w) ? w : 0;
+        h = float.IsFinite(h) ? h : 0;
+        x = float.IsFinite(x) ? x : a.X;
+        y = float.IsFinite(y) ? y : a.Y;
+        return new(Math.Max(a.X, Math.Min(x, a.Right - w)), Math.Max(a.Y, Math.Min(y, a.Bottom - h)), w, h);
+    }
 }
