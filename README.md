@@ -41,7 +41,7 @@ Performance is measured separately for capture, transcription, model response an
 
 ## Privacy and control
 
-- Screen questions share the current foreground window or explicitly selected pixels, plus request text, with ChatGPT. Tasks inspect relevant windows/tabs and may retrieve requested saved context. Raw audio is transcribed locally and discarded.
+- Screen questions share every connected display (up to four, the one with your cursor first) with OpenClicky's own windows left out, or only the area you select, plus request text, with ChatGPT. Tasks inspect relevant windows/tabs and may retrieve requested saved context. Raw audio is transcribed locally and discarded.
 - Ambient awareness starts with local activity signals and asks before inspecting a task. Exclusions are applied before supported inspection/capture paths. Window titles are convenience guards, not a security boundary.
 - ChatGPT credentials stay in the protected store. The private local inference adapter gives the managed OpenWork engine short-lived local authentication, not stored provider credentials.
 - Conversations, notes, clips and artifact references persist locally in SQLite; original JSON imports remain for recovery. The history preference is respected. Memory is editable and source-linked; forgetting suppresses recreation from its retained source.

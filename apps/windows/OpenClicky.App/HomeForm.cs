@@ -300,7 +300,7 @@ internal sealed class HomeForm : Form
             if (e.KeyCode == Keys.Enter && !e.Shift) { e.SuppressKeyPress = true; await SendAsync(); }
         };
         _composer.Controls.Add(_prompt, 0, 1);
-        _composer.Controls.Add(AppTheme.Label("Screen questions share the current window or selected area. Tasks may inspect more of the desktop. Check your task access mode.", 8), 0, 2);
+        _composer.Controls.Add(AppTheme.Label("Screen questions share every connected display (up to four, your cursor's first) without OpenClicky's own windows, or only the area you select. Tasks may inspect more of the desktop. Check your task access mode.", 8), 0, 2);
         var actions = new Panel { Dock = DockStyle.Fill, Margin = Padding.Empty };
         _status = AppTheme.Label("Ready when you are", 9);
         _status.Top = 10;

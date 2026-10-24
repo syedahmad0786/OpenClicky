@@ -683,7 +683,7 @@ public sealed class TalkOrchestrator : IDisposable
                 if (all.Count == 0) throw new InvalidOperationException("The screen could not be captured. Select the area you want help with.");
                 if (handle != _windowHandle?.Invoke())
                 { ReportAssistantMessage("The app changed during capture. Ask again for a fresh view."); return; }
-                screens = MonitorCap.Apply(all);
+                screens = MonitorCap.Apply(all, MonitorCap.Max, bounds);
             }
             else { screens = []; context += "\nNo screen image is available. Do not invent visible controls; ask the user to select an area if needed.\n"; }
             if (!selfContainedVisual && _foregroundCaptureEligible is not null && !_foregroundCaptureEligible())

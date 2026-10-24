@@ -99,4 +99,121 @@ public sealed class CaptureExclusionTests
         Assert.Equal(1, restores);
         Assert.Equal(1, scope.RestoreFailures);
     }
+
+    [Fact]
+    public void MonitorCap_AlwaysKeepsTheForegroundWindowMonitorSecond()
+    {
+        // Cursor on monitor 0; the foreground window sits on the far monitor 5, which plain distance would drop.
+        var screens = Enumerable.Range(0, 6).Select(i => Screen(i * 1000, 0, i == 0, $"screen {i + 1} of 6 - x")).ToList();
+        var capped = MonitorCap.Apply(screens, MonitorCap.Max, (5100, 50, 600, 400));
+        Assert.Equal([0, 5000, 1000, 2000], capped.Select(s => s.MonitorLeft));
+        Assert.Equal(["screen 1 of 4 - x", "screen 2 of 4 - x", "screen 3 of 4 - x", "screen 4 of 4 - x"], capped.Select(s => s.Label));
+    }
+
+    [Fact]
+    public void MonitorCap_ForegroundWindowOnTheCursorMonitorOrOffScreenChangesNothing()
+    {
+        var screens = Enumerable.Range(0, 6).Select(i => Screen(i * 1000, 0, i == 0, $"screen {i + 1} of 6 - x")).ToList();
+        var plain = MonitorCap.Apply(screens).Select(s => s.MonitorLeft).ToList();
+        Assert.Equal(plain, MonitorCap.Apply(screens, MonitorCap.Max, (100, 100, 300, 300)).Select(s => s.MonitorLeft));
+        Assert.Equal(plain, MonitorCap.Apply(screens, MonitorCap.Max, (-9000, 0, 300, 300)).Select(s => s.MonitorLeft));
+    }
+
+    private sealed class FakeCapture(Func<IReadOnlyList<ScreenCaptureResult>>? onCapture = null) : IScreenCaptureService
+    {
+        public int Calls;
+        public Task<IReadOnlyList<ScreenCaptureResult>> CaptureAllMonitorsJpegAsync(CancellationToken token = default)
+        { Calls++; return Task.FromResult(onCapture?.Invoke() ?? [Screen(0, 0, true, "screen 1")]); }
+    }
+
+    private static OwnWindowsExcludedCapture Wrapper(FakeCapture inner, FakeWindows w, IReadOnlyList<OwnWindow> own, Action hide, List<TimeSpan> settles) =>
+        new(inner, () => own, w.Get, w.Set, hide, _ => { }, delay: (t, _) => { settles.Add(t); return Task.CompletedTask; });
+
+    [Fact]
+    public async Task OwnWindowsCapture_ExcludesWhileCapturingThenRestoresAfterASettle()
+    {
+        var w = new FakeWindows { Affinity = { [1] = 0, [2] = 0x1 } };
+        var seen = new List<uint>();
+        var inner = new FakeCapture(() => { seen.AddRange(w.Affinity.Values); return [Screen(0, 0, true, "screen 1")]; });
+        var settles = new List<TimeSpan>();
+        var hidden = 0;
+        var capture = Wrapper(inner, w, [new(1, false), new(2, true)], () => hidden++, settles);
+
+        var result = await capture.CaptureAllMonitorsJpegAsync();
+
+        Assert.Single(result);
+        Assert.Equal([0x11u, 0x11u], seen);
+        Assert.Equal(0u, w.Affinity[1]);
+        Assert.Equal(0x1u, w.Affinity[2]);
+        Assert.Equal([TimeSpan.FromMilliseconds(120)], settles);
+        Assert.Equal(0, hidden);
+    }
+
+    [Fact]
+    public async Task OwnWindowsCapture_FailedOverlayHandleHidesTheOverlayButOtherFailuresDoNot()
+    {
+        var w = new FakeWindows { Affinity = { [1] = 0, [2] = 0 }, RefuseSet = { 1, 2 } };
+        var hidden = 0;
+        await Wrapper(new FakeCapture(), w, [new(1, false)], () => hidden++, []).CaptureAllMonitorsJpegAsync();
+        Assert.Equal(0, hidden);
+        await Wrapper(new FakeCapture(), w, [new(1, false), new(2, true)], () => hidden++, []).CaptureAllMonitorsJpegAsync();
+        Assert.Equal(1, hidden);
+    }
+
+    [Fact]
+    public async Task OwnWindowsCapture_NothingToChangeMeansNoSettle()
+    {
+        var w = new FakeWindows { Affinity = { [1] = 0x11 } }; // already excluded by the user's setting
+        var settles = new List<TimeSpan>();
+        await Wrapper(new FakeCapture(), w, [new(1, false)], () => { }, settles).CaptureAllMonitorsJpegAsync();
+        await Wrapper(new FakeCapture(), w, [], () => { }, settles).CaptureAllMonitorsJpegAsync();
+        Assert.Empty(settles);
+        Assert.Empty(w.Calls);
+    }
+
+    [Fact]
+    public async Task OwnWindowsCapture_RestoresWhenTheCaptureThrowsOrIsCancelled()
+    {
+        var w = new FakeWindows { Affinity = { [1] = 0 } };
+        var throwing = Wrapper(new FakeCapture(() => throw new InvalidOperationException()), w, [new(1, false)], () => { }, []);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => throwing.CaptureAllMonitorsJpegAsync());
+        Assert.Equal(0u, w.Affinity[1]);
+
+        using var cts = new CancellationTokenSource();
+        var cancelled = new OwnWindowsExcludedCapture(new FakeCapture(), () => [new(1, false)], w.Get, w.Set, () => { }, _ => { },
+            delay: (_, token) => { cts.Cancel(); token.ThrowIfCancellationRequested(); return Task.CompletedTask; });
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelled.CaptureAllMonitorsJpegAsync(cts.Token));
+        Assert.Equal(0u, w.Affinity[1]);
+    }
+
+    [Fact]
+    public async Task OwnWindowsCapture_OverlappingCapturesNeverRestoreMidCapture()
+    {
+        var w = new FakeWindows { Affinity = { [1] = 0 } };
+        var release = new TaskCompletionSource();
+        var entered = new TaskCompletionSource();
+        var slow = new OwnWindowsExcludedCapture(new GatedCapture(entered, release.Task), () => [new(1, false)], w.Get, w.Set, () => { }, _ => { },
+            delay: (_, _) => Task.CompletedTask);
+        var first = slow.CaptureAllMonitorsJpegAsync();
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        var second = slow.CaptureAllMonitorsJpegAsync();
+        await Task.Delay(100);
+        Assert.False(second.IsCompleted);
+        Assert.Equal(0x11u, w.Affinity[1]);   // still excluded for the first capture; the second has not touched anything
+        Assert.Equal(["1=11"], w.Calls);
+        release.SetResult();
+        await Task.WhenAll(first, second);
+        Assert.Equal(0u, w.Affinity[1]);
+        Assert.Equal(["1=11", "1=0", "1=11", "1=0"], w.Calls);
+    }
+
+    private sealed class GatedCapture(TaskCompletionSource entered, Task release) : IScreenCaptureService
+    {
+        private int _first = 1;
+        public async Task<IReadOnlyList<ScreenCaptureResult>> CaptureAllMonitorsJpegAsync(CancellationToken token = default)
+        {
+            if (Interlocked.Exchange(ref _first, 0) == 1) { entered.SetResult(); await release; }
+            return [Screen(0, 0, true, "screen 1")];
+        }
+    }
 }

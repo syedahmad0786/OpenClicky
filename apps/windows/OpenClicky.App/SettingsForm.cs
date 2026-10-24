@@ -173,7 +173,7 @@ internal sealed class SettingsForm : Form
         _speakReplies = new CheckBox { Text = "Read replies aloud using a Windows voice", Checked = settings.SpeakReplies, AutoSize = true, Margin = new Padding(0,12,0,10) };
         voice.Controls.Add(_speakReplies);
 
-        AddHeading(privacy, "You stay in charge", "Screen questions share the current window or selected area with your AI provider. Tasks may inspect more of the desktop. Images stay in memory.");
+        AddHeading(privacy, "You stay in charge", "Screen questions share every connected display (up to four, the one with your cursor first) with OpenClicky's own windows left out, or only the area you select with your AI provider. Tasks may inspect more of the desktop. Images stay in memory.");
         privacy.Controls.Add(AppTheme.Label("There is no OpenClicky cloud account. Keys and ChatGPT tokens use Windows Credential Manager or encrypted DPAPI storage.", 10));
         _persistHistory = new CheckBox { Text = "Remember conversations and task history · text only", Checked = settings.PersistConversationHistory, AutoSize = true, Margin = new Padding(0,10,0,12) };
         privacy.Controls.Add(_persistHistory);
