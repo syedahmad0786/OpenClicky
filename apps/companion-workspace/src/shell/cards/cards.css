@@ -1,0 +1,37 @@
+/* Notch cards: compact (max 360 px), opaque, no shadow outside the box (the window shows only reported regions). */
+
+.notch-cards { display: flex; flex-direction: column; gap: 6px; width: 360px; max-width: 100vw; }
+
+.notch-card {
+  --tone: var(--text-2);
+  position: relative; display: flex; align-items: flex-start; gap: 10px; padding: 10px 34px 10px 12px;
+  color: var(--text); background: var(--panel); border-radius: 14px;
+  box-shadow: inset 0 0 0 1px var(--panel-border), inset 3px 0 0 var(--tone);
+  animation: notch-card-in 180ms var(--ease) both;
+}
+.notch-card[data-kind="needsYou"], .notch-card[data-kind="micTrouble"], .notch-card[data-kind="documentAccess"] { --tone: var(--warn); }
+.notch-card[data-kind="appUpdated"], .notch-card[data-kind="activity"], .notch-card[data-kind="jobUpdate"] { --tone: var(--accent); }
+.notch-card[data-kind="mutedSpeaker"] { --tone: var(--danger); }
+.notch-card[data-kind="toast"] { --tone: var(--text-3); }
+
+.notch-card__lead { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 18px; }
+.notch-card__dot { width: 8px; height: 8px; margin: 5px 3px 0; align-self: flex-start; background: var(--tone); border-radius: 50%; }
+.notch-card__dots { gap: 2px; }
+.notch-card__dots i { width: 4px; height: 4px; background: var(--tone); border-radius: 50%; animation: notch-card-pulse 1.1s ease-in-out infinite; }
+.notch-card__dots i:nth-child(2) { animation-delay: 0.15s; }
+.notch-card__dots i:nth-child(3) { animation-delay: 0.3s; }
+:root[data-reduced-motion="true"] .notch-card__dots i { animation: none; }
+
+.notch-card__main { flex: 1; min-width: 0; }
+.notch-card__title { margin: 0; font-size: 13px; font-weight: 600; line-height: 18px; overflow-wrap: anywhere; }
+.notch-card__body { margin: 2px 0 0; font-size: 12px; line-height: 1.4; color: var(--text-2); overflow-wrap: anywhere; }
+.notch-card__actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.notch-card__close {
+  position: absolute; top: 8px; right: 8px; display: grid; place-items: center; width: 22px; height: 22px; padding: 0;
+  color: var(--text-2); background: transparent; border: 0; border-radius: 50%; cursor: pointer;
+}
+.notch-card__close:hover { color: var(--text); background: var(--panel-inner); }
+.notch-card__close:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 1px; }
+
+@keyframes notch-card-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes notch-card-pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }

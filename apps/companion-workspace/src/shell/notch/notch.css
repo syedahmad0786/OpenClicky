@@ -1,8 +1,16 @@
 /* Notch shell. Numbers are the design-spec geometry: pill 60x8, peek 532 wide / 280 content, settings 920x720,
    top corners 10, sheet corners 26, open 430 ms, close 300 ms, content fade 180 ms, reduced motion 120 ms fade. */
 
-.notch {
+/* Notch and its cards, centred at the top. Only [data-region] children are drawn or clickable. */
+.notch-shell {
   position: fixed; top: 0; left: 50%; translate: -50% 0; z-index: 1;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+}
+/* The panel keeps its full size while closing, so the cards wait below it and appear once it has collapsed. */
+.notch-shell[data-phase="closing"] > .notch-cards { visibility: hidden; }
+
+.notch {
+  position: relative;
   width: 60px; height: 8px;
   color: var(--text); font-family: var(--font-ui);
 }

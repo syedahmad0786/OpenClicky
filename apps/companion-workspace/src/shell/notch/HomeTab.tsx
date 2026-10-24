@@ -1,6 +1,7 @@
 import { postPage } from "../bridge";
 import type { JobCard, ShellState } from "../contract";
-import { Badge, CloseIcon, KeyCaps, PaperCard, PillButton, type PaperStock } from "../ui";
+import { STOCK } from "../deck/JobCardView";
+import { Badge, CloseIcon, KeyCaps, PaperCard, PillButton } from "../ui";
 
 /** Our own copy. 5-11 morning, 12-16 afternoon, 17-21 evening, otherwise neutral. */
 export function greetingFor(hour: number, name: string): string {
@@ -14,7 +15,6 @@ export function statusLine(working: number, needYou: number): string {
   return parts.length ? parts.join(" · ") : "Nothing running";
 }
 
-const STOCK: Record<JobCard["colour"], PaperStock> = { red: "blush", blue: "sky", yellow: "butter", green: "mint" };
 const PRIMARY_LABEL: Record<JobCard["state"], string> = {
   queued: "Watch", working: "Watch", needsYou: "Review", done: "View result", failed: "See what happened", stopped: "Open", new: "Open",
 };

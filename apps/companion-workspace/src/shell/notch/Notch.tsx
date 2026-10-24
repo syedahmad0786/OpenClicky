@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type FocusEvent } from "react";
 import { postPage } from "../bridge";
+import { NotchCards } from "../cards/NotchCards";
 import type { NotchTab, ShellState } from "../contract";
+import { JobDeck } from "../deck/JobDeck";
 import { cx } from "../ui/cx";
 import { Peek } from "./Peek";
 import "./notch.css";
@@ -68,17 +70,22 @@ export function Notch({ state }: { state: ShellState }) {
 
   const expanded = phase !== "collapsed";
   return (
-    <div
-      ref={root} role="region" aria-label="OpenClicky" data-tab={tab} data-reduced={state.reducedMotion}
-      className={cx("notch", phase === "collapsed" ? "notch--collapsed" : phase === "open" ? "notch--open" : "notch--closing", expanded && tab === "settings" && "notch--settings")}
-      onPointerEnter={() => { inside.current = true; openPanel(true); }}
-      onPointerLeave={() => { inside.current = false; scheduleClose(); }}
-      onFocus={onFocus} onBlur={onBlur}
-    >
-      {/* The panel carries the corner radii, so it is the reported region. */}
-      <div className="notch__panel" data-region>
-        {expanded ? <Peek state={state} tab={tab} onTab={changeTab} draft={draft} onDraft={setDraft} /> : null}
+    // The shell stacks the notch and its cards; the deck hangs off the notch itself so hovering a deck card keeps the panel open.
+    <div className="notch-shell" data-phase={phase}>
+      <div
+        ref={root} role="region" aria-label="OpenClicky" data-tab={tab} data-reduced={state.reducedMotion}
+        className={cx("notch", phase === "collapsed" ? "notch--collapsed" : phase === "open" ? "notch--open" : "notch--closing", expanded && tab === "settings" && "notch--settings")}
+        onPointerEnter={() => { inside.current = true; openPanel(true); }}
+        onPointerLeave={() => { inside.current = false; scheduleClose(); }}
+        onFocus={onFocus} onBlur={onBlur}
+      >
+        {/* The panel carries the corner radii, so it is the reported region. */}
+        <div className="notch__panel" data-region>
+          {expanded ? <Peek state={state} tab={tab} onTab={changeTab} draft={draft} onDraft={setDraft} /> : null}
+        </div>
+        {phase === "open" && tab === "home" ? <JobDeck jobs={state.jobs} featuredId={state.featured?.id ?? null} /> : null}
       </div>
+      <NotchCards cards={state.cards} />
     </div>
   );
 }
