@@ -50,7 +50,8 @@ internal sealed partial class TrayApplicationContext
         };
         _hotkey.Pressed += (_, _) => _talkPressedAt = Environment.TickCount64;
         _talk.HeldTalkStarted += WatchMicDuringHold;
-        // A cancelled release (Esc, another key) runs after the orchestrator's handler and before the watch's next tick.
+        // A cancelled release (Esc, another key): subscribed before _talk.Start(), so this runs before the orchestrator's
+        // handler, and before the watch's next tick.
         _hotkey.Released += (_, e) => { if (e is ShortcutEndedEventArgs { Cancelled: true }) CancelMicWatch(); };
     }
 

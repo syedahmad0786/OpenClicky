@@ -56,6 +56,9 @@ public sealed record HotkeyBinding(IReadOnlyList<string> Keys, HotkeyTrigger Tri
             return Fail("Add a modifier (Ctrl, Alt, Shift or Win) so the shortcut does not interfere with typing.", out error);
         if (trigger == HotkeyTrigger.DoubleTap && canonical.Count != 1 && others.Count != 0)
             return Fail("Double-tap works with a single key or with modifier keys only.", out error);
+        // Every Win tap would have to mask the Start menu.
+        if (trigger == HotkeyTrigger.Hold && canonical is ["Win"])
+            return Fail("Holding Win alone would stop the Start menu opening. Add another key.", out error);
 
         binding = new HotkeyBinding([.. modifiers, .. others], trigger);
         error = null;

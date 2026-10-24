@@ -44,6 +44,7 @@ public class SettingsPatchTests
     [InlineData("shortcuts.text", "{\"keys\":[\"Ctrl\",\"Ctrl\"],\"trigger\":\"hold\"}")]
     [InlineData("shortcuts.text", "{\"keys\":[\"Ctrl\",\"A\"],\"trigger\":\"doubleTap\"}")]
     [InlineData("shortcuts.text", "\"Ctrl+Alt\"")]
+    [InlineData("shortcuts.talk", "{\"keys\":[\"Win\"],\"trigger\":\"hold\"}")]
     [InlineData("shortcuts.text", "{\"keys\":[1],\"trigger\":\"hold\"}")]
     [InlineData("shortcuts.text", "{\"keys\":[null],\"trigger\":\"hold\"}")]
     [InlineData("shortcuts.text", "{\"keys\":[{}],\"trigger\":\"hold\"}")]
