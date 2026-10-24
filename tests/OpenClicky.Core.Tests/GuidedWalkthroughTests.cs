@@ -134,6 +134,7 @@ public class GuidedWalkthroughTests
     [InlineData("[GUIDE:step] One [GUIDE:wait] two")]
     [InlineData("[GUIDE:step]")]
     [InlineData("[GUIDE:step] [POINT:1,2:only markup]")]
+    [InlineData("[GUIDE:step] [DRAW:text x=1 y=2 text=\"a\\]b\"]")]
     public void InvalidResponse_ExitsBusyAndCanRetry(string raw)
     {
         var guide = new GuidedWalkthrough();

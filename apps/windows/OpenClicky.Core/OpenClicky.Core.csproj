@@ -9,4 +9,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.31" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="OpenClicky.Core.Tests" />
+  </ItemGroup>
 </Project>

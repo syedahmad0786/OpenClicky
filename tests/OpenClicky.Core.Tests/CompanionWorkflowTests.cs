@@ -8,6 +8,18 @@ namespace OpenClicky.Core.Tests;
 public class CompanionWorkflowTests
 {
     [Fact]
+    public void DrawTagsNeverSpoken()
+    {
+        Assert.Equal("Here. Then", StreamingReplySpeech.Clean("""Here. [DRAW:rect x=1 y=1 w=2 h=2 label="a\]b. c"] Then [DRAW:dot x=1"""));
+        Assert.Equal("Here.", StreamingReplySpeech.Clean("Here. [DRAW:blob]"));
+        Assert.Equal("Here.", StreamingReplySpeech.Clean("Here. [DRA"));
+        var speech = new StreamingReplySpeech();
+        Assert.Equal("Here.", speech.TakeCompleted(StreamingReplySpeech.Clean("Here. [DRAW:dot x=1 y=1] Next")));
+        Assert.Equal(2, StreamingReplySpeech.CountSentenceEnds("One. Two! v1.2 Three"));
+        Assert.Equal(3, StreamingReplySpeech.CountSentenceEnds("One. Two! v1.2 Three? "));
+    }
+
+    [Fact]
     public async Task ActionTagsAreStrippedFromSpeechAndHistoryAndRaisedOnce()
     {
         var historyPath = Path.Combine(Path.GetTempPath(), $"openclicky-actions-{Guid.NewGuid():N}.json");

@@ -187,6 +187,7 @@ public sealed partial class GuidedWalkthrough
     [GeneratedRegex(@"\[GUIDE:[^\]\r\n]*(?:\]|$)", RegexOptions.CultureInvariant)]
     private static partial Regex GuideLikeTags();
 
-    [GeneratedRegex(@"\[(?:POINT|MARK):[^\]\r\n]*(?:\]|$)", RegexOptions.CultureInvariant)]
+    // DRAW values escape ']' as \], so a backslash pair never ends the tag.
+    [GeneratedRegex(@"\[(?:POINT|MARK|DRAW):(?:\\[^\r\n]|[^\\\]\r\n])*(?:\]|$)", RegexOptions.CultureInvariant)]
     private static partial Regex VisualTags();
 }
