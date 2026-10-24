@@ -14,28 +14,34 @@ public sealed record WalkthroughView(
     bool CanBack,
     string Goal,
     string Instruction,
-    string Status);
+    string Status,
+    bool StepIsHover = false);
 
 public sealed partial class GuidedWalkthrough
 {
     public const string ResponseInstructions = "\n" + """
         Guide the user through the stated goal using the fresh screenshots attached to each request.
         This is advisory guidance only: never perform actions or turn the request into an agent task.
-        Return exactly one status marker: [GUIDE:step], [GUIDE:wait], or [GUIDE:complete].
-        After the marker, give concise spoken text. You may also use existing [POINT:...] and [MARK:...] tags.
-        For [GUIDE:step], briefly state the visible observation, then ask for one visible action only.
-        Prefer one circle plus one point for that action; do not mark unrelated controls.
+        Return exactly one status marker: [GUIDE:step], [GUIDE:hover], [GUIDE:wait], or [GUIDE:complete].
+        After the marker, give concise spoken text. You may also use the [POINT:...], [MARK:...] and [DRAW:...] tags.
+        For [GUIDE:step], briefly state the visible observation, then ask for one visible action only, and POINT at the exact
+        control it needs: the user's own click on that control moves the guide to the next step.
+        Use [GUIDE:hover] instead when the action is only resting the pointer on something (a tooltip, a menu that opens on
+        hover); keeping the pointer there for two seconds moves the guide on.
+        Prefer one point plus at most one DRAW or MARK shape for that action; do not mark unrelated controls.
         On Next, first explicitly observe the visible result of the last action.
         Return [GUIDE:wait] when the expected result is missing or uncertain; do not advance.
         Return [GUIDE:complete] only when visible evidence proves the goal is complete.
         Back means freshly ground the earlier instruction in the current screenshots; it does not undo an action.
-        Never reuse coordinates from an earlier response.
+        Never reuse coordinates from an earlier response. A walkthrough stops after fifteen steps.
         """;
 
     private const int MaximumGoalLength = 2000;
     private const int MaximumInstructionLength = 1200;
     private const int MaximumStatusLength = 300;
     private const int MaximumHistory = 8;
+    public const int MaximumSteps = 15;
+    public const string StepLimitMessage = "That's fifteen steps, so I'll stop here. Ask me again to keep going.";
     private readonly object _gate = new();
     private readonly List<(int Step, string Instruction)> _history = [];
     private WalkthroughView _view = new(false, false, 0, false, "", "", "");
@@ -43,6 +49,7 @@ public sealed partial class GuidedWalkthrough
     private WalkthroughMove _pendingMove;
     private int _pendingStep;
     private long _revision;
+    private string? _endReason;
 
     public WalkthroughView View { get { lock (_gate) return _view; } }
 
@@ -115,13 +122,18 @@ public sealed partial class GuidedWalkthrough
             }
 
             var step = _pendingMove == WalkthroughMove.Next ? _view.Step + 1 : Math.Max(1, _pendingStep);
+            if (step > MaximumSteps)
+            {
+                _view = _view with { Active = false, Busy = false, Instruction = StepLimitMessage, Status = "Complete" };
+                return StepLimitMessage;
+            }
             if (_pendingMove is WalkthroughMove.Start or WalkthroughMove.Next || _view.Step == 0)
             {
                 _history.RemoveAll(entry => entry.Step >= step);
                 _history.Add((step, plain));
                 if (_history.Count > MaximumHistory) _history.RemoveAt(0);
             }
-            _view = _view with { Busy = false, Step = step, CanBack = HasStep(step - 1), Instruction = plain, Status = $"Step {step}" };
+            _view = _view with { Busy = false, Step = step, CanBack = HasStep(step - 1), Instruction = plain, Status = $"Step {step}", StepIsHover = kind == "hover" };
             return clean;
         }
     }
@@ -138,15 +150,43 @@ public sealed partial class GuidedWalkthrough
         }
     }
 
-    public void Stop()
+    /// <param name="endReason">Why it ended (lower case, our own words), for the next turn's context: see <see cref="TakeEndReason"/>.</param>
+    public void Stop(string? endReason = null)
     {
         lock (_gate)
         {
+            if (_view.Active && endReason is not null) _endReason = endReason;
             _revision++;
             _pending = null;
             _view = _view with { Active = false, Busy = false, Status = "Stopped" };
         }
     }
+
+    /// <summary>Why the last walkthrough was stopped, once: the next turn's context takes it.</summary>
+    public string? TakeEndReason()
+    {
+        lock (_gate)
+        {
+            var reason = _endReason;
+            _endReason = null;
+            return reason;
+        }
+    }
+
+    /// <summary>Shows <paramref name="status"/> on a step that is waiting for the user; false when none is.</summary>
+    public bool SetStatus(string status)
+    {
+        lock (_gate)
+        {
+            if (!_view.Active || _view.Busy || string.IsNullOrWhiteSpace(status)) return false;
+            _view = _view with { Status = Limit(status.Trim(), MaximumStatusLength) };
+            return true;
+        }
+    }
+
+    /// <summary>True when an accepted reply asks for an action on a target the user can click or hover: [GUIDE:step] or [GUIDE:hover].</summary>
+    public static bool AsksForAction(string? raw) =>
+        raw is not null && GuideTags().Match(raw) is { Success: true } m && m.Groups[1].Value is "step" or "hover";
 
     private WalkthroughRequest CreateRequest(WalkthroughMove move, int step)
     {
@@ -175,14 +215,14 @@ public sealed partial class GuidedWalkthrough
     private static bool TryKind(string value, out string kind)
     {
         kind = value;
-        return value is "step" or "wait" or "complete";
+        return value is "step" or "hover" or "wait" or "complete";
     }
 
     private static string Limit(string value, int length) => value.Length <= length ? value : value[..length];
 
     private bool HasStep(int step) => step > 0 && _history.Any(entry => entry.Step == step);
 
-    [GeneratedRegex(@"\[GUIDE:(step|wait|complete)\]", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"\[GUIDE:(step|hover|wait|complete)\]", RegexOptions.CultureInvariant)]
     private static partial Regex GuideTags();
 
     [GeneratedRegex(@"\[GUIDE:[^\]\r\n]*(?:\]|$)", RegexOptions.CultureInvariant)]

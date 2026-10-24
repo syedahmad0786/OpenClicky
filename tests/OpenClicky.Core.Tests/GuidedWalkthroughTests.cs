@@ -191,6 +191,80 @@ public class GuidedWalkthroughTests
     }
 
     [Fact]
+    public void StopsAtFifteenSteps()
+    {
+        var guide = new GuidedWalkthrough();
+        guide.Accept(guide.Begin("Long task"), "[GUIDE:step] Action 1.");
+        for (var step = 2; step <= GuidedWalkthrough.MaximumSteps; step++)
+            guide.Accept(guide.Prepare(WalkthroughMove.Next)!, $"[GUIDE:step] Action {step}.");
+        Assert.Equal(15, guide.View.Step);
+        Assert.True(guide.View.Active);
+
+        Assert.Equal(GuidedWalkthrough.StepLimitMessage, guide.Accept(guide.Prepare(WalkthroughMove.Next)!, "[GUIDE:step] Action 16. [POINT:5,5:x]"));
+        Assert.False(guide.View.Active);
+        Assert.Equal(15, guide.View.Step);
+        Assert.Equal("That's fifteen steps, so I'll stop here. Ask me again to keep going.", guide.View.Instruction);
+        Assert.Null(guide.Prepare(WalkthroughMove.Next));
+    }
+
+    [Fact]
+    public void HoverMarkerSetsHover()
+    {
+        var guide = new GuidedWalkthrough();
+        var start = guide.Begin("Find the tooltip");
+        Assert.True(GuidedWalkthrough.AsksForAction("[GUIDE:hover] Rest on the icon."));
+        Assert.Equal("Rest on the icon.", guide.Accept(start, "[GUIDE:hover] Rest on the icon."));
+        Assert.True(guide.View.StepIsHover);
+        Assert.Equal(1, guide.View.Step);
+
+        guide.Accept(guide.Prepare(WalkthroughMove.Next)!, "[GUIDE:step] Now click Details.");
+        Assert.False(guide.View.StepIsHover);
+        Assert.Equal(2, guide.View.Step);
+        Assert.True(GuidedWalkthrough.AsksForAction("[GUIDE:step] x"));
+        Assert.False(GuidedWalkthrough.AsksForAction("[GUIDE:wait] x"));
+        Assert.False(GuidedWalkthrough.AsksForAction("[GUIDE:complete] x"));
+        Assert.False(GuidedWalkthrough.AsksForAction(null));
+    }
+
+    [Fact]
+    public void EndReasonConsumedOnce()
+    {
+        var guide = new GuidedWalkthrough();
+        guide.Accept(guide.Begin("Export"), "[GUIDE:step] Click File.");
+        guide.Stop("the user clicked outside the guided target");
+        Assert.Equal("the user clicked outside the guided target", guide.TakeEndReason());
+        Assert.Null(guide.TakeEndReason());
+
+        guide.Stop("the user switched apps"); // already stopped: nothing new ended
+        Assert.Null(guide.TakeEndReason());
+        guide.Accept(guide.Begin("Again"), "[GUIDE:step] Click Edit.");
+        guide.Stop(); // the user's own stop has no reason
+        Assert.Null(guide.TakeEndReason());
+    }
+
+    [Fact]
+    public void DrawTagsStrippedFromInstruction()
+    {
+        var guide = new GuidedWalkthrough();
+        Assert.NotNull(guide.Accept(guide.Begin("Save"),
+            "[GUIDE:step] Click Save [DRAW:circle x=10 y=20 r=8 label=\"Save\"] at the top [DRAW:clear]"));
+        Assert.Equal("Click Save at the top", guide.View.Instruction);
+    }
+
+    [Fact]
+    public void SetStatusOnlyOnAWaitingStep()
+    {
+        var guide = new GuidedWalkthrough();
+        var start = guide.Begin("Save");
+        Assert.False(guide.SetStatus("Still there?")); // busy
+        guide.Accept(start, "[GUIDE:step] Click Save.");
+        Assert.True(guide.SetStatus("Still there?"));
+        Assert.Equal("Still there?", guide.View.Status);
+        guide.Stop();
+        Assert.False(guide.SetStatus("Still there?"));
+    }
+
+    [Fact]
     public async Task RacingAccepts_OnlyOneResultWins()
     {
         var guide = new GuidedWalkthrough();

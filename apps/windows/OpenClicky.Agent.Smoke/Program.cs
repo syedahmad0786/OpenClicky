@@ -16,6 +16,7 @@ internal static class Program
     {
         if (args.Length >= 2 && args[0] == "--harvest-fixture") return HarvestFixture(args[1]);
         if (args.Contains("--harvest", StringComparer.OrdinalIgnoreCase)) return await RunHarvestAsync().ConfigureAwait(true);
+        if (args.Contains("--snap", StringComparer.OrdinalIgnoreCase)) return await RunSnapAsync().ConfigureAwait(true);
         Console.WriteLine("OpenClicky agent↔sandbox smoke starting…");
 
         var sandboxExe = ResolveSandboxExe(args);
@@ -272,7 +273,10 @@ internal static class Program
 
     private const string PlainText = "harvest fixture plain words", SecretText = "harvest-fixture-secret";
 
-    /// <summary>A fixture window of its own process (never activated): a plain text box and a password box; prints their centres.</summary>
+    /// <summary>
+    /// A fixture window of its own process (never activated): a plain text box, a password box and a button. Prints each one's
+    /// centre and then its screen bounds ("name cx cy x y w h").
+    /// </summary>
     private static int HarvestFixture(string title)
     {
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2); // physical pixels, as OpenClicky reads them
@@ -280,13 +284,25 @@ internal static class Program
         using var form = new FixtureForm
         {
             Text = title, TopMost = true, ShowInTaskbar = false, StartPosition = FormStartPosition.Manual,
-            Location = new Point(area.Left + 60, area.Top + 60), Size = new Size(460, 200),
+            Location = new Point(area.Left + 60, area.Top + 60), Size = new Size(460, 260),
         };
         var plain = new TextBox { Text = PlainText, Location = new Point(20, 20), Width = 380 };
         var secret = new TextBox { Text = SecretText, UseSystemPasswordChar = true, Location = new Point(20, 80), Width = 380 };
-        form.Controls.AddRange([plain, secret]);
-        static string Centre(Control c) { var p = c.PointToScreen(new Point(c.Width / 2, c.Height / 2)); return $"{p.X} {p.Y}"; }
-        form.Shown += (_, _) => { Console.WriteLine("plain " + Centre(plain)); Console.WriteLine("secret " + Centre(secret)); Console.Out.Flush(); };
+        var button = new Button { Text = "Fixture button", Location = new Point(20, 140), Size = new Size(160, 36) };
+        form.Controls.AddRange([plain, secret, button]);
+        static string Where(Control c)
+        {
+            var p = c.PointToScreen(new Point(c.Width / 2, c.Height / 2));
+            var r = c.Parent!.RectangleToScreen(c.Bounds); // the whole control, border included, as UIA reports it
+            return $"{p.X} {p.Y} {r.X} {r.Y} {r.Width} {r.Height}";
+        }
+        form.Shown += (_, _) =>
+        {
+            Console.WriteLine("plain " + Where(plain));
+            Console.WriteLine("secret " + Where(secret));
+            Console.WriteLine("button " + Where(button));
+            Console.Out.Flush();
+        };
         Application.Run(form);
         return 0;
     }
@@ -309,19 +325,9 @@ internal static class Program
             { UseShellExecute = false, RedirectStandardOutput = true })!;
             try
             {
-                var points = new Dictionary<string, OpenClicky.Core.Drawing.Pt>();
-                var reading = Task.Run(async () =>
-                {
-                    while (points.Count < 2 && await fixture.StandardOutput.ReadLineAsync() is { } line)
-                    {
-                        var parts = line.Split(' ');
-                        points[parts[0]] = new(float.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture),
-                            float.Parse(parts[2], System.Globalization.CultureInfo.InvariantCulture));
-                    }
-                });
-                if (await Task.WhenAny(reading, Task.Delay(TimeSpan.FromSeconds(20))).ConfigureAwait(true) != reading || points.Count < 2)
+                if (await ReadFixtureAsync(fixture).ConfigureAwait(true) is not { } layout)
                 { Console.Error.WriteLine($"FAIL: harvest fixture '{title}' did not report its boxes"); return 30; }
-                await Task.Delay(500).ConfigureAwait(true); // painted and on top
+                var points = layout.ToDictionary(e => e.Key, e => new OpenClicky.Core.Drawing.Pt(e.Value[0], e.Value[1]));
 
                 var plain = UiaTextHarvester.Harvest([points["plain"]], Environment.ProcessId, TimeSpan.FromSeconds(2));
                 var secret = UiaTextHarvester.Harvest([points["secret"]], Environment.ProcessId, TimeSpan.FromSeconds(2));
@@ -339,6 +345,73 @@ internal static class Program
             }
         }
         Console.WriteLine("PASS: harvester reads a plain box, never a password box or a deny-listed window");
+        return 0;
+    }
+
+    /// <summary>The fixture's "name cx cy x y w h" lines once all three controls are reported and painted, or null after 20 s.</summary>
+    private static async Task<Dictionary<string, float[]>?> ReadFixtureAsync(Process fixture)
+    {
+        var layout = new Dictionary<string, float[]>();
+        var reading = Task.Run(async () =>
+        {
+            while (layout.Count < 3 && await fixture.StandardOutput.ReadLineAsync() is { } line)
+            {
+                var parts = line.Split(' ');
+                layout[parts[0]] = parts[1..].Select(v => float.Parse(v, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+            }
+        });
+        if (await Task.WhenAny(reading, Task.Delay(TimeSpan.FromSeconds(20))).ConfigureAwait(true) != reading || layout.Count < 3) return null;
+        await Task.Delay(500).ConfigureAwait(true); // painted and on top
+        return layout;
+    }
+
+    /// <summary>
+    /// The POINT snapper against the same fixture in another process: the button and the text box snap to their own bounds, the
+    /// password box and a deny-listed window snap to nothing, and so does a window of this process. It only reads.
+    /// </summary>
+    private static async Task<int> RunSnapAsync()
+    {
+        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+        static string Show(OpenClicky.Core.Drawing.Box? b) => b is { } x ? $"{x.X},{x.Y},{x.W},{x.H}" : "none";
+        static bool Same(OpenClicky.Core.Drawing.Box? b, float[] r) => b is { } x && x.X == r[2] && x.Y == r[3] && x.W == r[4] && x.H == r[5];
+        foreach (var (title, denied) in new[] { ("OpenClicky snap fixture", false), ("1Password snap fixture", true) })
+        {
+            using var fixture = Process.Start(new ProcessStartInfo(Environment.ProcessPath!, ["--harvest-fixture", title])
+            { UseShellExecute = false, RedirectStandardOutput = true })!;
+            try
+            {
+                if (await ReadFixtureAsync(fixture).ConfigureAwait(true) is not { } layout)
+                { Console.Error.WriteLine($"FAIL: snap fixture '{title}' did not report its controls"); return 40; }
+                OpenClicky.Core.Drawing.Box? At(string name) =>
+                    UiaControlSnapper.Snap((int)layout[name][0], (int)layout[name][1], TimeSpan.FromSeconds(2));
+                var (button, plain, secret) = (At("button"), At("plain"), At("secret"));
+                Console.WriteLine($"snap title='{title}' button={Show(button)} plain={Show(plain)} secret={Show(secret)} expected_button={string.Join(',', layout["button"][2..])}");
+                if (secret is not null) { Console.Error.WriteLine("FAIL: the snapper read a password box"); return 41; }
+                if (denied && (button is not null || plain is not null)) { Console.Error.WriteLine("FAIL: the snapper read a deny-listed window"); return 42; }
+                if (!denied && (!Same(button, layout["button"]) || !Same(plain, layout["plain"])))
+                { Console.Error.WriteLine("FAIL: the snapper did not fit the button and the text box (the control check)"); return 43; }
+            }
+            finally
+            {
+                try { fixture.Kill(); fixture.WaitForExit(5000); } catch (InvalidOperationException) { }
+            }
+        }
+
+        // A window of this process: refused before UI Automation is asked anything.
+        var area = Screen.PrimaryScreen!.WorkingArea;
+        using (var own = new FixtureForm { TopMost = true, ShowInTaskbar = false, StartPosition = FormStartPosition.Manual,
+                   Location = new Point(area.Left + 60, area.Top + 60), Size = new Size(300, 120) })
+        {
+            var ownButton = new Button { Text = "Own button", Location = new Point(10, 10), Size = new Size(120, 36) };
+            own.Controls.Add(ownButton);
+            own.Show();
+            Application.DoEvents();
+            var centre = ownButton.PointToScreen(new Point(60, 18));
+            var snapped = UiaControlSnapper.Snap(centre.X, centre.Y, TimeSpan.FromSeconds(1));
+            Console.WriteLine($"snap own_window button={Show(snapped)}");
+            if (snapped is not null) { Console.Error.WriteLine("FAIL: the snapper read OpenClicky's own window"); return 44; }
+        }
+        Console.WriteLine("PASS: snapper fits real controls, never a password box, a deny-listed window or its own window");
         return 0;
     }
 

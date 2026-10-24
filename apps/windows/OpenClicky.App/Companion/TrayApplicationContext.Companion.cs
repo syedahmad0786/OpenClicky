@@ -43,7 +43,124 @@ internal sealed partial class TrayApplicationContext
         _overlay.DrawingButtonsSuppressed = () => _confirm.IsDialogOpen;
         _talk.StateChanged += state => OnUi(() => { if (state == CompanionVoiceState.Listening && _micWatch is null) WatchMicLevels(); });
         WatchForStaleDrawing();
+        WireWalkthroughWatch();
     }
+
+    // Walkthrough targets: the user's own click on the pointed control (or a 2 s hover) moves the guide on.
+    private const int AdvanceDelayMs = 400;
+    private readonly WalkthroughTargetWatch _walkthroughWatch = new();
+    /// <summary>The app being guided (0 until the first check): the foreground moving to another one ends the walkthrough.</summary>
+    private uint _guidedProcessId;
+
+    /// <summary>UI thread, once: arms the watch from each step that pointed, and feeds it physical clicks and a 100 ms tick.</summary>
+    private void WireWalkthroughWatch()
+    {
+        _talk.WalkthroughTargeted += target => OnUi(() =>
+        {
+            if (_talk.Walkthrough.View is { Active: true, Busy: false } && _taskCts is null)
+                _walkthroughWatch.Arm(target, Environment.TickCount64);
+        });
+        // Raw input: injected input (an agent's or any other app's) never arrives here, so only the user's own clicks count.
+        _physicalInput.UserActivity += activity => { if (activity.MouseButtonDown) OnWalkthroughClick(); };
+        var timer = new System.Windows.Forms.Timer { Interval = 100 };
+        timer.Tick += (_, _) => WalkthroughWatchTick();
+        timer.Start();
+        _home.Disposed += (_, _) => timer.Dispose();
+    }
+
+    /// <summary>UI thread: the walkthrough changed. It ended: the watch forgets everything. A step is loading: no target until it arrives.</summary>
+    private void UpdateWalkthroughWatch(WalkthroughView view)
+    {
+        if (!view.Active)
+        {
+            _walkthroughWatch.Reset();
+            _guidedProcessId = 0;
+        }
+        else if (view.Busy) _walkthroughWatch.Disarm();
+    }
+
+    /// <summary>
+    /// UI thread, a physical button press. A press on any OpenClicky window (a card, the shell, a drawn button, the overlay's
+    /// catchers) or while a confirm dialog is up never ends or advances the guide; nor does anything while an agent task runs.
+    /// </summary>
+    private void OnWalkthroughClick()
+    {
+        if (_walkthroughWatch.Target is null || _taskCts is not null || !_talk.Walkthrough.View.Active) return;
+        var p = System.Windows.Forms.Cursor.Position;
+        var own = _confirm.IsDialogOpen || ForegroundWindowInfo.IsCurrentProcessWindowAt(p.X, p.Y);
+        OnWalkthroughEvent(_walkthroughWatch.OnClick(new Pt(p.X, p.Y), own, Environment.TickCount64));
+    }
+
+    /// <summary>UI thread, every 100 ms while a walkthrough runs: hover, an app switch, expiry and the idle timeout.</summary>
+    private void WalkthroughWatchTick()
+    {
+        if (!_talk.Walkthrough.View.Active) return;
+        var now = Environment.TickCount64;
+        if (_taskCts is not null) { _walkthroughWatch.Disarm(); return; }
+        if (_walkthroughWatch.Target is { IsHover: true })
+        {
+            var p = System.Windows.Forms.Cursor.Position;
+            OnWalkthroughEvent(_walkthroughWatch.OnPointer(new Pt(p.X, p.Y), now));
+        }
+        if (SwitchedAwayFromGuidedApp(now)) { StopWalkthrough(WalkthroughTargetWatch.SwitchedAppsReason); return; }
+        OnWalkthroughEvent(_walkthroughWatch.Tick(now));
+    }
+
+    /// <summary>
+    /// True when another app (not OpenClicky) is in front and no advance happened in the last 3 s. Right after an advance the
+    /// click itself may have opened that app: it becomes the guided app.
+    /// </summary>
+    private bool SwitchedAwayFromGuidedApp(long now)
+    {
+        var foreground = ForegroundWindowInfo.GetHandle();
+        if (foreground == 0 || ForegroundWindowInfo.IsCurrentProcessWindow(foreground)) return false;
+        var pid = ForegroundWindowInfo.ProcessIdOf(foreground);
+        if (pid == 0) return false;
+        if (_guidedProcessId == 0 || pid == _guidedProcessId || _walkthroughWatch.InSwitchGrace(now))
+        {
+            _guidedProcessId = pid;
+            return false;
+        }
+        return true;
+    }
+
+    private void OnWalkthroughEvent(TargetEvent e)
+    {
+        switch (e)
+        {
+            case TargetEvent.Advance: _ = AdvanceWalkthroughAsync(); break;
+            case TargetEvent.LeftGuide: StopWalkthrough(WalkthroughTargetWatch.ClickedElsewhereReason); break;
+            case TargetEvent.GuideTimedOut: StopWalkthrough(WalkthroughTargetWatch.TimedOutReason); break;
+            case TargetEvent.Expired:
+                _talk.SetWalkthroughStatus(WalkthroughTargetWatch.StillThereStatus);
+                if (_shell is { IsActive: true } shell) shell.AddToast(WalkthroughTargetWatch.StillThereStatus); // the card shows the instruction
+                break;
+        }
+    }
+
+    /// <summary>The click landed on the target: give the app 400 ms to react, then look at the result for the next step.</summary>
+    private async Task AdvanceWalkthroughAsync()
+    {
+        await Task.Delay(AdvanceDelayMs);
+        if (_talk.Walkthrough.View is { Active: true, Busy: false } && _taskCts is null) await MoveWalkthroughAsync(WalkthroughMove.Next);
+    }
+
+    /// <summary>UI thread: in shell mode the step card stands in for the classic walkthrough window.</summary>
+    private bool ShowWalkthroughCard(WalkthroughView view)
+    {
+        if (_shell is not { IsActive: true } shell) return false;
+        _walkthroughForm.Hide();
+        if (view.Active) shell.AddCard(CompanionCards.Walkthrough(view));
+        else shell.RemoveCard(CompanionCards.WalkthroughId);
+        return true;
+    }
+
+    /// <summary>
+    /// The frame of the control under a POINT, read with UI Automation within 300 ms (off the UI thread: Talk's and the agent's
+    /// turns call it on the thread pool). Only its bounds are used, never its name or value.
+    /// </summary>
+    private Box? SnapControl(int x, int y) =>
+        UiaControlSnapper.Snap(x, y, UiaControlSnapper.Budget, AgentDenyList.ParseExtraFragments(_settings.AgentDenyListExtra));
 
     /// <summary>
     /// UI thread: a button the model drew was clicked. Its prompt is model-authored, untrusted text: it runs as an ordinary talk

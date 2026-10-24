@@ -146,6 +146,36 @@ public class CompanionWorkflowTests
     }
 
     [Fact]
+    public async Task WalkthroughStepPointSnapsAndArmsItsTarget()
+    {
+        var replies = new Queue<string>(["[GUIDE:hover] Rest on Save. [POINT:50,25:Save]", "[GUIDE:wait] Not yet. [POINT:50,25:Save]", "Sure. [POINT:50,25:Save]"]);
+        var overlay = new Overlay();
+        var snaps = new List<(int, int)>();
+        var targets = new List<GuidedTarget>();
+        var systems = new List<string>();
+        using var talk = new TalkOrchestrator(new Hotkey(), overlay, new Capture(), new Mic(), () => null,
+            () => new Talk((_, _) => Task.FromResult(replies.Dequeue()), observeSystem: systems.Add), new Tts(),
+            () => new AppSettings { PersistConversationHistory = false }, log: _ => { }, windowBounds: () => (0, 0, 200, 100),
+            snapTarget: (x, y) => { snaps.Add((x, y)); return new Box(80, 40, 40, 20); });
+        talk.WalkthroughTargeted += targets.Add;
+
+        await talk.StartWalkthroughAsync("save the file");
+        Assert.Equal(new Box(80, 40, 40, 20), overlay.LastFrame);
+        var target = Assert.Single(targets);
+        Assert.Equal((new Box(80, 40, 40, 20), new Pt(100, 50), true, "Save"), (target.Frame, target.Centre, target.IsHover, target.Label));
+
+        await talk.MoveWalkthroughAsync(WalkthroughMove.Next); // a wait reply points but arms nothing
+        Assert.Single(targets);
+        talk.StopWalkthrough(WalkthroughTargetWatch.ClickedElsewhereReason);
+
+        await talk.SubmitTextAsync("where is save", remember: false); // every POINT snaps; the reason reaches this turn once
+        Assert.Equal([(100, 50), (100, 50), (100, 50)], snaps);
+        Assert.Single(targets);
+        Assert.Contains("The last walkthrough ended because the user clicked outside the guided target.", systems[^1]);
+        Assert.DoesNotContain("The last walkthrough ended", systems[0]);
+    }
+
+    [Fact]
     public async Task WalkthroughStepClearsTheDrawingFirst()
     {
         var replies = new Queue<string>(["Here. [DRAW:dot id=old x=10 y=10] [POINT:none]", "[GUIDE:step] Click save. [DRAW:dot id=new x=20 y=20]"]);
@@ -1755,6 +1785,8 @@ public class CompanionWorkflowTests
         public void ShowProcessing() => Calls.Enqueue(nameof(ShowProcessing));
         public void ShowResponding(string text) => Calls.Enqueue(nameof(ShowResponding));
         public void PointAt(int x, int y, string? label, string? text = null) { LastPoint = (x,y); Calls.Enqueue(nameof(PointAt)); }
+        public Box? LastFrame;
+        public void PointAt(int x, int y, string? label, string? text, Box? frame) { LastFrame = frame; PointAt(x, y, label, text); }
         public void Hide() => Calls.Enqueue(nameof(Hide));
         public void ShowIdle() => Calls.Enqueue(nameof(ShowIdle));
         public void Dispose() { }

@@ -24,6 +24,7 @@ public sealed class AgentOrchestrator
     private readonly Func<nint>? _foregroundWindow;
     private readonly Func<long>? _revision;
     private readonly Func<(int X, int Y, int Width, int Height)?>? _foregroundBounds;
+    private readonly Func<int, int, Drawing.Box?>? _snapTarget;
 
     public AgentOrchestrator(
         IScreenCaptureService capture,
@@ -41,7 +42,8 @@ public sealed class AgentOrchestrator
         Func<CancellationToken, Task>? beforeStep = null,
         AgentAccessMode access = AgentAccessMode.ConfirmEach,
         Func<nint>? foregroundWindow = null, Func<long>? revision = null,
-        Func<(int X, int Y, int Width, int Height)?>? foregroundBounds = null)
+        Func<(int X, int Y, int Width, int Height)?>? foregroundBounds = null,
+        Func<int, int, Drawing.Box?>? snapTarget = null)
     {
         _capture = capture;
         _planner = planner;
@@ -60,6 +62,7 @@ public sealed class AgentOrchestrator
         _foregroundWindow = foregroundWindow;
         _revision = revision;
         _foregroundBounds = foregroundBounds;
+        _snapTarget = snapTarget;
     }
 
     public async Task RunAsync(string task, string model, CancellationToken cancellationToken = default)
@@ -230,7 +233,11 @@ public sealed class AgentOrchestrator
             cancellationToken.ThrowIfCancellationRequested();
             if (plan.ToolName == "click")
             {
-                _overlay.PointAt(int.Parse(args["x"]), int.Parse(args["y"]), plan.Rationale);
+                int x = int.Parse(args["x"]), y = int.Parse(args["y"]);
+                Drawing.Box? frame = null;
+                try { frame = _snapTarget?.Invoke(x, y); }
+                catch (Exception ex) when (ex is not OutOfMemoryException) { _log($"snap_error={ex.GetType().Name}"); }
+                _overlay.PointAt(x, y, plan.Rationale, null, frame);
                 await Task.Delay(350, cancellationToken).ConfigureAwait(false);
             }
             if (_beforeStep is not null) await _beforeStep(cancellationToken).ConfigureAwait(false);

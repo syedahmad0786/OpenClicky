@@ -41,6 +41,7 @@ public sealed class TalkOrchestrator : IDisposable
     private readonly Func<IReadOnlyList<VisibleWindow>>? _visibleWindows;
     private readonly Func<HighlightGesture?>? _takeHighlight;
     private readonly Func<IReadOnlyList<ScreenCaptureResult>, HighlightGesture, IReadOnlyList<ScreenCaptureResult>>? _compositeHighlight;
+    private readonly Func<int, int, Box?>? _snapTarget;
     private string? _previousApp;
     private readonly Func<string>? _userContext;
     private readonly Func<string, CancellationToken, Task<bool>>? _requestInterceptor;
@@ -60,6 +61,8 @@ public sealed class TalkOrchestrator : IDisposable
 
     public string? WalkthroughWindowTitle { get; private set; }
     public event Action<WalkthroughView>? WalkthroughChanged;
+    /// <summary>A walkthrough step or hover reply pointed: the target the user's click (or hover) should land on.</summary>
+    public event Action<GuidedTarget>? WalkthroughTargeted;
 
     public TalkOrchestrator(IPushToTalkMonitor hotkey, IOverlayController overlay,
         IScreenCaptureService capture, IMicrophoneRecorder mic, Func<ISttClient?> sttFactory,
@@ -72,7 +75,8 @@ public sealed class TalkOrchestrator : IDisposable
         Func<ISttClient?>? interruptionSttFactory = null, string? historyPath = null, string? memoryPath = null,
         Func<bool>? foregroundCaptureEligible = null, Func<IReadOnlyList<VisibleWindow>>? visibleWindows = null,
         Func<HighlightGesture?>? takeHighlight = null,
-        Func<IReadOnlyList<ScreenCaptureResult>, HighlightGesture, IReadOnlyList<ScreenCaptureResult>>? compositeHighlight = null)
+        Func<IReadOnlyList<ScreenCaptureResult>, HighlightGesture, IReadOnlyList<ScreenCaptureResult>>? compositeHighlight = null,
+        Func<int, int, Box?>? snapTarget = null)
     {
         _hotkey = hotkey;
         _overlay = overlay;
@@ -93,6 +97,7 @@ public sealed class TalkOrchestrator : IDisposable
         _visibleWindows = visibleWindows;
         _takeHighlight = takeHighlight;
         _compositeHighlight = compositeHighlight;
+        _snapTarget = snapTarget;
         _canInterruptSpeech = canInterruptSpeech;
         _interruptionSttFactory = interruptionSttFactory ?? sttFactory;
         _historyPath = historyPath;
@@ -541,12 +546,27 @@ public sealed class TalkOrchestrator : IDisposable
         return RunTurnAsync(move + " walkthrough step", [], turn, true, walkthrough: request);
     }
 
-    public void StopWalkthrough()
+    /// <param name="endReason">Why it ended, for the next turn's context (see <see cref="GuidedWalkthrough.TakeEndReason"/>).</param>
+    public void StopWalkthrough(string? endReason = null)
     {
-        Walkthrough.Stop();
+        Walkthrough.Stop(endReason);
         _conversationActive = false;
         CancelTurn(); // a held shortcut press (recording silently) is not the walkthrough's to drop
         WalkthroughChanged?.Invoke(Walkthrough.View);
+    }
+
+    /// <summary>Shows a status on the walkthrough step that is waiting for the user (nothing when none is).</summary>
+    public void SetWalkthroughStatus(string status)
+    {
+        if (Walkthrough.SetStatus(status)) WalkthroughChanged?.Invoke(Walkthrough.View);
+    }
+
+    /// <summary>The control frame under a mapped point, or null. Never throws: a failed snap just draws the plain ring.</summary>
+    private Box? SnapTarget(int x, int y)
+    {
+        if (_snapTarget is null) return null;
+        try { return _snapTarget(x, y); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { _log($"snap_error={ex.GetType().Name}"); return null; }
     }
 
     /// <summary>Talk press: record silently; it becomes visible only once the 400 ms tap window has passed.</summary>
@@ -835,6 +855,8 @@ public sealed class TalkOrchestrator : IDisposable
             { ReportAssistantMessage("The app changed during capture. Ask again for a fresh view."); return; }
             context += AppKnowledge.WindowContext(bounds, screens);
             if (!selfContainedVisual) context += DrawingContext();
+            if (Walkthrough.TakeEndReason() is { } endReason && !selfContainedVisual)
+                context += $"\nThe last walkthrough ended because {endReason}. Mention it only if it helps.\n";
             _log($"screen_capture_ms={captureClock.ElapsedMilliseconds} walkthrough={walkthrough is not null}");
             if (walkthrough is not null) WalkthroughChanged?.Invoke(Walkthrough.View);
             _overlay.ShowProcessing();
@@ -961,8 +983,10 @@ public sealed class TalkOrchestrator : IDisposable
                 ReportAssistantMessage("The window changed while I was looking. Ask again for a fresh view; I cleared the old marks.");
                 return;
             }
+            var asksForAction = false;
             if (walkthrough is not null)
             {
+                asksForAction = GuidedWalkthrough.AsksForAction(raw);
                 var accepted = Walkthrough.Accept(walkthrough, raw);
                 WalkthroughChanged?.Invoke(Walkthrough.View);
                 if (accepted is null) return;
@@ -990,8 +1014,12 @@ public sealed class TalkOrchestrator : IDisposable
             if (mapped is { } point)
             {
                 SetState(CompanionVoiceState.Pointing);
-                _overlay.PointAt(point.virtualX, point.virtualY, parsed.ElementLabel, spoken);
-                _log($"point=({point.virtualX},{point.virtualY})");
+                // Off the UI thread: the snap may wait up to its UIA budget on the app under the point.
+                var frame = SnapTarget(point.virtualX, point.virtualY);
+                _overlay.PointAt(point.virtualX, point.virtualY, parsed.ElementLabel, spoken, frame);
+                _log($"point=({point.virtualX},{point.virtualY}) snapped={frame is not null}");
+                if (walkthrough is not null && asksForAction && Walkthrough.View is { Active: true, Busy: false } step)
+                    WalkthroughTargeted?.Invoke(GuidedTargets.From(new Pt(point.virtualX, point.virtualY), frame, parsed.ElementLabel, step.StepIsHover));
             }
             else
             {

@@ -70,11 +70,19 @@ public static class UiaTextHarvester
         return false;
     }
 
+    /// <summary>
+    /// True when UIA must not be asked about (<paramref name="x"/>, <paramref name="y"/>): no window is there, or it is refused.
+    /// The window under the point decides first, without asking UIA (or our own UI thread) anything. Shared with <see cref="UiaControlSnapper"/>.
+    /// </summary>
+    internal static bool RefusedAt(int x, int y, int ownProcessId, IReadOnlyList<string>? extras)
+    {
+        var window = WindowFromPoint(new NativePoint { X = x, Y = y });
+        return window == 0 || Refused(window, ownProcessId, extras);
+    }
+
     private static IEnumerable<string> At(int x, int y, int ownProcessId, IReadOnlyList<string>? extras)
     {
-        // The window under the point decides first, without asking UIA (or our own UI thread) anything.
-        var window = WindowFromPoint(new NativePoint { X = x, Y = y });
-        if (window == 0 || Refused(window, ownProcessId, extras)) yield break;
+        if (RefusedAt(x, y, ownProcessId, extras)) yield break;
 
         AutomationElement? element;
         try { element = AutomationElement.FromPoint(new System.Windows.Point(x, y)); }

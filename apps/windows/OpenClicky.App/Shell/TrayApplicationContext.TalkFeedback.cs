@@ -1,5 +1,6 @@
 using OpenClicky.App.Speech;
 using OpenClicky.Core;
+using OpenClicky.Core.CompanionCursor;
 using OpenClicky.Core.Shell;
 using OpenClicky.Core.Speech;
 using OpenClicky.Input;
@@ -132,6 +133,16 @@ internal sealed partial class TrayApplicationContext
                 return false;
             case (TalkActionText.CopyCardId, TalkActionText.UndoAction):
                 UndoTalkCopy();
+                return false;
+            // The step card stays up: the walkthrough's next change replaces it (or, once stopped, removes it).
+            case (CompanionCards.WalkthroughId, CompanionCards.BackAction):
+                _ = MoveWalkthroughAsync(WalkthroughMove.Back);
+                return true;
+            case (CompanionCards.WalkthroughId, CompanionCards.RecheckAction):
+                _ = MoveWalkthroughAsync(WalkthroughMove.Refresh);
+                return true;
+            case (CompanionCards.WalkthroughId, CompanionCards.StopAction):
+                StopWalkthrough();
                 return false;
             default:
                 Log("shell: card action not handled: " + actionId);

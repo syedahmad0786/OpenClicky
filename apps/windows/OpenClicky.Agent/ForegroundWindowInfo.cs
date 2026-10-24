@@ -15,6 +15,17 @@ public static class ForegroundWindowInfo
         _ = GetWindowThreadProcessId(window, out var processId);
         return processId == Environment.ProcessId;
     }
+    /// <summary>True when the window under (<paramref name="x"/>, <paramref name="y"/>) belongs to OpenClicky (click-through windows are skipped).</summary>
+    public static bool IsCurrentProcessWindowAt(int x, int y) => IsCurrentProcessWindow(WindowFromPoint(new NativePoint { X = x, Y = y }));
+
+    /// <summary>The process that owns <paramref name="window"/>, or 0.</summary>
+    public static uint ProcessIdOf(IntPtr window)
+    {
+        if (window == IntPtr.Zero) return 0;
+        _ = GetWindowThreadProcessId(window, out var processId);
+        return processId;
+    }
+
     public static (int X, int Y, int Width, int Height)? GetBounds()
     {
         if (!GetWindowRect(GetForegroundWindow(), out var rect)) return null;
@@ -64,6 +75,12 @@ public static class ForegroundWindowInfo
 
     [DllImport("user32.dll")]
     private static extern IntPtr GetForegroundWindow();
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint { public int X, Y; }
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr WindowFromPoint(NativePoint point);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct WindowRect { public int Left, Top, Right, Bottom; }

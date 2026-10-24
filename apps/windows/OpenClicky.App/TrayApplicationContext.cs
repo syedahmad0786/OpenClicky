@@ -122,6 +122,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
                 new EchoCancelledMicrophoneRecorder(() => _settings.MicrophoneDeviceId, Log), _whisperRuntime, Log),
             foregroundCaptureEligible: ForegroundWindowInfo.IsCompanionCaptureEligible, visibleWindows: OtherVisibleWindows,
             takeHighlight: TakeHighlight,
+            snapTarget: SnapControl,
             compositeHighlight: (screens, gesture) => HighlightCompositor.Composite(screens, gesture, _settings.AccentColor));
 
         _connectors = new ConnectorRegistry(_secrets);
@@ -136,7 +137,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             }, SelectScreenAreaAsync, PauseTaskUnlessConfirming, ResumeTaskAsync, ClearTasks, ShowClipboardShelf,
             BeginDictationFromHomeAsync, ToggleDictationRecordingAsync, InsertDictationAsync, CancelDictation,
             StartWalkthroughFromHomeAsync, ShowChromeSetup, _work, RunJobAsync, _connectors);
-        _walkthroughForm = new WalkthroughForm(MoveWalkthroughAsync, StopWalkthrough);
+        _walkthroughForm = new WalkthroughForm(MoveWalkthroughAsync, () => StopWalkthrough());
         _talk.WalkthroughChanged += view =>
         {
             if (view.Active) TrackWalkthroughTarget();
@@ -144,6 +145,8 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             {
                 if (view != _talk.Walkthrough.View) return;
                 _home.SetWalkthroughActive(view.Active);
+                UpdateWalkthroughWatch(view);
+                if (ShowWalkthroughCard(view)) return;
                 _walkthroughForm.UpdateStep(view, _talk.WalkthroughWindowTitle);
                 if (view.Active || view.Status.StartsWith("Complete", StringComparison.OrdinalIgnoreCase))
                     _walkthroughForm.Show();
@@ -613,7 +616,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         finally
         {
             _walkthroughForm.UpdateStep(_talk.Walkthrough.View);
-            if (_talk.Walkthrough.View.Active) _walkthroughForm.Show();
+            if (_talk.Walkthrough.View.Active && _shell is not { IsActive: true }) _walkthroughForm.Show();
             _talk.ResumeConversation();
         }
     }
@@ -627,9 +630,10 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             ForegroundWindowInfo.IsCurrentProcessWindow(foreground));
     }
 
-    private void StopWalkthrough()
+    /// <param name="endReason">Why it ended, for the next turn's context; null when the user stopped it.</param>
+    private void StopWalkthrough(string? endReason = null)
     {
-        _talk.StopWalkthrough();
+        _talk.StopWalkthrough(endReason);
         _walkthroughWindow = 0;
         _walkthroughForm.Hide();
     }
@@ -901,7 +905,8 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             access: access,
             foregroundWindow: ForegroundWindowInfo.GetHandle,
             revision: () => Interlocked.Read(ref _steeringRevision),
-            foregroundBounds: ForegroundWindowInfo.GetBounds);
+            foregroundBounds: ForegroundWindowInfo.GetBounds,
+            snapTarget: SnapControl);
             await agent.RunAsync(task + MemoryContext(), _settings.ResolveVisionModel(), token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
