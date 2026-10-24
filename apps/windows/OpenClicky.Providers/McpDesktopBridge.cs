@@ -80,7 +80,7 @@ public sealed class McpDesktopBridge
             }
             if (id is null) return new(202, null);
             if (!_ready) return JsonError(id, -32002, "Send notifications/initialized before making requests.");
-            if (method == "tools/list") return JsonResult(id, new { tools = ToolDefinitions(_tools.BrowserToolsAvailable) });
+            if (method == "tools/list") return JsonResult(id, new { tools = ToolDefinitions(_tools) });
             if (method != "tools/call") return JsonError(id, -32601, "Method not found");
             if (parameters.ValueKind != JsonValueKind.Object
                 || !parameters.TryGetProperty("name", out var name) || name.ValueKind != JsonValueKind.String)
@@ -113,8 +113,9 @@ public sealed class McpDesktopBridge
         }
     }
 
-    private static object[] ToolDefinitions(bool browserAvailable)
+    private static object[] ToolDefinitions(DesktopToolSession session)
     {
+        var browserAvailable = session.BrowserToolsAvailable;
         var tools = new List<object>
         {
         Tool("observe_screen", "Capture only the current foreground window and return a fresh observation ID/revision and its screen coordinates.", new { }),
@@ -134,6 +135,15 @@ public sealed class McpDesktopBridge
             tools.Add(BrowserMutatingTool("openclicky_browser_click", "Click an element from the current browser observation.", new { element_id = StringProperty() }, ["element_id"]));
             tools.Add(BrowserMutatingTool("openclicky_browser_type_text", "Type into an editable element from the current browser observation.", new { element_id = StringProperty(), text = StringProperty() }, ["element_id", "text"]));
             tools.Add(BrowserMutatingTool("openclicky_browser_follow_link", "Follow a link from the current browser observation without accepting a raw URL.", new { link_id = StringProperty() }, ["link_id"]));
+        }
+        if (session.JobFiles is not null)
+            tools.AddRange(JobOutputTools.Definitions((name, description, properties, required) => Tool(name, description, properties, required)));
+        if (session.Connectors.Count > 0)
+        {
+            var keys = string.Join(", ", session.Connectors.Select(c => $"{c.Key} ({c.DisplayName})"));
+            tools.Add(Tool("connector_tools", "List the tools of one connected account. Connected: " + keys + ".", new { connector = StringProperty() }, ["connector"]));
+            tools.Add(Tool("connector_call", "Call one tool from connector_tools. arguments is a JSON object string matching its input_schema. Tools that are not read_only need the user's approval.",
+                new { connector = StringProperty(), tool = StringProperty(), arguments = StringProperty(), rationale = StringProperty() }, ["connector", "tool", "arguments", "rationale"]));
         }
         return [.. tools];
     }

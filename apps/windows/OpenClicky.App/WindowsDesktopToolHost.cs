@@ -83,7 +83,7 @@ internal sealed class WindowsDesktopToolHost : IDesktopToolHost
             ? "Open " + request.TrustedTargetName + Environment.NewLine + request.Rationale
             : request.ToolName + ": " + string.Join(", ", request.Arguments.Select(p => p.Key + "=" + p.Value))
                 + Environment.NewLine + request.Rationale;
-        return await (request.ToolName == "open_app" ? _confirm.ConfirmNonInputAsync(summary, token)
+        return await (request.ToolName is "open_app" or "connector_call" ? _confirm.ConfirmNonInputAsync(summary, token)
             : _confirm.ConfirmAsync(summary, token)).ConfigureAwait(false);
     }
 

@@ -12,7 +12,8 @@ public sealed record TaskRunRecord(
     DateTimeOffset StartedAt,
     string Status,
     List<AgentProgress> Events,
-    string AccessMode);
+    string AccessMode,
+    string? JobId = null);
 
 public static class AgentProgressStates
 {
