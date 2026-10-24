@@ -100,8 +100,7 @@ internal sealed partial class TrayApplicationContext
         {
             if (_talk.State == CompanionVoiceState.Listening)
             {
-                var mic = _mic is NAudioMicrophoneRecorder { IsRecording: true } shared ? shared
-                    : _sttMic is { IsRecording: true } live ? live : null;
+                var mic = RecordingMic();
                 if (mic is null) measurable = false;
                 else
                 {
@@ -139,6 +138,11 @@ internal sealed partial class TrayApplicationContext
                 return false;
         }
     }
+
+    /// <summary>The NAudio recorder that is capturing now (the shared one, else the local recognizer's), if any has a level.</summary>
+    private NAudioMicrophoneRecorder? RecordingMic() =>
+        _mic is NAudioMicrophoneRecorder { IsRecording: true } shared ? shared
+        : _sttMic is { IsRecording: true } live ? live : null;
 
     private void CancelMicWatch()
     {

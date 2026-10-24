@@ -294,4 +294,50 @@ public class CursorMotionTests
         })
             Assert.True(float.IsFinite(b.X) && float.IsFinite(b.Y) && float.IsFinite(b.W) && float.IsFinite(b.H), b.ToString());
     }
+    [Fact]
+    public void DetachReattachesAfterThreeSeconds()
+    {
+        var d = new DetachState();
+        d.Shake(new Pt(50, 60), 1000);
+        Assert.True(d.Detached);
+        Assert.Equal(new Pt(50, 60), d.At);
+        Assert.False(d.Tick(3999));
+        Assert.True(d.Detached);
+        Assert.True(d.Tick(4000));
+        Assert.False(d.Detached);
+        Assert.False(d.Tick(9000)); // reports the reattach once
+    }
+
+    [Fact]
+    public void ClickReattaches()
+    {
+        var d = new DetachState();
+        d.Shake(new Pt(1, 2), 0);
+        d.Clicked();
+        Assert.False(d.Detached);
+        Assert.False(d.Tick(3000));
+    }
+
+    [Theory]
+    [InlineData(CursorPresence.Docked)]
+    [InlineData(CursorPresence.Off)]
+    public void ShakeIgnoredWhenDocked(CursorPresence presence)
+    {
+        var d = new DetachState { Presence = presence };
+        d.Shake(new Pt(5, 5), 0);
+        Assert.False(d.Detached);
+    }
+
+    [Fact]
+    public void ReshakeWhileDetachedDoesNotExtendAndLeavingFollowingReattaches()
+    {
+        var d = new DetachState();
+        d.Shake(new Pt(5, 5), 0);
+        d.Shake(new Pt(9, 9), 2000);
+        Assert.Equal(new Pt(5, 5), d.At);
+        Assert.True(d.Tick(3000));
+        d.Shake(new Pt(5, 5), 3100);
+        d.Presence = CursorPresence.Docked;
+        Assert.False(d.Detached);
+    }
 }

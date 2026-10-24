@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using OpenClicky.Core;
+using OpenClicky.Core.CompanionCursor;
 using OpenClicky.Overlay;
 
 namespace OpenClicky.Overlay.Smoke;
@@ -75,10 +76,10 @@ internal static class Program
         }
 
         Console.WriteLine($"overlay_hwnd=0x{overlay.WindowHandle:X}");
-        if (overlay.WindowHandles.Count != 2 || overlay.WindowHandles.Distinct().Count() != 2 || overlay.WindowHandles.Contains(IntPtr.Zero)
+        if (overlay.WindowHandles.Count != 3 || overlay.WindowHandles.Distinct().Count() != 3 || overlay.WindowHandles.Contains(IntPtr.Zero)
             || overlay.BuddyTipHandle != overlay.WindowHandle)
         {
-            Console.Error.WriteLine($"FAIL: expected the cursor and drawing windows, got [{string.Join(",", overlay.WindowHandles)}]");
+            Console.Error.WriteLine($"FAIL: expected the cursor, drawing and click-catcher windows, got [{string.Join(",", overlay.WindowHandles)}]");
             return 2;
         }
 
@@ -234,6 +235,14 @@ internal static class Program
             return 25;
         }
 
+        var dockFailure = ValidateDockAndDetach(overlay, vs, targetX, targetY);
+        if (dockFailure is not null)
+        {
+            Console.Error.WriteLine("FAIL: dock / detach " + dockFailure);
+            return 14;
+        }
+        Console.WriteLine("PASS: dock into the notch, hide, shake to detach, click to talk");
+
         var selection = overlay.SelectRegionAsync();
         Application.DoEvents();
         overlay.Hide();
@@ -315,6 +324,107 @@ internal static class Program
         return null;
     }
 
+    /// <summary>
+    /// Real windows, real hit-testing: docking flies to the notch and hides, a POINT grows out of it, a physical-style shake
+    /// (the cursor is moved, never clicked) detaches the companion under a 36 DIP click target that really receives the
+    /// click, and it reattaches after 3 s. Restores the cursor position.
+    /// </summary>
+    private static string? ValidateDockAndDetach(BuddyOverlayController overlay, Rectangle vs, int targetX, int targetY)
+    {
+        var cursorWindow = overlay.WindowHandle;
+        var catcher = overlay.WindowHandles[2];
+        var notch = new Point(vs.Left + vs.Width / 2, vs.Top + 4);
+        overlay.SetNotchPoint(notch.X, notch.Y);
+        static CompanionStyle Style(CursorPresence presence, bool shake = true) => new("#3380FF", presence, shake, true, false);
+        static bool Visible(IntPtr hwnd) => NativeMethods.IsWindowVisible(hwnd);
+        static void Pump(int ms) => PumpUntil(() => false, TimeSpan.FromMilliseconds(ms));
+        static bool Covers(IntPtr hwnd, Point p) =>
+            NativeMethods.GetWindowRect(hwnd, out var r) && r.Left <= p.X && p.X < r.Right && r.Top <= p.Y && p.Y < r.Bottom;
+
+        overlay.ApplyStyle(Style(CursorPresence.Docked));
+        overlay.ShowIdle();
+        overlay.ShowListening();
+        overlay.ShowProcessing();
+        Pump(400);
+        if (Visible(cursorWindow)) return "docked companion showed for listening / thinking";
+
+        overlay.PointAt(targetX, targetY, "dock-point");
+        if (!Visible(cursorWindow) || !Covers(cursorWindow, notch)) return "a POINT did not start from the notch";
+        if (!PumpUntil(() => overlay.IsPointFlyComplete, TimeSpan.FromSeconds(5))) return "the POINT flight from the notch did not settle";
+        var lastVisibleAtNotch = false;
+        overlay.ShowIdle();
+        Pump(150);
+        if (!Visible(cursorWindow)) return "ShowIdle did not fly the companion back";
+        var docked = PumpUntil(() =>
+        {
+            if (Visible(cursorWindow)) lastVisibleAtNotch = Covers(cursorWindow, notch);
+            return !Visible(cursorWindow);
+        }, TimeSpan.FromSeconds(4));
+        if (!docked) return "ShowIdle did not dock the companion";
+        if (!lastVisibleAtNotch) return "the companion vanished away from the notch";
+
+        overlay.ApplyStyle(Style(CursorPresence.Following));
+        overlay.ShowIdle();
+        if (!PumpUntil(() => Visible(cursorWindow), TimeSpan.FromSeconds(2))) return "leaving Docked did not bring the companion back";
+        Pump(700);
+        overlay.ApplyStyle(Style(CursorPresence.Docked));
+        Pump(500);
+        if (!Visible(cursorWindow)) return "docking did not hold its bubble first";
+        if (!PumpUntil(() => !Visible(cursorWindow), TimeSpan.FromSeconds(5))) return "docking never finished";
+
+        // Shake to detach. Only the cursor position is set; nothing is clicked or typed anywhere.
+        overlay.ApplyStyle(Style(CursorPresence.Following));
+        overlay.ShowIdle();
+        Pump(900);
+        var saved = Cursor.Position;
+        var home = new Point(vs.Left + vs.Width / 2, vs.Top + vs.Height / 2);
+        var clicks = 0;
+        overlay.DetachedClicked += () => clicks++;
+        void Shake()
+        {
+            for (var i = 0; i < 16; i++)
+            {
+                Cursor.Position = new Point(home.X + (i % 2 == 0 ? 40 : -40), home.Y);
+                Pump(25);
+            }
+        }
+        try
+        {
+            Shake();
+            if (!PumpUntil(() => Visible(catcher), TimeSpan.FromSeconds(2))) return "a shake did not detach the companion";
+            NativeMethods.GetWindowRect(catcher, out var box);
+            var middle = new Point((box.Left + box.Right) / 2, (box.Top + box.Bottom) / 2);
+            if (NativeMethods.WindowFromPoint(middle) != catcher) return "the click target is not what Windows hit-tests at the companion";
+            NativeMethods.SendMessage(catcher, 0x201, IntPtr.Zero, IntPtr.Zero);
+            NativeMethods.SendMessage(catcher, 0x202, IntPtr.Zero, IntPtr.Zero);
+            if (!PumpUntil(() => clicks == 1 && !Visible(catcher), TimeSpan.FromSeconds(1))) return $"the click did not raise DetachedClicked once (clicks={clicks})";
+
+            Pump(1100); // the detector's cooldown
+            Shake();
+            if (!PumpUntil(() => Visible(catcher), TimeSpan.FromSeconds(2))) return "a second shake did not detach";
+            if (!PumpUntil(() => !Visible(catcher), TimeSpan.FromSeconds(4)) || clicks != 1) return "an unclicked companion did not reattach after 3 s";
+
+            overlay.ApplyStyle(Style(CursorPresence.Following, shake: false));
+            Pump(1100);
+            Shake();
+            Pump(400);
+            if (Visible(catcher)) return "a shake detached with Shake to detach off";
+
+            overlay.ApplyStyle(Style(CursorPresence.Following));
+            Pump(1100);
+            Shake();
+            if (!PumpUntil(() => Visible(catcher), TimeSpan.FromSeconds(2))) return "a shake did not detach after re-enabling";
+            overlay.Hide();
+            if (overlay.WindowHandles.Any(Visible)) return "Hide left an overlay window (the click target?) visible";
+        }
+        finally
+        {
+            Cursor.Position = saved;
+        }
+
+        return null;
+    }
+
     private static bool PumpUntil(Func<bool> predicate, TimeSpan timeout)
     {
         var deadline = DateTime.UtcNow + timeout;
@@ -356,6 +466,12 @@ internal static class Program
 
         [DllImport("user32.dll")]
         public static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll")]
+        public static extern IntPtr WindowFromPoint(Point point);
+
+        [DllImport("user32.dll")]
+        public static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
         [DllImport("user32.dll")]
         [return: MarshalAs(UnmanagedType.Bool)]

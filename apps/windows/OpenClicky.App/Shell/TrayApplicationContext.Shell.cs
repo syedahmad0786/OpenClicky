@@ -123,6 +123,7 @@ internal sealed partial class TrayApplicationContext : IShellHost
         {
             ApplyTaskbarPresence();
             ApplyCaptureExclusion();
+            UpdateCompanionDock();
         }
         // Updates are checked in classic fallback mode too; there they announce through the tray.
         _updateTimer.Start();
@@ -138,6 +139,8 @@ internal sealed partial class TrayApplicationContext : IShellHost
         // The shell page never calls the workspace runtime API, so it gets its own bootstrap token, not the runtime's.
         var token = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
         _shellSurface = await ShellSurfaceAdapter.CreateAsync(runtime.Origin, token, WebViewFolder, !_settings.ShowInScreenRecordings);
+        _shellSurface.ScreenChanged += UpdateNotchPoint;
+        UpdateNotchPoint();
         return _shellSurface;
     }
 
@@ -241,6 +244,7 @@ internal sealed partial class TrayApplicationContext : IShellHost
     {
         if (_lifetime.IsCancellationRequested) return; // quitting while the shell was still starting
         ApplyTaskbarPresence(); // the shell is gone: drop its taskbar button
+        UpdateCompanionDock(); // and the round classic dock takes the notch's place
         if (!_background) ShowClassic();
         _tray.ShowBalloonTip(5000, "OpenClicky", _background
             ? "The new shell could not start. Open the classic window from the tray."

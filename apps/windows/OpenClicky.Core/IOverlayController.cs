@@ -34,6 +34,9 @@ public interface IOverlayController : IDisposable
 
     void ApplyStyle(CompanionStyle style) { }
 
+    /// <summary>Where a docked companion goes: the top centre of the monitor that hosts the shell surface (virtual-screen px).</summary>
+    void SetNotchPoint(int virtualX, int virtualY) { }
+
     /// <summary>Microphone peak level (0..1) for the listening bars; fed about every 100 ms while listening.</summary>
     void ShowMicLevel(double level) { }
 

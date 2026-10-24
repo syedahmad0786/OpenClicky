@@ -34,8 +34,8 @@ internal sealed class LayeredWindow : NativeWindow, IDisposable
         });
     }
 
-    /// <summary>Shows <paramref name="bitmap"/> (32 bpp with alpha) with its top-left at <paramref name="screenTopLeft"/> (virtual-screen px).</summary>
-    public void Present(Bitmap bitmap, Point screenTopLeft)
+    /// <summary>Shows <paramref name="bitmap"/> (32 bpp with alpha) with its top-left at <paramref name="screenTopLeft"/> (virtual-screen px), faded by <paramref name="opacity"/> (0..255).</summary>
+    public void Present(Bitmap bitmap, Point screenTopLeft, byte opacity = 255)
     {
         // GDI+ hands back a premultiplied 32 bpp DIB, which is what ULW_ALPHA expects. Taken first: if it throws, no
         // GDI handle is held yet.
@@ -51,7 +51,7 @@ internal sealed class LayeredWindow : NativeWindow, IDisposable
             var size = new NativeSize(bitmap.Width, bitmap.Height);
             var source = new NativePoint(0, 0);
             var destination = new NativePoint(screenTopLeft.X, screenTopLeft.Y);
-            var blend = new BlendFunction { BlendOp = AcSrcOver, SourceConstantAlpha = 255, AlphaFormat = AcSrcAlpha };
+            var blend = new BlendFunction { BlendOp = AcSrcOver, SourceConstantAlpha = opacity, AlphaFormat = AcSrcAlpha };
             updated = UpdateLayeredWindow(Handle, screenDc, ref destination, ref size, memDc, ref source, 0, ref blend, UlwAlpha);
             if (!updated) error = Marshal.GetLastWin32Error();
         }

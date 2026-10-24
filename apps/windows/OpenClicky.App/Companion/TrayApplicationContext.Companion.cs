@@ -1,5 +1,7 @@
 using OpenClicky.App.Shell;
+using OpenClicky.Core;
 using OpenClicky.Core.CompanionCursor;
+using OpenClicky.Input;
 
 namespace OpenClicky.App;
 
@@ -9,4 +11,44 @@ internal sealed partial class TrayApplicationContext
     /// <summary>UI thread: at startup, after a cursor.* patch, Pause/Resume, the classic settings form, and when a turn starts
     /// (Windows' reduced-motion setting is read fresh each time).</summary>
     private void ApplyCompanionStyle() => _overlay.ApplyStyle(CompanionStyle.From(_settings, GeneralBehaviour.ReducedMotion()));
+
+    /// <summary>UI thread, once at startup: clicking the detached companion talks, and any listening that no held press
+    /// started still drives the listening bars.</summary>
+    private void WireCompanion()
+    {
+        _overlay.DetachedClicked += ToggleConversation;
+        _talk.StateChanged += state => OnUi(() => { if (state == CompanionVoiceState.Listening && _micWatch is null) WatchMicLevels(); });
+    }
+
+    /// <summary>The surface covers the monitor it follows; the companion docks at that monitor's top centre.</summary>
+    private void UpdateNotchPoint()
+    {
+        if (_shellSurface is not { Window.IsDisposed: false } surface) return;
+        var bounds = surface.Window.Bounds;
+        _overlay.SetNotchPoint(bounds.Left + bounds.Width / 2, bounds.Top + 4);
+    }
+
+    /// <summary>The round classic dock is only for the classic fallback: the notch is the dock while the shell is up.</summary>
+    private void UpdateCompanionDock()
+    {
+        if (_shell is { IsActive: true }) _companionDock.Hide();
+        else _companionDock.Show();
+    }
+
+    /// <summary>Feeds the companion's listening bars until listening ends (a held press has its own watch, which also checks for a silent mic).</summary>
+    private void WatchMicLevels()
+    {
+        var timer = _micWatch = new System.Windows.Forms.Timer { Interval = 100 };
+        timer.Tick += (_, _) =>
+        {
+            if (_talk.State == CompanionVoiceState.Listening)
+            {
+                if (RecordingMic() is { } mic) _overlay.ShowMicLevel(mic.PeakLevel);
+                return;
+            }
+            timer.Dispose();
+            if (ReferenceEquals(_micWatch, timer)) _micWatch = null;
+        };
+        timer.Start();
+    }
 }

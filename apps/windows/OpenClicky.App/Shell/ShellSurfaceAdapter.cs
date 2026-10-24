@@ -34,6 +34,8 @@ internal sealed class ShellSurfaceAdapter : IShellSurface
     public ShellSurfaceWindow Window { get; }
     public event Action<string, string>? Message;
     public event Action? Failed;
+    /// <summary>The surface moved to another monitor (the companion docks at its top centre).</summary>
+    public event Action? ScreenChanged;
 
     public static async Task<ShellSurfaceAdapter> CreateAsync(Uri origin, string token, string userDataFolder, bool excludeFromCapture)
     {
@@ -68,7 +70,9 @@ internal sealed class ShellSurfaceAdapter : IShellSurface
     {
         if (_notch.Open || Window.IsDisposed) return;
         var screen = Screen.FromPoint(Cursor.Position);
-        if (!Window.Bounds.Equals(screen.Bounds)) Window.MoveToScreen(screen);
+        if (Window.Bounds.Equals(screen.Bounds)) return;
+        Window.MoveToScreen(screen);
+        ScreenChanged?.Invoke();
     }
 
     public void Dispose()

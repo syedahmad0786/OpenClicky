@@ -160,6 +160,50 @@ public sealed class ShakeDetector
     }
 }
 
+/// <summary>
+/// The shake-to-detach window: after a shake the companion stays where it is until it is clicked or
+/// <see cref="ReattachMs"/> pass. Only a Following companion detaches; leaving Following reattaches.
+/// </summary>
+public sealed class DetachState
+{
+    public const long ReattachMs = 3000;
+    long _shakeMs;
+    CursorPresence _presence = CursorPresence.Following;
+
+    public bool Detached { get; private set; }
+    public Pt At { get; private set; }
+
+    public CursorPresence Presence
+    {
+        get => _presence;
+        set
+        {
+            _presence = value;
+            if (value != CursorPresence.Following) Detached = false;
+        }
+    }
+
+    /// <summary>Detaches at <paramref name="at"/>; ignored unless Following, and a shake while detached does not extend the window.</summary>
+    public void Shake(Pt at, long ms)
+    {
+        if (_presence != CursorPresence.Following || Detached) return;
+        Detached = true;
+        At = at;
+        _shakeMs = ms;
+    }
+
+    /// <summary>True once, when the window has run out and the companion reattaches.</summary>
+    public bool Tick(long ms)
+    {
+        if (!Detached || ms - _shakeMs < ReattachMs) return false;
+        Detached = false;
+        return true;
+    }
+
+    /// <summary>The click (or any other reason to follow again, like a new turn) reattaches.</summary>
+    public void Clicked() => Detached = false;
+}
+
 public static class CursorShape
 {
     /// <summary>Equilateral triangle, apex at <paramref name="tip"/> (index 0), body trailing behind it; at -35 deg the apex points up-left.</summary>

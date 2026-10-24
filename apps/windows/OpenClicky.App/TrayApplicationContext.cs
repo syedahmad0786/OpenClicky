@@ -287,7 +287,8 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         };
         try { _physicalInput.Start(); }
         catch (Exception ex) { Log("takeover_monitor_error=" + ex.GetType().Name); ClassicMessage("Automatic pause on physical input is unavailable. Use Stop before taking over a running task."); }
-        _companionDock.Show();
+        // The classic dock stays hidden here: the notch replaces it once the shell is up (UpdateCompanionDock).
+        WireCompanion();
         ApplyCompanionStyle();
         if (_settings.AwarenessEnabled) _guideTimer.Start();
         Log($"tray ready — {TalkGesture} to talk");
