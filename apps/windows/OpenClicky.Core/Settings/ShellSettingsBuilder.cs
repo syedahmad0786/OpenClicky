@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using OpenClicky.Core.Shell;
 
 namespace OpenClicky.Core.Settings;
@@ -38,7 +37,6 @@ public sealed record SettingsRuntime
 public static class ShellSettingsBuilder
 {
     public const int MaxModels = 64, MaxVoices = 64, MaxDevices = 32, MaxLanguages = 128, MaxConnectors = 64, MaxReach = 16, MaxRoutines = 100, MaxHotkeyKeys = 6;
-    private static readonly Regex Hex = new("^#[0-9a-fA-F]{6}$", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(50));
     private const string UnavailableMicrophone = "Unavailable microphone";
     private const string UnavailableOutput = "Unavailable speaker";
 
@@ -49,7 +47,7 @@ public static class ShellSettingsBuilder
             runtime.SignedInAs, s.ChatGptModel ?? "", s.ChatGptQuickModel ?? "", runtime.Models,
             runtime.OpenRouterKeySet, s.OpenRouterModel ?? "");
 
-        var voices = Voices(runtime);
+        var voices = Voices(runtime, s.VoiceId);
         var voice = voices.Any(v => v.Id == s.VoiceId) ? s.VoiceId : SettingsCatalog.WindowsDefaultVoice;
         var (outputId, outputs) = Devices(s.OutputDeviceId, runtime.RenderDevices, UnavailableOutput);
         var (micId, mics) = Devices(s.MicrophoneDeviceId, runtime.CaptureDevices, UnavailableMicrophone);
@@ -60,11 +58,11 @@ public static class ShellSettingsBuilder
             new SettingsMicrophone(micId, mics, runtime.Whisper, runtime.WhisperProgress),
             new SettingsDictation(s.DictationAutoDetect, SettingsCatalog.Languages.Any(l => l.Code == s.DictationLanguage) ? s.DictationLanguage : "en", SettingsCatalog.Languages, s.DictionaryWords ?? []),
             new SettingsShortcuts(
-                HotkeyBinding.OrDefault(s.TalkHotkey, HotkeyBinding.DefaultTalk).ToView(),
+                HotkeyBinding.LiveTalk(s).ToView(), // sub-project B: show s.TalkHotkey once the monitor follows it
                 HotkeyBinding.OrDefault(s.TextHotkey, HotkeyBinding.DefaultText).ToView(),
                 HotkeyBinding.OrDefault(s.DictateHotkey, HotkeyBinding.DefaultDictate).ToView(),
                 HotkeyBinding.OrDefault(s.HandsFreeHotkey, HotkeyBinding.DefaultHandsFree).ToView()),
-            new SettingsCursor(s.AccentColor, s.CursorHidden, s.ScreenHighlight, s.ShakeToDetach),
+            new SettingsCursor(SettingsCatalog.SnapAccent(s.AccentColor), s.CursorHidden, s.ScreenHighlight, s.ShakeToDetach),
             new SettingsIntegrations(runtime.Chrome, runtime.Connectors),
             new SettingsAgents(
                 string.IsNullOrWhiteSpace(s.AgentFolder) ? runtime.DefaultAgentFolder : s.AgentFolder,
@@ -84,10 +82,10 @@ public static class ShellSettingsBuilder
     };
 
     /// <summary>Windows default, installed voices, then the OpenAI voices (unavailable until an OpenAI key is saved).</summary>
-    private static List<VoiceOption> Voices(SettingsRuntime runtime)
+    private static List<VoiceOption> Voices(SettingsRuntime runtime, string? selected)
     {
         var voices = new List<VoiceOption> { new(SettingsCatalog.WindowsDefaultVoice, "Windows default", "Installed voice", true) };
-        voices.AddRange(runtime.InstalledVoices
+        voices.AddRange(Front(runtime.InstalledVoices, v => v.Id, selected)
             .Where(v => v.Id != SettingsCatalog.WindowsDefaultVoice && !SettingsCatalog.OpenAiVoices.Contains(v.Id))
             .Take(MaxVoices - 1 - SettingsCatalog.OpenAiVoices.Count)
             .Select(v => new VoiceOption(v.Id, v.Name, "Installed voice", true)));
@@ -106,8 +104,9 @@ public static class ShellSettingsBuilder
         var devices = found.ToList();
         if (string.IsNullOrWhiteSpace(saved)) return (null, devices);
         var match = devices.FirstOrDefault(d => d.Id == saved);
-        if (match is null) devices.Insert(0, new Device(saved, unavailableName, DeviceState.Unavailable));
-        return (match is { State: DeviceState.Active } ? saved : null, devices);
+        if (match is null) match = new Device(saved, unavailableName, DeviceState.Unavailable);
+        // The selected device goes first so the list cap can never push it out.
+        return (match.State == DeviceState.Active ? saved : null, [match, .. devices.Where(d => d != match)]);
     }
 
     /// <summary>
@@ -127,7 +126,7 @@ public static class ShellSettingsBuilder
         var agents = v.Agents ?? d.Agents;
         var access = v.Access ?? d.Access;
         var advanced = v.Advanced ?? d.Advanced;
-        var voices = WithId(voice.Voices, o => o.Id, MaxVoices)
+        var voices = WithId(voice.Voices, o => o.Id, MaxVoices, voice.Voice)
             .Select(o => new VoiceOption(Cut(o.Id, 160), Cut(o.Name, 80), Cut(o.Detail, 160), o.Available)).ToList();
         var languages = Take(dictation.Languages, MaxLanguages).Select(l => new DictationLanguage(Cut(l.Code, 16), Cut(l.Name, 80), Cut(l.Native, 80))).ToList();
 
@@ -135,15 +134,15 @@ public static class ShellSettingsBuilder
             new SettingsAccount(account.Provider, CutOrNull(account.SignedInAs, 160), Cut(account.Model, 80), Cut(account.QuickModel, 80),
                 Take(account.Models, MaxModels).Select(m => Cut(m, 80)).ToList(), account.OpenRouterKeySet, Cut(account.OpenRouterModel, 120)),
             new SettingsVoice(Cut(voice.Voice, 80), voices, Math.Clamp(double.IsFinite(voice.Speed) ? voice.Speed : 1, 0.5, 1.5),
-                voice.Captions, voice.ReadReplies, CutOrNull(voice.OutputDeviceId, 160), Devs(voice.OutputDevices)),
-            new SettingsMicrophone(CutOrNull(mic.DeviceId, 160), Devs(mic.Devices), mic.Whisper,
+                voice.Captions, voice.ReadReplies, CutOrNull(voice.OutputDeviceId, 160), Devs(voice.OutputDevices, voice.OutputDeviceId)),
+            new SettingsMicrophone(CutOrNull(mic.DeviceId, 160), Devs(mic.Devices, mic.DeviceId), mic.Whisper,
                 Math.Clamp(double.IsFinite(mic.WhisperProgress) ? mic.WhisperProgress : 0, 0, 1)),
             new SettingsDictation(dictation.AutoDetect, Cut(dictation.Language, 16), languages,
                 SettingsCatalog.CleanDictionary(dictation.Dictionary)),
             new SettingsShortcuts(
                 Key(shortcuts.Talk, HotkeyBinding.DefaultTalk), Key(shortcuts.Text, HotkeyBinding.DefaultText),
                 Key(shortcuts.Dictate, HotkeyBinding.DefaultDictate), Key(shortcuts.HandsFree, HotkeyBinding.DefaultHandsFree)),
-            new SettingsCursor(Hex.IsMatch(cursor.Colour ?? "") ? cursor.Colour!.ToUpperInvariant() : ShellStateBuilder.DefaultAccent,
+            new SettingsCursor(ShellStateBuilder.IsHex(cursor.Colour) ? cursor.Colour!.ToUpperInvariant() : ShellStateBuilder.DefaultAccent,
                 cursor.Hidden, cursor.ScreenHighlight, cursor.ShakeToDetach),
             new SettingsIntegrations(integrations.Chrome, WithId(integrations.Connectors, c => c.Key, MaxConnectors)
                 .Select(c => new ConnectorView(Cut(c.Key, 160), Cut(c.Name, 80), Cut(c.Host, 255), c.Status, c.ToolCount is < 0 ? null : c.ToolCount)).ToList()),
@@ -156,8 +155,8 @@ public static class ShellSettingsBuilder
             new SettingsAdvanced(advanced.UseLocalProxy, SettingsCatalog.LoopbackUrl(advanced.ProxyUrl, stripUserInfo: true) ?? SettingsCatalog.DefaultProxyUrl,
                 advanced.ForceGdiCapture));
 
-        static List<Device> Devs(IReadOnlyList<Device>? devices) =>
-            WithId(devices, x => x.Id, MaxDevices).Select(x => new Device(Cut(x.Id, 160), Cut(x.Name, 160), x.State)).ToList();
+        static List<Device> Devs(IReadOnlyList<Device>? devices, string? selected) =>
+            WithId(devices, x => x.Id, MaxDevices, selected).Select(x => new Device(Cut(x.Id, 160), Cut(x.Name, 160), x.State)).ToList();
 
         static Hotkey Key(Hotkey? hotkey, HotkeyBinding fallback)
         {
@@ -166,9 +165,27 @@ public static class ShellSettingsBuilder
         }
     }
 
-    /// <summary>Entries with a non-empty id (the page schema requires one), then at most <paramref name="max"/> of them.</summary>
-    private static IEnumerable<T> WithId<T>(IReadOnlyList<T>? list, Func<T, string?> id, int max) =>
-        (list ?? []).Where(x => !string.IsNullOrEmpty(id(x))).Take(max);
+    /// <summary>The entry whose id is <paramref name="selected"/> first (if present), then the rest in order, so a cap never drops the selection.</summary>
+    private static IReadOnlyList<T> Front<T>(IReadOnlyList<T>? list, Func<T, string?> id, string? selected)
+    {
+        var items = list ?? [];
+        var index = selected is null ? -1 : items.ToList().FindIndex(x => id(x) == selected);
+        return index <= 0 ? items : [items[index], .. items.Where((_, i) => i != index)];
+    }
+
+    /// <summary>
+    /// Entries with a non-empty id (the page schema requires one), at most <paramref name="max"/> of them in order;
+    /// if the <paramref name="selected"/> entry would fall outside the cap it takes the last slot instead.
+    /// </summary>
+    private static List<T> WithId<T>(IReadOnlyList<T>? list, Func<T, string?> id, int max, string? selected = null)
+    {
+        var valid = (list ?? []).Where(x => !string.IsNullOrEmpty(id(x))).ToList();
+        if (valid.Count <= max) return valid;
+        var kept = valid.Take(max).ToList();
+        if (selected is not null && !kept.Any(x => id(x) == selected) && valid.FirstOrDefault(x => id(x) == selected) is { } pick)
+            kept[^1] = pick;
+        return kept;
+    }
     private static IEnumerable<T> Take<T>(IReadOnlyList<T>? list, int max) => (list ?? []).Take(max);
     private static string Cut(string? value, int max) => SettingsCatalog.Cut(value ?? "", max);
     /// <summary>Routine times must be ISO-8601 with an offset or the page schema rejects the whole state.</summary>

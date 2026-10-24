@@ -53,6 +53,7 @@ public static class ShellStateBuilder
     /// <summary>Longest file path the page schema accepts; longer paths are dropped, never cut (the open allow-list needs them exact).</summary>
     public const int MaxPath = 4_096;
     public const string DefaultAccent = "#3380FF";
+    internal static bool IsHex(string? value) => value is not null && Hex.IsMatch(value);
     private static readonly Regex Hex = new("^#[0-9a-fA-F]{6}$", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(50));
     private static readonly JobColour[] Colours = [JobColour.Red, JobColour.Blue, JobColour.Yellow, JobColour.Green];
 
@@ -69,7 +70,7 @@ public static class ShellStateBuilder
         var state = new ShellState(
             ShellContract.Version,
             inputs.Theme,
-            settings.AccentColor is { } accent && Hex.IsMatch(accent) ? accent.ToUpperInvariant() : DefaultAccent,
+            IsHex(settings.AccentColor) ? settings.AccentColor.ToUpperInvariant() : DefaultAccent,
             inputs.ReducedMotion,
             new ShellUser(Cut(DisplayName(settings, inputs.AccountDisplayName, inputs.FallbackUserName), 80)),
             new ShellHotkeys(Keys(settings.PushToTalk), [], [], []),
@@ -84,7 +85,7 @@ public static class ShellStateBuilder
             BoundUpdate(inputs.Update) ?? new ShellUpdate(Cut(inputs.CurrentVersion, 40), null, UpdateState.Idle, 0),
             inputs.Document is { } pathDoc && pathDoc.Path.Length > MaxPath ? null
                 : inputs.Document is { } doc && doc.Content.Length > MaxDocument ? doc with { Content = doc.Content[..MaxDocument], Truncated = true } : inputs.Document,
-            ShellSettingsBuilder.Clamp(inputs.SettingsPage ?? ShellSettingsBuilder.Build(settings, inputs.SettingsRuntime)));
+            inputs.SettingsPage is { } page ? ShellSettingsBuilder.Clamp(page) : ShellSettingsBuilder.Build(settings, inputs.SettingsRuntime)); // Build already clamps
         return WithinBudget(state);
 
         JobCard MapJob(ShellJobInput input)
@@ -168,7 +169,7 @@ public static class ShellStateBuilder
         return fallback;
     }
 
-    private static IReadOnlyList<string> Keys(HotkeyChord chord) =>
+    internal static IReadOnlyList<string> Keys(HotkeyChord chord) =>
         chord.DisplayName.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Take(6).Select(k => Cut(k, 24)).ToList();
 
     /// <summary>Stable across runs (FNV-1a); string.GetHashCode is randomised per process.</summary>

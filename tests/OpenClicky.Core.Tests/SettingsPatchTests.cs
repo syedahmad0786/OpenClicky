@@ -36,14 +36,31 @@ public class SettingsPatchTests
     [InlineData("account.provider", "\"bing\"")]
     [InlineData("account.model", "\"\"")]
     [InlineData("account.model", "\"bad model!\"")]
-    [InlineData("shortcuts.talk", "{\"keys\":[\"Foo\"],\"trigger\":\"hold\"}")]
-    [InlineData("shortcuts.talk", "{\"keys\":[],\"trigger\":\"hold\"}")]
-    [InlineData("shortcuts.talk", "{\"keys\":[\"Ctrl\"],\"trigger\":\"tap\"}")]
-    [InlineData("shortcuts.talk", "{\"keys\":[\"A\"],\"trigger\":\"hold\"}")]
-    [InlineData("shortcuts.talk", "{\"keys\":[\"Ctrl\",\"A\",\"B\"],\"trigger\":\"hold\"}")]
-    [InlineData("shortcuts.talk", "{\"keys\":[\"Ctrl\",\"Ctrl\"],\"trigger\":\"hold\"}")]
-    [InlineData("shortcuts.talk", "{\"keys\":[\"Ctrl\",\"A\"],\"trigger\":\"doubleTap\"}")]
-    [InlineData("shortcuts.talk", "\"Ctrl+Alt\"")]
+    [InlineData("shortcuts.text", "{\"keys\":[\"Foo\"],\"trigger\":\"hold\"}")]
+    [InlineData("shortcuts.text", "{\"keys\":[],\"trigger\":\"hold\"}")]
+    [InlineData("shortcuts.text", "{\"keys\":[\"Ctrl\"],\"trigger\":\"tap\"}")]
+    [InlineData("shortcuts.text", "{\"keys\":[\"A\"],\"trigger\":\"hold\"}")]
+    [InlineData("shortcuts.text", "{\"keys\":[\"Ctrl\",\"A\",\"B\"],\"trigger\":\"hold\"}")]
+    [InlineData("shortcuts.text", "{\"keys\":[\"Ctrl\",\"Ctrl\"],\"trigger\":\"hold\"}")]
+    [InlineData("shortcuts.text", "{\"keys\":[\"Ctrl\",\"A\"],\"trigger\":\"doubleTap\"}")]
+    [InlineData("shortcuts.text", "\"Ctrl+Alt\"")]
+    [InlineData("shortcuts.text", "{\"keys\":[1],\"trigger\":\"hold\"}")]
+    [InlineData("shortcuts.text", "{\"keys\":[null],\"trigger\":\"hold\"}")]
+    [InlineData("shortcuts.text", "{\"keys\":[{}],\"trigger\":\"hold\"}")]
+    [InlineData("shortcuts.text", "{\"keys\":[\"\\ud800\"],\"trigger\":\"hold\"}")]
+    [InlineData("shortcuts.text", "{\"keys\":[\"Ctrl\"],\"trigger\":\"\\ud800\"}")]
+    [InlineData("voice.voice", "\"\\ud800\"")]
+    [InlineData("voice.speed", "1e400")]
+    [InlineData("voice.speed", "-1e400")]
+    [InlineData("dictation.language", "\"\\ud800\"")]
+    [InlineData("dictation.dictionary", "[\"\\ud800\"]")]
+    [InlineData("cursor.colour", "\"\\ud800\"")]
+    [InlineData("access.denyList", "\"\\ud800\"")]
+    [InlineData("access.mode", "\"\\ud800\"")]
+    [InlineData("advanced.proxyUrl", "\"\\ud800\"")]
+    [InlineData("account.provider", "\"\\ud800\"")]
+    [InlineData("account.model", "\"\\ud800\"")]
+    [InlineData("microphone.deviceId", "\"\\ud800\"")]
     public void RejectsUnknownKeyWrongTypeAndRange(string key, string json)
     {
         var s = new AppSettings();
@@ -62,7 +79,6 @@ public class SettingsPatchTests
             ("voice.voice", "\"alloy\""), ("voice.speed", "1.25"), ("voice.captions", "false"), ("voice.readReplies", "false"),
             ("voice.outputDeviceId", "\"spk-1\""), ("microphone.deviceId", "\"mic-1\""),
             ("dictation.autoDetect", "false"), ("dictation.language", "\"fr\""), ("dictation.dictionary", "[\"Clicky\"]"),
-            ("shortcuts.talk", "{\"keys\":[\"Ctrl\",\"Shift\"],\"trigger\":\"hold\"}"),
             ("shortcuts.text", "{\"keys\":[\"F9\"],\"trigger\":\"doubleTap\"}"),
             ("shortcuts.dictate", "{\"keys\":[\"Alt\",\"D\"],\"trigger\":\"hold\"}"),
             ("shortcuts.handsFree", "{\"keys\":[\"Ctrl\",\"Alt\"],\"trigger\":\"doubleTap\"}"),
@@ -84,7 +100,6 @@ public class SettingsPatchTests
         Assert.Equal("mic-1", s.MicrophoneDeviceId);
         Assert.Equal("fr", s.DictationLanguage);
         Assert.Equal(["Clicky"], s.DictionaryWords);
-        Assert.Equal(["Ctrl", "Shift"], s.TalkHotkey.Keys);
         Assert.Equal(HotkeyTrigger.DoubleTap, s.TextHotkey.Trigger);
         Assert.Equal("#26C281", s.AccentColor);
         Assert.Equal(AgentAccessMode.Preview, s.AgentAccess);
@@ -100,24 +115,46 @@ public class SettingsPatchTests
         var s = new AppSettings();
         var before = Snapshot(s);
 
-        // Talk defaults to hold Ctrl+Alt: same keys in another order and the same trigger conflict.
-        Assert.Equal(PatchResult.Rejected, Apply(s, "shortcuts.text", "{\"keys\":[\"alt\",\"control\"],\"trigger\":\"hold\"}", out var error));
+        // sub-project B: Talk is the live PushToTalk chord (Win+Alt+Space, hold); same keys in any order and the same trigger conflict.
+        Assert.Equal(PatchResult.Rejected, Apply(s, "shortcuts.text", "{\"keys\":[\"space\",\"win\",\"alt\"],\"trigger\":\"hold\"}", out var error));
         Assert.Contains("Talk", error);
         Assert.Equal(before, Snapshot(s));
 
         // Dictate defaults to hold Ctrl+Win; hands-free is double-tap on the same keys, so that pair is not a conflict.
         Assert.Equal(PatchResult.Rejected, Apply(s, "shortcuts.handsFree", "{\"keys\":[\"Win\",\"Ctrl\"],\"trigger\":\"hold\"}", out error));
         Assert.Contains("Dictate", error);
-        Assert.Equal(PatchResult.Applied, Apply(s, "shortcuts.talk", "{\"keys\":[\"Ctrl\",\"Alt\"],\"trigger\":\"doubleTap\"}", out error));
         Assert.Equal(PatchResult.Applied, Apply(s, "shortcuts.dictate", "{\"keys\":[\"Ctrl\",\"Win\"],\"trigger\":\"hold\"}", out error));
+        Assert.Equal(PatchResult.Applied, Apply(s, "shortcuts.text", "{\"keys\":[\"Ctrl\",\"Alt\"],\"trigger\":\"hold\"}", out error));
+    }
+
+    [Fact]
+    public void ConflictCheckTreatsAMissingOrInvalidStoredBindingAsItsDefault()
+    {
+        var s = new AppSettings { TextHotkey = null!, DictateHotkey = new HotkeyBinding(["Bogus"], HotkeyTrigger.Hold) };
+        // Text mode is null (default double-tap Ctrl): hands-free may not take it. Dictate is invalid (default hold Ctrl+Win).
+        Assert.Equal(PatchResult.Rejected, Apply(s, "shortcuts.handsFree", "{\"keys\":[\"Ctrl\"],\"trigger\":\"doubleTap\"}", out var error));
+        Assert.Contains("Text mode", error);
+        Assert.Equal(PatchResult.Rejected, Apply(s, "shortcuts.handsFree", "{\"keys\":[\"Ctrl\",\"Win\"],\"trigger\":\"hold\"}", out error));
+        Assert.Contains("Dictate", error);
+        Assert.Equal(PatchResult.Applied, Apply(s, "shortcuts.handsFree", "{\"keys\":[\"F8\"],\"trigger\":\"doubleTap\"}", out _));
+    }
+
+    [Fact]
+    public void TalkShortcutIsReadOnlyUntilSubProjectB()
+    {
+        var s = new AppSettings();
+        var before = Snapshot(s);
+        Assert.Equal(PatchResult.Rejected, Apply(s, "shortcuts.talk", "{\"keys\":[\"Ctrl\",\"Shift\"],\"trigger\":\"hold\"}", out var error));
+        Assert.Equal("Changing this shortcut arrives with the new shortcuts update.", error);
+        Assert.Equal(before, Snapshot(s));
     }
 
     [Fact]
     public void ReSavingAnActionsOwnChordIsNotAConflict()
     {
         var s = new AppSettings();
-        Assert.Equal(PatchResult.Applied, Apply(s, "shortcuts.talk", "{\"keys\":[\"Alt\",\"Ctrl\"],\"trigger\":\"hold\"}", out _));
-        Assert.Equal(["Ctrl", "Alt"], s.TalkHotkey.Keys);
+        Assert.Equal(PatchResult.Applied, Apply(s, "shortcuts.dictate", "{\"keys\":[\"Win\",\"Ctrl\"],\"trigger\":\"hold\"}", out _));
+        Assert.Equal(["Ctrl", "Win"], s.DictateHotkey.Keys);
     }
 
     [Fact]
@@ -180,6 +217,7 @@ public class SettingsPatchTests
             TalkHotkey = new HotkeyBinding(["Nonsense"], HotkeyTrigger.Hold),
             DictionaryWords = [.. Enumerable.Range(0, 99).Select(i => "w" + i)],
             DictationLanguage = "zz",
+            AccentColor = "#123456",
             AgentDenyListExtra = new string('a', 9_000),
         };
         SettingsPatch.Normalize(s);
@@ -187,6 +225,7 @@ public class SettingsPatchTests
         Assert.Equal(["Ctrl", "Alt"], s.TalkHotkey.Keys);
         Assert.Equal(50, s.DictionaryWords.Count);
         Assert.Equal("en", s.DictationLanguage);
+        Assert.Equal("#3380FF", s.AccentColor);
         Assert.Equal(2_000, s.AgentDenyListExtra!.Length);
     }
 }

@@ -24,7 +24,7 @@ public class ShellSettingsBuilderTests
         Assert.True(v.Dictation.AutoDetect);
         Assert.Equal("en", v.Dictation.Language);
         Assert.Empty(v.Dictation.Dictionary);
-        Assert.Equal(["Ctrl", "Alt"], Keys(v.Shortcuts.Talk));
+        Assert.Equal(["Win", "Alt", "Space"], Keys(v.Shortcuts.Talk)); // sub-project B: the live PushToTalk chord, not TalkHotkey
         Assert.Equal(HotkeyTrigger.Hold, v.Shortcuts.Talk.Trigger);
         Assert.Equal(["Ctrl"], Keys(v.Shortcuts.Text));
         Assert.Equal(HotkeyTrigger.DoubleTap, v.Shortcuts.Text.Trigger);
@@ -39,6 +39,55 @@ public class ShellSettingsBuilderTests
         Assert.Equal(AccessModeView.ConfirmEach, v.Access.Mode);
         Assert.Equal("http://127.0.0.1:8787", v.Advanced.ProxyUrl);
         Assert.Contains(v.Dictation.Languages, l => l.Code == "en");
+    }
+
+    [Fact]
+    public void TalkShortcutFollowsTheLivePushToTalkChord()
+    {
+        var s = new AppSettings { PushToTalk = new HotkeyChord(Win: false, Alt: false, Control: true, Shift: true, VirtualKey: 0x4B) };
+        var shown = Build(s).Shortcuts.Talk;
+        Assert.Equal(["Ctrl", "Shift", "K"], Keys(shown));
+        Assert.Equal(HotkeyTrigger.Hold, shown.Trigger);
+        Assert.Equal(ShellStateBuilder.Build(new ShellInputs(s, [], [], [], ShellPhase.Idle, DateTimeOffset.UtcNow)).Hotkeys.Talk, shown.Keys);
+    }
+
+    [Fact]
+    public void SelectedDeviceAndVoiceSurviveTheListCaps()
+    {
+        var mics = Enumerable.Range(0, 60).Select(i => new Device("m" + i, "Mic " + i, DeviceState.Active)).ToList();
+        var voices = Enumerable.Range(0, 120).Select(i => new InstalledVoice("v" + i, "Voice " + i)).ToList();
+        var v = Build(new AppSettings { MicrophoneDeviceId = "m50", VoiceId = "v100" },
+            new SettingsRuntime { CaptureDevices = mics, InstalledVoices = voices });
+        Assert.Equal("m50", v.Microphone.DeviceId);
+        Assert.Equal(32, v.Microphone.Devices.Count);
+        Assert.Equal("m50", v.Microphone.Devices[0].Id);
+        Assert.Equal("v100", v.Voice.Voice);
+        Assert.Equal(64, v.Voice.Voices.Count);
+        Assert.Contains(v.Voice.Voices, x => x.Id == "v100");
+
+        // An unplugged saved device is listed first too.
+        var gone = Build(new AppSettings { MicrophoneDeviceId = "m-gone" }, new SettingsRuntime { CaptureDevices = mics });
+        Assert.Null(gone.Microphone.DeviceId);
+        Assert.Equal(new Device("m-gone", "Unavailable microphone", DeviceState.Unavailable), gone.Microphone.Devices[0]);
+
+        // An explicit over-cap page keeps its selection inside the cap as well.
+        var page = SettingsView.Default with
+        {
+            Microphone = new SettingsMicrophone("m50", mics, WhisperState.Ready, 0),
+            Voice = SettingsView.Default.Voice with { Voice = "v100", Voices = [.. voices.Select(x => new VoiceOption(x.Id, x.Name, "", true))] },
+        };
+        var clamped = ShellSettingsBuilder.Clamp(page);
+        Assert.Equal(32, clamped.Microphone.Devices.Count);
+        Assert.Contains(clamped.Microphone.Devices, d => d.Id == "m50");
+        Assert.Equal(64, clamped.Voice.Voices.Count);
+        Assert.Contains(clamped.Voice.Voices, x => x.Id == "v100");
+    }
+
+    [Fact]
+    public void NonAccentCursorColourShowsTheDefault()
+    {
+        Assert.Equal("#3380FF", Build(new AppSettings { AccentColor = "#123456" }).Cursor.Colour);
+        Assert.Equal("#FF4C4C", Build(new AppSettings { AccentColor = "#ff4c4c" }).Cursor.Colour);
     }
 
     [Fact]

@@ -6,69 +6,6 @@ namespace OpenClicky.Core.Settings;
 
 public enum PatchResult { Applied, Rejected, RequiresConfirmation }
 
-/// <summary>Fixed values and caps shared by the patch validator and the view builder.</summary>
-public static class SettingsCatalog
-{
-    public static readonly IReadOnlyList<double> Speeds = [0.5, 0.75, 1, 1.25, 1.5];
-    public static readonly IReadOnlyList<string> Accents = ["#3380FF", "#FF4C4C", "#D4A017", "#26C281"];
-    public static readonly IReadOnlyList<string> OpenAiVoices = ["alloy", "ash", "ballad", "cedar", "coral", "echo", "marin", "sage", "shimmer", "verse"];
-    public const string WindowsDefaultVoice = "windows-default";
-    public const string DefaultProxyUrl = "http://127.0.0.1:8787";
-    public const int MaxDictionaryWords = 50, MaxWordLength = 40, MaxDenyListChars = 2_000, MaxIdLength = 160, MaxVoiceLength = 80;
-
-    public static readonly IReadOnlyList<DictationLanguage> Languages =
-    [
-        new("en", "English", "English"), new("es", "Spanish", "Español"), new("fr", "French", "Français"),
-        new("de", "German", "Deutsch"), new("it", "Italian", "Italiano"), new("pt", "Portuguese", "Português"),
-        new("nl", "Dutch", "Nederlands"), new("sv", "Swedish", "Svenska"), new("pl", "Polish", "Polski"),
-        new("tr", "Turkish", "Türkçe"), new("ru", "Russian", "Русский"),
-        new("uk", "Ukrainian", "Українська"),
-        new("ar", "Arabic", "العربية"), new("hi", "Hindi", "हिन्दी"),
-        new("ja", "Japanese", "日本語"), new("ko", "Korean", "한국어"), new("zh", "Chinese", "中文"),
-    ];
-
-    public static double SnapSpeed(double speed) => Speeds.FirstOrDefault(s => Math.Abs(s - speed) < 1e-9, 1);
-
-    /// <summary>Trimmed, control-character-free words, de-duplicated ignoring case, each cut to 40 chars, at most 50.</summary>
-    public static List<string> CleanDictionary(IEnumerable<string?>? words)
-    {
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var result = new List<string>();
-        foreach (var raw in (words ?? []).Take(1_000))
-        {
-            var word = Cut(raw?.Trim() ?? "", MaxWordLength).TrimEnd();
-            if (word.Length == 0 || word.Any(char.IsControl) || !seen.Add(word)) continue;
-            result.Add(word);
-            if (result.Count == MaxDictionaryWords) break;
-        }
-        return result;
-    }
-
-    public static string CleanDenyList(string? text) => Cut(text?.Trim() ?? "", MaxDenyListChars);
-
-    /// <summary>Cuts to <paramref name="max"/> chars without leaving half a surrogate pair.</summary>
-    public static string Cut(string value, int max)
-    {
-        if (value.Length <= max) return value;
-        return char.IsHighSurrogate(value[max - 1]) ? value[..(max - 1)] : value[..max];
-    }
-
-    /// <summary>
-    /// The http/https loopback URL (no path trailing slash), or null when it is anything else. Credentials
-    /// (user:pass@) are rejected unless <paramref name="stripUserInfo"/>, in which case they are removed.
-    /// </summary>
-    public static string? LoopbackUrl(string? text, bool stripUserInfo = false)
-    {
-        var t = text?.Trim();
-        if (string.IsNullOrEmpty(t) || t.Length > 200 || !Uri.TryCreate(t, UriKind.Absolute, out var uri)) return null;
-        if (uri.Scheme is not ("http" or "https") || !uri.IsLoopback) return null;
-        if (uri.UserInfo.Length > 0 && !stripUserInfo) return null;
-        var host = uri.HostNameType == UriHostNameType.IPv6 ? uri.Host : uri.IdnHost;
-        var port = uri.IsDefaultPort ? "" : ":" + uri.Port;
-        return $"{uri.Scheme}://{host}{port}{uri.AbsolutePath}".TrimEnd('/');
-    }
-}
-
 /// <summary>
 /// Validates one <c>settings.patch {key, value}</c> and applies it to <see cref="AppSettings"/> in memory. Nothing is
 /// written to disk here and a rejected patch never changes the settings. Lists are capped rather than rejected.
@@ -92,13 +29,19 @@ public static class SettingsPatch
         ["advanced.forceGdiCapture"] = (s, v) => s.ForceGdiCapture = v,
     };
 
-    private static readonly Dictionary<string, (string Name, Func<AppSettings, HotkeyBinding> Get, Action<AppSettings, HotkeyBinding> Set)> Hotkeys = new()
+    private sealed record HotkeySlot(string Name, Func<AppSettings, HotkeyBinding?> Get, Action<AppSettings, HotkeyBinding> Set, HotkeyBinding Default);
+
+    private static readonly Dictionary<string, HotkeySlot> Hotkeys = new()
     {
-        ["shortcuts.talk"] = ("Talk", s => s.TalkHotkey, (s, b) => s.TalkHotkey = b),
-        ["shortcuts.text"] = ("Text mode", s => s.TextHotkey, (s, b) => s.TextHotkey = b),
-        ["shortcuts.dictate"] = ("Dictate", s => s.DictateHotkey, (s, b) => s.DictateHotkey = b),
-        ["shortcuts.handsFree"] = ("Hands-free dictation", s => s.HandsFreeHotkey, (s, b) => s.HandsFreeHotkey = b),
+        // sub-project B: the talk shortcut is read-only and mirrors the live PushToTalk chord (see HotkeyBinding.LiveTalk);
+        // when B switches the monitor to TalkHotkey, read s.TalkHotkey here and let shortcuts.talk be patched again.
+        ["shortcuts.talk"] = new("Talk", HotkeyBinding.LiveTalk, (s, b) => s.TalkHotkey = b, HotkeyBinding.DefaultTalk),
+        ["shortcuts.text"] = new("Text mode", s => s.TextHotkey, (s, b) => s.TextHotkey = b, HotkeyBinding.DefaultText),
+        ["shortcuts.dictate"] = new("Dictate", s => s.DictateHotkey, (s, b) => s.DictateHotkey = b, HotkeyBinding.DefaultDictate),
+        ["shortcuts.handsFree"] = new("Hands-free dictation", s => s.HandsFreeHotkey, (s, b) => s.HandsFreeHotkey = b, HotkeyBinding.DefaultHandsFree),
     };
+
+    private const string TalkLocked = "Changing this shortcut arrives with the new shortcuts update.";
 
     /// <summary>
     /// <paramref name="confirmed"/> is true only after the user accepted the native warning for Auto/Full access;
@@ -124,7 +67,8 @@ public static class SettingsPatch
             return PatchResult.Applied;
         }
 
-        if (Hotkeys.TryGetValue(key, out var hotkey)) return ApplyHotkey(s, hotkey.Name, value, hotkey.Set, out error);
+        if (key == "shortcuts.talk") return Reject(TalkLocked, out error); // sub-project B: remove to allow editing Talk.
+        if (Hotkeys.TryGetValue(key, out var hotkey)) return ApplyHotkey(s, hotkey, value, out error);
 
         switch (key)
         {
@@ -163,16 +107,17 @@ public static class SettingsPatch
                 foreach (var item in value.EnumerateArray().Take(1_000))
                 {
                     if (item.ValueKind != JsonValueKind.String) return Reject("Dictionary words must be text.", out error);
-                    words.Add(ShellIntentParser.ReadString(item));
+                    if (ShellIntentParser.ReadString(item) is not { } word) return Reject("Dictionary words must be valid text.", out error);
+                    words.Add(word);
                 }
                 s.DictionaryWords = SettingsCatalog.CleanDictionary(words);
                 return PatchResult.Applied;
 
             case "cursor.colour":
                 if (value.ValueKind != JsonValueKind.String || ShellIntentParser.ReadString(value) is not { } colour
-                    || SettingsCatalog.Accents.FirstOrDefault(a => a.Equals(colour, StringComparison.OrdinalIgnoreCase)) is not { } accent)
+                    || !SettingsCatalog.Accents.Contains(colour, StringComparer.OrdinalIgnoreCase))
                     return Reject("Pick one of the offered cursor colours.", out error);
-                s.AccentColor = accent;
+                s.AccentColor = SettingsCatalog.SnapAccent(colour);
                 return PatchResult.Applied;
 
             case "access.mode":
@@ -236,8 +181,7 @@ public static class SettingsPatch
         return PatchResult.Applied;
     }
 
-    private static PatchResult ApplyHotkey(AppSettings s, string name, JsonElement value,
-        Action<AppSettings, HotkeyBinding> set, out string? error)
+    private static PatchResult ApplyHotkey(AppSettings s, HotkeySlot slot, JsonElement value, out string? error)
     {
         error = null;
         if (value.ValueKind != JsonValueKind.Object
@@ -262,10 +206,11 @@ public static class SettingsPatch
 
         foreach (var other in Hotkeys.Values)
         {
-            if (other.Name != name && other.Get(s).SameChord(binding!))
+            // Compared the way the page shows them: a missing or invalid stored binding counts as that action's default.
+            if (!ReferenceEquals(other, slot) && HotkeyBinding.OrDefault(other.Get(s), other.Default).SameChord(binding!))
                 return Reject($"That shortcut is already used by {other.Name}. Pick a different one.", out error);
         }
-        set(s, binding!);
+        slot.Set(s, binding!);
         return PatchResult.Applied;
     }
 
@@ -319,6 +264,7 @@ public static class SettingsPatch
         s.DictateHotkey = HotkeyBinding.OrDefault(s.DictateHotkey, HotkeyBinding.DefaultDictate);
         s.HandsFreeHotkey = HotkeyBinding.OrDefault(s.HandsFreeHotkey, HotkeyBinding.DefaultHandsFree);
         s.SpeechSpeed = SettingsCatalog.SnapSpeed(s.SpeechSpeed);
+        s.AccentColor = SettingsCatalog.SnapAccent(s.AccentColor);
         s.DictionaryWords = SettingsCatalog.CleanDictionary(s.DictionaryWords);
         s.VoiceId = string.IsNullOrWhiteSpace(s.VoiceId) ? SettingsCatalog.WindowsDefaultVoice : s.VoiceId;
         s.DictationLanguage = SettingsCatalog.Languages.Any(l => l.Code == s.DictationLanguage) ? s.DictationLanguage : "en";

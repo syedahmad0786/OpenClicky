@@ -17,6 +17,12 @@ public sealed record HotkeyBinding(IReadOnlyList<string> Keys, HotkeyTrigger Tri
     public static HotkeyBinding DefaultDictate => new(["Ctrl", "Win"], HotkeyTrigger.Hold);
     public static HotkeyBinding DefaultHandsFree => new(["Ctrl", "Win"], HotkeyTrigger.DoubleTap);
 
+    /// <summary>
+    /// sub-project B: until B moves the monitor to <see cref="AppSettings.TalkHotkey"/>, the talk shortcut is the live
+    /// PushToTalk chord (hold), mapped the same way as ShellState.hotkeys.talk. Delete this when B lands.
+    /// </summary>
+    public static HotkeyBinding LiveTalk(AppSettings s) => new(ShellStateBuilder.Keys(s.PushToTalk), HotkeyTrigger.Hold);
+
     public Hotkey ToView() => new(Keys.Take(5).ToList(), Trigger);
 
     /// <summary>Same trigger and the same keys in any order.</summary>
