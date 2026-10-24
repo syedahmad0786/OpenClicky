@@ -30,6 +30,7 @@ internal sealed class HomeForm : Form
     private bool _conversationActive;
     private bool _walkthroughActive;
     private readonly TaskWorkspacePanel _tasks;
+    private readonly WorkPanel? _work;
     private readonly TabControl _workspace;
     private readonly ComboBox _access;
     private readonly HomeUiState _uiState = new();
@@ -53,7 +54,10 @@ internal sealed class HomeForm : Form
         Func<string, Task>? insertDictation = null,
         Action? cancelDictation = null,
         Func<string, Task>? startWalkthrough = null,
-        Action? setupChrome = null)
+        Action? setupChrome = null,
+        WorkStore? work = null,
+        Func<string, string?, Task<bool>>? runJob = null,
+        ConnectorRegistry? connectors = null)
     {
         _settings = settings;
         _send = send;
@@ -222,13 +226,16 @@ internal sealed class HomeForm : Form
         var chatPage = new TabPage("Chat") { BackColor = Color.White }; chatPage.Controls.Add(surface);
         _tasks = new TaskWorkspacePanel(pauseTask, resumeTask, stop, clearTasks);
         var taskPage = new TabPage("Tasks") { BackColor = Color.White }; taskPage.Controls.Add(_tasks);
+        var workPage = new TabPage("Work") { BackColor = Color.White };
+        if (work is not null && runJob is not null) { _work = new WorkPanel(work, runJob); workPage.Controls.Add(_work); }
         var memoryPage = new TabPage("Memory") { BackColor = Color.White }; memoryPage.Controls.Add(new CompanionMemoryPanel());
         var notesPage = new TabPage("Notes") { BackColor = Color.White }; notesPage.Controls.Add(new NotesPanel());
         var connectionsPage = new TabPage("Connections") { BackColor = Color.White, Padding = new Padding(20) };
         var connectionInfo = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoScroll = true };
         connectionInfo.Controls.Add(AppTheme.Label("Your accounts, under your control", 17, true));
-        connectionInfo.Controls.Add(AppTheme.Label("ChatGPT powers reasoning. Gmail and other accounts need their own consent.\nComposio and Nango free plans were reviewed; account setup is not connected yet.", 11));
-        connectionInfo.Controls.Add(AppTheme.Label("No Gmail account is connected by this app.\nYour ChatGPT credentials are never copied into another engine.", 10));
+        connectionInfo.Controls.Add(AppTheme.Label("ChatGPT powers reasoning. Gmail, Slack and other accounts need their own consent.\nAdd any MCP server you control or one from a provider such as Composio; paste its address and credential below.", 11));
+        connectionInfo.Controls.Add(AppTheme.Label("Tasks call connectors through OpenClicky: read-only tools run directly, others ask you first under Confirm each. Requests and results go to that provider. Your ChatGPT credentials are never copied into another engine.", 10));
+        if (connectors is not null) connectionInfo.Controls.Add(new ConnectorsPanel(connectors));
         connectionInfo.Controls.Add(AppTheme.Label("OpenWork · tasks inside your companion", 13, true));
         connectionInfo.Controls.Add(AppTheme.Label("Choose Agent in Chat, then describe your task. Progress and approvals appear here in OpenClicky. Your selected access mode stays fixed for that task.", 10));
         connectionInfo.Controls.Add(AppTheme.Label("During a task, relevant window images and control text go to ChatGPT. Local speech recognition keeps raw audio on your PC.", 9));
@@ -238,7 +245,7 @@ internal sealed class HomeForm : Form
         connectionInfo.Controls.Add(chromeSetup);
         connectionInfo.Controls.Add(AppTheme.Label("Optional: use your existing signed-in tabs on sites you choose. Review the requested site access in Chrome before enabling the local extension.", 9));
         connectionsPage.Controls.Add(connectionInfo);
-        _workspace.TabPages.AddRange([chatPage, taskPage, memoryPage, notesPage, connectionsPage]);
+        _workspace.TabPages.AddRange([chatPage, taskPage, workPage, memoryPage, notesPage, connectionsPage]);
         _workspace.SelectedIndexChanged += (_, _) =>
         {
             if (_workspace.SelectedIndex != 0 && _dictation.Visible) cancelDictation?.Invoke();
@@ -246,8 +253,9 @@ internal sealed class HomeForm : Form
             if (_workspace.SelectedIndex == 0 && Visible && WindowState != FormWindowState.Minimized
                 && _uiState.ConsumeDeferredChatScroll())
                 BeginInvoke(ScrollConversationToLatest);
-            if (_workspace.SelectedIndex == 2 && memoryPage.Controls[0] is CompanionMemoryPanel memory) memory.RefreshMemory();
-            if (_workspace.SelectedIndex == 3 && notesPage.Controls[0] is NotesPanel notes) notes.RefreshNotes();
+            if (_workspace.SelectedTab == memoryPage && memoryPage.Controls[0] is CompanionMemoryPanel memory) memory.RefreshMemory();
+            if (_workspace.SelectedTab == notesPage && notesPage.Controls[0] is NotesPanel notes) notes.RefreshNotes();
+            if (_workspace.SelectedTab == workPage) _work?.RefreshWork();
         };
         _main.Controls.Add(_workspace, 0, 1);
 
@@ -358,6 +366,7 @@ internal sealed class HomeForm : Form
         else _intelligentUi.ShowDocument(document);
     }
     public void UpdateTasks(IReadOnlyList<TaskRunRecord> tasks) => _tasks.UpdateRuns(tasks);
+    public void RefreshWork() => _work?.RefreshWork();
     public bool AgentSelected => _agent.Checked;
     public void AttachVisualWorkspace(VisualWorkspacePanel panel)
     {

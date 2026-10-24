@@ -31,12 +31,14 @@ public sealed class DeploymentPathResolverTests : IDisposable
         Directory.CreateDirectory(build);
         File.WriteAllText(Path.Combine(repo, "OpenClicky.sln"), string.Empty);
 
+        // Pin the process path too: the real test host may itself run inside a checkout that has OpenClicky.sln.
+        var app = Path.Combine(build, "OpenClicky.App.exe");
         Assert.Equal(
             Path.Combine(repo, "apps", "companion-workspace", "dist"),
-            DeploymentPathResolver.ResolveDirectory("workspace", null, build));
+            DeploymentPathResolver.ResolveDirectory("workspace", app, build));
         Assert.Equal(
             Path.Combine(repo, "apps", "chrome-extension"),
-            DeploymentPathResolver.ResolveDirectory("chrome-extension", null, build));
+            DeploymentPathResolver.ResolveDirectory("chrome-extension", app, build));
     }
 
     public void Dispose()

@@ -64,6 +64,16 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private string? _currentArtifactJson;
     private const string SessionId = "companion-main";
 
+    /// <summary>One run of a saved job; Display is the bounded line shown in Tasks.</summary>
+    private sealed record JobRun(WorkJob Job, string Ask, string? RoutineId)
+    {
+        public string Display => $"{Job.Title}: {Ask}"[..Math.Min(Job.Title.Length + 2 + Ask.Length, 4000)];
+    }
+    private readonly WorkStore _work = new();
+    private readonly ConnectorRegistry _connectors;
+    private readonly System.Windows.Forms.Timer _routineTimer = new() { Interval = 60_000 };
+    private JobRun? _activeJob;
+
     public TrayApplicationContext()
     {
         _uiContext = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
@@ -108,6 +118,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 new EchoCancelledMicrophoneRecorder(() => _settings.MicrophoneDeviceId, Log), _whisperRuntime, Log),
             foregroundCaptureEligible: ForegroundWindowInfo.IsCompanionCaptureEligible);
 
+        _connectors = new ConnectorRegistry(_secrets);
         _home = new HomeForm(_settings, SubmitFromHomeAsync, Stop, ShowSettings, TryPointingDemoAsync, TrySandboxDemoAsync,
             ToggleConversation, enabled =>
             {
@@ -118,7 +129,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 else { _guideTimer.Stop(); _companionDock?.DismissOffer(); }
             }, SelectScreenAreaAsync, PauseTaskUnlessConfirming, ResumeTaskAsync, ClearTasks, ShowClipboardShelf,
             BeginDictationFromHomeAsync, ToggleDictationRecordingAsync, InsertDictationAsync, CancelDictation,
-            StartWalkthroughFromHomeAsync, ShowChromeSetup);
+            StartWalkthroughFromHomeAsync, ShowChromeSetup, _work, RunJobAsync, _connectors);
         _walkthroughForm = new WalkthroughForm(MoveWalkthroughAsync, StopWalkthrough);
         _talk.WalkthroughChanged += view =>
         {
@@ -225,6 +236,9 @@ internal sealed class TrayApplicationContext : ApplicationContext
         };
         visualGuard.Start();
         _home.Disposed += (_, _) => visualGuard.Dispose();
+        _routineTimer.Tick += (_, _) => RunDueRoutine();
+        _routineTimer.Start();
+        _home.Disposed += (_, _) => _routineTimer.Dispose();
         _hotkey.Cancelled += (_, _) => Stop();
         _hotkey.Pressed += (_, _) => _submissionCts?.Cancel();
         _hotkey.Pressed += (_, _) => PauseTask();
@@ -607,7 +621,9 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     }
 
-    private Task RunAgentAsync(string task, CancellationToken cancellationToken)
+    private Task RunAgentAsync(string task, CancellationToken cancellationToken) => StartAgentTask(task, null);
+
+    private Task StartAgentTask(string task, JobRun? work)
     {
         var planner = _sandboxDemo && _sandbox is not null
             ? new SandboxPlanner(_sandbox)
@@ -621,7 +637,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             _talk.ReportAssistantMessage(msg);
             return Task.CompletedTask;
         }
-        if (task.Length > 4000) { _talk.ReportAssistantMessage("Keep a desktop task under 4,000 characters."); return Task.CompletedTask; }
+        if (work is null && task.Length > 4000) { _talk.ReportAssistantMessage("Keep a desktop task under 4,000 characters."); return Task.CompletedTask; }
         var job = new CancellationTokenSource();
         if (Interlocked.CompareExchange(ref _taskCts, job, null) is not null)
         {
@@ -631,24 +647,114 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
         _taskControl = new();
         _taskSteering = "";
-        _activeTaskGoal = task;
+        _activeTaskGoal = work?.Display ?? task;
+        _activeJob = work;
         var demo = _sandboxDemo;
         var access = demo ? AgentAccessMode.ConfirmEach : _settings.AgentAccess;
         var id = Guid.NewGuid().ToString("N");
         _runningTaskId = id;
-        var initialized = InitializeTaskRunAsync(id, task, access, job.Token);
-        _nativeTask = RunManagedTaskAsync(task, planner, access, id, job, initialized);
+        var initialized = InitializeTaskRunAsync(id, work?.Display ?? task, access, job.Token, work?.Job.Id);
+        _nativeTask = RunManagedTaskAsync(task, planner, access, id, job, initialized, work);
         return demo ? _nativeTask : Task.CompletedTask;
     }
 
-    private async Task<bool> InitializeTaskRunAsync(string id, string task, AgentAccessMode access, CancellationToken token)
+    private Task<bool> RunJobAsync(string jobId, string? followUp) => Task.FromResult(StartJob(jobId, followUp, routineId: null));
+
+    /// <summary>Starts a saved job on the OpenWork runtime with its own folder as workspace. Returns false when it could not start.</summary>
+    private bool StartJob(string jobId, string? followUp, string? routineId)
+    {
+        string prompt;
+        JobRun run;
+        try
+        {
+            var saved = _work.GetJob(jobId);
+            var companion = _work.GetCompanion(saved.CompanionSlug);
+            prompt = JobPrompt.Build(companion, _work.ReadNotes(companion.Slug), saved, _work.Outputs(saved), followUp, scheduled: routineId is not null);
+            run = new JobRun(saved, string.IsNullOrWhiteSpace(followUp) ? saved.Prompt : followUp.Trim(), routineId);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _home.AddMessage("OpenClicky", "Could not start the job: " + ex.Message);
+            return false;
+        }
+        if (_settings.AuthProvider != AuthProvider.ChatGPT || !ProviderFactory.IsChatGptSignedIn(_secrets))
+        {
+            _home.AddMessage("OpenClicky", "Jobs run on the bundled OpenWork runtime. Continue with ChatGPT in Settings first.");
+            return false;
+        }
+        if (_taskCts is not null)
+        {
+            _home.AddMessage("OpenClicky", "A task is already open. Let it finish or stop it before running a job.");
+            return false;
+        }
+        _work.RecordJobRun(run.Job.Id, WorkJobStates.Running, run.Job.Summary, DateTimeOffset.UtcNow);
+        _ = StartAgentTask(prompt, run);
+        if (!ReferenceEquals(_activeJob, run))
+        {
+            _work.RecordJobRun(run.Job.Id, run.Job.Status, run.Job.Summary, run.Job.LastRunAt ?? run.Job.CreatedAt);
+            return false;
+        }
+        if (routineId is not null) KeepAwake(true);
+        _home.RefreshWork();
+        return true;
+    }
+
+    private void RunDueRoutine()
+    {
+        if (_taskCts is not null || !System.Net.NetworkInformation.NetworkInterface.GetIsNetworkAvailable()) return;
+        Routine? due;
+        try { due = _work.Routines().FirstOrDefault(r => RoutineSchedule.IsDue(r, DateTimeOffset.UtcNow)); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Log("routine_read_error=" + ex.GetType().Name); return; }
+        if (due is null || StartJob(due.JobId, null, due.Id)) return;
+        try { _work.SaveRoutine(RoutineSchedule.AfterRun(due, false, "Could not start; see Chat.", DateTimeOffset.UtcNow, TimeZoneInfo.Local)); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Log("routine_save_error=" + ex.GetType().Name); }
+    }
+
+    private void FinishJob(JobRun work, string status, string text)
+    {
+        var summary = status == AgentProgressStates.Completed ? JobPrompt.FirstSentence(text) : text;
+        try
+        {
+            _work.RecordJobRun(work.Job.Id, status, summary, DateTimeOffset.UtcNow);
+            _work.AppendRunLog(work.Job, work.Ask, status, text);
+            if (work.RoutineId is { } routineId && _work.Routines(work.Job.Id).FirstOrDefault(r => r.Id == routineId) is { } routine)
+                _work.SaveRoutine(RoutineSchedule.AfterRun(routine, status == AgentProgressStates.Completed, summary[..Math.Min(summary.Length, 200)],
+                    DateTimeOffset.UtcNow, TimeZoneInfo.Local));
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Log("job_record_error=" + ex.GetType().Name); }
+        OnUi(() =>
+        {
+            if (work.RoutineId is not null) KeepAwake(false);
+            _home.RefreshWork();
+        });
+    }
+
+    private IReadOnlyList<RemoteMcpConnector> OpenConnectors()
+    {
+        var list = new List<RemoteMcpConnector>();
+        try
+        {
+            foreach (var info in _connectors.List())
+                if (_connectors.Secret(info.Key) is { } secret) list.Add(new RemoteMcpConnector(info.Key, info.DisplayName, secret));
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Log("connector_load_error=" + ex.GetType().Name); }
+        return list;
+    }
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    private static extern uint SetThreadExecutionState(uint flags);
+
+    /// <summary>Keeps the PC from sleeping (ES_CONTINUOUS | ES_SYSTEM_REQUIRED) while a scheduled run is in flight; called on the UI thread.</summary>
+    private static void KeepAwake(bool on) => SetThreadExecutionState(on ? 0x80000001u : 0x80000000u);
+
+    private async Task<bool> InitializeTaskRunAsync(string id, string task, AgentAccessMode access, CancellationToken token, string? jobId = null)
     {
         var initialized = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         _uiContext.Post(_ =>
         {
             if (token.IsCancellationRequested || _home.IsDisposed) { initialized.TrySetResult(false); return; }
             var previous = _taskRuns.ToList();
-            _taskRuns.Add(new(id, task, DateTimeOffset.UtcNow, "started", [], access.ToString()));
+            _taskRuns.Add(new(id, task, DateTimeOffset.UtcNow, "started", [], access.ToString(), jobId));
             if (_taskRuns.Count > TaskHistoryStore.MaxRuns) _taskRuns.RemoveAt(0);
             if (!SaveTasks())
             {
@@ -667,10 +773,11 @@ internal sealed class TrayApplicationContext : ApplicationContext
     }
 
     private async Task RunManagedTaskAsync(string task, IAgentPlanner planner, AgentAccessMode access, string id,
-        CancellationTokenSource job, Task<bool> initialization)
+        CancellationTokenSource job, Task<bool> initialization, JobRun? work = null)
     {
         var token = job.Token;
         var taskResultCommitted = false;
+        var jobRecorded = false;
         try
         {
             if (!await initialization.ConfigureAwait(false)) return;
@@ -693,14 +800,24 @@ internal sealed class TrayApplicationContext : ApplicationContext
                     ? new ChromeBridgeSession(new TaskChromeHost(new ChromeBridgeHost(pipe), _taskControl),
                         new ChromeApprovalBroker(_confirm, _taskControl), access, configuration.AllowedOrigins,
                         AgentDenyList.ParseExtraFragments(_settings.AgentDenyListExtra)) : null;
-                var result = await OpenWorkCompanionRunner.RunAsync(task + MemoryContext(), _settings, _secrets,
-                    host, access, p => RecordProgress(id, p), token, runtimeDirectory: RuntimePath("openwork"), browser: browser).ConfigureAwait(false);
+                var connectors = OpenConnectors();
+                OpenCodeTaskResult result;
+                try
+                {
+                    result = await OpenWorkCompanionRunner.RunAsync(task + MemoryContext(), _settings, _secrets,
+                        host, access, p => RecordProgress(id, p), token, runtimeDirectory: RuntimePath("openwork"), browser: browser,
+                        workspaceDirectory: work is null ? null : _work.JobFolder(work.Job),
+                        jobFiles: work is null ? null : new JobOutputTools(_work.OutputFolder(work.Job)),
+                        connectors: connectors).ConfigureAwait(false);
+                }
+                finally { foreach (var connector in connectors) connector.Dispose(); }
                 var answer = result.Messages.LastOrDefault(m => m.Role == "assistant" && !string.IsNullOrWhiteSpace(m.Text))?.Text;
                 if (!string.IsNullOrWhiteSpace(answer))
                 {
-                    _talk.ReportTaskResult(task, answer);
+                    _talk.ReportTaskResult(work?.Display ?? task, answer);
                     taskResultCommitted = true;
                 }
+                if (work is not null) { FinishJob(work, AgentProgressStates.Completed, answer ?? "Finished without a written reply."); jobRecorded = true; }
                 RecordProgress(id, new(0, "completed", "OpenWork returned its result. Session: " + result.SessionId));
                 return;
             }
@@ -728,20 +845,27 @@ internal sealed class TrayApplicationContext : ApplicationContext
             foregroundBounds: ForegroundWindowInfo.GetBounds);
             await agent.RunAsync(task + MemoryContext(), _settings.ResolveVisionModel(), token).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) { RecordProgress(id, new(0, "stopped", "Stopped by you")); }
+        catch (OperationCanceledException)
+        {
+            RecordProgress(id, new(0, "stopped", "Stopped by you"));
+            if (work is not null && !jobRecorded) { FinishJob(work, AgentProgressStates.Stopped, "Stopped by you."); jobRecorded = true; }
+        }
         catch (Exception ex)
         {
             Log("task_error=" + ex.GetType().Name);
             var failure = "Task could not finish: " + ex.Message;
             RecordProgress(id, new(0, "failed", failure));
             if (taskResultCommitted) _talk.ReportAssistantMessage(failure);
-            else _talk.ReportLocalReply(task, failure);
+            else _talk.ReportLocalReply(work?.Display ?? task, failure);
+            if (work is not null && !jobRecorded) { FinishJob(work, AgentProgressStates.Failed, failure); jobRecorded = true; }
         }
         finally
         {
+            if (work is not null && !jobRecorded) FinishJob(work, AgentProgressStates.Stopped, "The run ended before it started its work.");
             Interlocked.CompareExchange(ref _taskCts, null, job);
             _runningTaskId = null;
             _activeTaskGoal = "";
+            _activeJob = null;
             job.Dispose();
             OnUi(() => { _home.SetTaskRunning(false); if (_talk.State == CompanionVoiceState.Idle) _overlay.Hide(); SaveTasks(); });
             _talk.ResumeConversation();

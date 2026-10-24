@@ -28,6 +28,9 @@ public class WorkStoreTests
             File.WriteAllText(Path.Combine(store.OutputFolder(job), "brief.md"), "x");
             Assert.Equal("brief.md", Assert.Single(store.Outputs(job)));
             store.RecordJobRun(job.Id, AgentProgressStates.Completed, "Wrote the brief.", DateTimeOffset.UtcNow);
+            store.AppendRunLog(job, "Summarize", AgentProgressStates.Completed, "Wrote the brief.");
+            Assert.Contains("Asked: Summarize", File.ReadAllText(Path.Combine(store.JobFolder(job), "runs.md")));
+            Assert.Equal("brief.md", Assert.Single(store.Outputs(job)));
             Assert.Equal("Wrote the brief.", store.GetJob(job.Id).Summary);
 
             var now = new DateTimeOffset(2026, 10, 24, 8, 0, 0, TimeSpan.Zero);

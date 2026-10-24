@@ -178,6 +178,15 @@ public sealed class WorkStore
         }
     }
 
+    /// <summary>Appends one run to the job folder's runs.md, newest last, so the folder explains its own history.</summary>
+    public void AppendRunLog(WorkJob job, string ask, string outcome, string reply)
+    {
+        var folder = JobFolder(job);
+        Directory.CreateDirectory(folder);
+        var entry = $"## {DateTimeOffset.Now:yyyy-MM-dd HH:mm} · {outcome}{Environment.NewLine}{Environment.NewLine}Asked: {ask.Trim()}{Environment.NewLine}{Environment.NewLine}{reply.Trim()}{Environment.NewLine}{Environment.NewLine}";
+        File.AppendAllText(Path.Combine(folder, "runs.md"), entry.Length > 20_000 ? entry[..20_000] + Environment.NewLine : entry, Encoding.UTF8);
+    }
+
     public string JobFolder(WorkJob job) => SafeChild(Path.Combine(CompanionFolder(job.CompanionSlug), "jobs"), RequireSlug(job.Id));
     public string OutputFolder(WorkJob job) => Path.Combine(JobFolder(job), "output");
 
