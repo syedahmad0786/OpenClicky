@@ -90,8 +90,8 @@ public class HighlightTests
         new([0xff, 0xd8], 1000, 500, 2000, 0, 2000, 1000, false, "screen 2 of 2"),
     ];
 
-    private static HighlightStroke Stroke(StrokeKind kind, Box box, string text) =>
-        new(kind, [new(box.X, box.Y), new(box.Right, box.Bottom)], box, text);
+    private static HighlightStroke Stroke(StrokeKind kind, Box box, string text, Pt? readAt = null) =>
+        new(kind, [new(box.X, box.Y), new(box.Right, box.Bottom)], box, text.Length == 0 ? [] : [new(readAt ?? box.Centre, text)]);
 
     [Fact]
     public void DescribeNamesRegionAndQuotesText()
@@ -117,6 +117,64 @@ public class HighlightTests
         Assert.Contains("rested on 500,250 on screen1", text);
         Assert.DoesNotContain("-250", text);
         Assert.Equal("", HighlightDescriber.Describe(new([Stroke(StrokeKind.Path, new Box(9000, 9000, 9, 9), "x")], [], DateTimeOffset.UtcNow), Screens));
+    }
+
+    [Fact]
+    public void DescribeDropsTextReadOnADisplayThatWasNotSent()
+    {
+        // The stroke's centre is on a sent screen, but one of its texts was read on a display that was left out (protected).
+        var stroke = new HighlightStroke(StrokeKind.LineAcross, [new(100, 100), new(300, 100)], new Box(100, 100, 200, 1),
+            [new(new(150, 100), "visible label"), new(new(-50, 100), "protected secret")]);
+        var text = HighlightDescriber.Describe(new([stroke], [], DateTimeOffset.UtcNow), Screens);
+        Assert.Contains("\"visible label\"", text);
+        Assert.DoesNotContain("protected secret", text);
+        Assert.Equal(0, HighlightDescriber.ScreenOf(stroke.Bounds, Screens));
+        Assert.Equal(1, HighlightDescriber.ScreenOf(new Pt(2500, 10), Screens));
+        Assert.Null(HighlightDescriber.ScreenOf(new Pt(-1, 10), Screens));
+    }
+
+    private static IReadOnlyList<HarvestedText> NoText(IReadOnlyList<Pt> samples, TimeSpan budget) => [];
+
+    [Fact]
+    public void RecorderInjectedMovesNeverDraw()
+    {
+        var recorder = new HighlightRecorder();
+        recorder.Start(new(100, 100), 0);
+        for (var i = 1; i <= 50; i++) Assert.True(recorder.Sample(null, i * 16)); // the cursor moved, but no physical mouse input came
+        Assert.True(recorder.End(keep: true, DateTimeOffset.UtcNow, TimeSpan.FromMilliseconds(400), NoText));
+        Assert.Null(recorder.Take(TimeSpan.FromSeconds(1))); // nothing moved: no gesture
+    }
+
+    [Fact]
+    public void RecorderTakesOnceAndCancelOrClearLeavesNothing()
+    {
+        var recorder = new HighlightRecorder();
+        void Draw()
+        {
+            recorder.Start(new(0, 0), 0);
+            for (var x = 4; x <= 200; x += 4) recorder.Sample(new(x, 0), x * 4);
+        }
+        Draw();
+        Assert.True(recorder.End(keep: true, DateTimeOffset.UtcNow, TimeSpan.FromMilliseconds(400),
+            (samples, _) => [new(samples[0], "under")]));
+        var gesture = recorder.Take(TimeSpan.FromSeconds(1));
+        Assert.Equal(StrokeKind.LineAcross, Assert.Single(gesture!.Strokes).Kind);
+        Assert.Equal("under", Assert.Single(gesture.Strokes[0].TextUnder).Text);
+        Assert.Null(recorder.Take(TimeSpan.FromSeconds(1))); // once
+
+        Draw();
+        Assert.True(recorder.End(keep: false, DateTimeOffset.UtcNow, TimeSpan.FromMilliseconds(400), NoText)); // a cancelled hold
+        Assert.Null(recorder.Take(TimeSpan.FromSeconds(1)));
+        Assert.False(recorder.End(keep: true, DateTimeOffset.UtcNow, TimeSpan.FromMilliseconds(400), NoText)); // nothing recording
+
+        Draw();
+        recorder.Clear(); // Esc, or Screen highlight turned off, mid-hold
+        Assert.False(recorder.Recording);
+        Assert.False(recorder.Sample(new(300, 0), 900));
+        Draw();
+        recorder.End(keep: true, DateTimeOffset.UtcNow, TimeSpan.FromMilliseconds(400), NoText);
+        recorder.Clear(); // ... or after the release, before the turn takes it
+        Assert.Null(recorder.Take(TimeSpan.FromSeconds(1)));
     }
 
     [Fact]

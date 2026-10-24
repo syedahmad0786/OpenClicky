@@ -605,42 +605,98 @@ public class CompanionWorkflowTests
     }
 
     private static HighlightGesture Gesture(DateTimeOffset endedAt) => new(
-        [new(StrokeKind.Circled, [new(20, 20), new(60, 20), new(60, 60), new(20, 60), new(20, 20)], new Box(20, 20, 40, 40), "Submit")],
+        [new(StrokeKind.Circled, [new(20, 20), new(60, 20), new(60, 60), new(20, 60), new(20, 20)], new Box(20, 20, 40, 40),
+            [new(new(40, 40), "Submit")])],
         [], endedAt);
+
+    /// <summary>A held talk press and its release; returns when the turn the release started has ended.</summary>
+    private static async Task HoldTalkAsync(TalkOrchestrator talk, RaisingHotkey hotkey)
+    {
+        var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var processing = false;
+        void OnState(CompanionVoiceState state)
+        {
+            if (state == CompanionVoiceState.Processing) processing = true;
+            else if (processing && state == CompanionVoiceState.Idle) done.TrySetResult();
+        }
+        talk.StateChanged += OnState;
+        try
+        {
+            hotkey.Press();
+            hotkey.Release(cancelled: false);
+            await done.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        finally { talk.StateChanged -= OnState; }
+    }
 
     [Fact]
     public async Task HighlightCompositedAndDescribedOnce()
     {
-        HighlightGesture? pending = Gesture(DateTimeOffset.UtcNow);
+        HighlightGesture? pending = null;
         var takes = 0;
         var composites = 0;
         var systems = new List<string>();
         var labels = new List<string>();
-        using var talk = new TalkOrchestrator(new Hotkey(), new Overlay(), new Capture(), new Mic(), () => null,
+        var hotkey = new RaisingHotkey();
+        using var talk = new TalkOrchestrator(hotkey, new Overlay(), new Capture(), new Mic(), () => null,
             () => new Talk((_, _) => Task.FromResult("ok [POINT:none]"), inspectScreens: screens => labels.AddRange(screens.Select(s => s.Label)),
                 observeSystem: systems.Add),
-            new Tts(), () => new AppSettings { PersistConversationHistory = false }, log: _ => { },
+            new Tts(), () => new AppSettings { PersistConversationHistory = false, DebugTranscriptOverride = "What is this?" }, log: _ => { },
             windowTitle: () => "Claude", windowBounds: () => (0, 0, 200, 100),
-            takeHighlight: () => { takes++; return Interlocked.Exchange(ref pending, null); },
+            takeHighlight: () => { Interlocked.Increment(ref takes); return Interlocked.Exchange(ref pending, null); },
             compositeHighlight: (screens, gesture) => { composites++; return screens.Select(s => s with { Label = s.Label + " +marks" }).ToList(); });
+        talk.HeldRevealDelay = TimeSpan.Zero;
+        talk.Start();
+        talk.HeldTalkStarted += () => pending = Gesture(DateTimeOffset.UtcNow); // as the tray stores it on release
 
-        await talk.SubmitTextAsync("What is this?", false);
+        await HoldTalkAsync(talk, hotkey);
         Assert.Equal(1, composites);
         Assert.Equal(["test +marks"], labels);
         Assert.Contains(HighlightDescriber.Intro, systems[0]);
         Assert.Contains("\"Submit\"", systems[0]);
 
         labels.Clear();
-        await talk.SubmitTextAsync("And this?", false); // the gesture was taken: the next turn has none
+        pending = Gesture(DateTimeOffset.UtcNow);
+        await talk.SubmitTextAsync("And this?", false); // a typed turn is not the hold's question: it drops the gesture
         Assert.Equal(1, composites);
         Assert.Equal(["test"], labels);
         Assert.DoesNotContain(HighlightDescriber.Intro, systems[1]);
+        Assert.Null(pending);
 
-        pending = Gesture(DateTimeOffset.UtcNow - TimeSpan.FromSeconds(11)); // too old to belong to this question
-        await talk.SubmitTextAsync("And now?", false);
+        talk.HeldTalkStarted += () => pending = Gesture(DateTimeOffset.UtcNow - TimeSpan.FromSeconds(11)); // too old for its question
+        await HoldTalkAsync(talk, hotkey);
         Assert.Equal(1, composites);
         Assert.DoesNotContain(HighlightDescriber.Intro, systems[2]);
         Assert.Equal(3, takes);
+    }
+
+    [Fact]
+    public async Task EarlyReturnTurnDropsHighlight()
+    {
+        HighlightGesture? pending = null;
+        var composites = 0;
+        var title = "1Password"; // excluded: the held turn returns before any capture
+        var systems = new List<string>();
+        var hotkey = new RaisingHotkey();
+        using var talk = new TalkOrchestrator(hotkey, new Overlay(), new Capture(), new Mic(), () => null,
+            () => new Talk((_, _) => Task.FromResult("ok [POINT:none]"), observeSystem: systems.Add),
+            new Tts(), () => new AppSettings { PersistConversationHistory = false, DebugTranscriptOverride = "What is this?" }, log: _ => { },
+            windowTitle: () => title, windowBounds: () => (0, 0, 200, 100),
+            takeHighlight: () => Interlocked.Exchange(ref pending, null),
+            compositeHighlight: (screens, _) => { composites++; return screens; });
+        talk.HeldRevealDelay = TimeSpan.Zero;
+        talk.Start();
+        talk.HeldTalkStarted += () => pending = Gesture(DateTimeOffset.UtcNow);
+
+        await HoldTalkAsync(talk, hotkey);
+        Assert.Empty(systems); // refused: nothing was sent
+        Assert.Null(pending); // and the gesture went with that turn
+
+        title = "Claude";
+        await talk.SubmitTextAsync("What is on screen?", false);
+        Assert.Single(systems);
+        Assert.DoesNotContain(HighlightDescriber.Intro, systems[0]);
+        Assert.Equal(0, composites);
     }
 
     [Fact]

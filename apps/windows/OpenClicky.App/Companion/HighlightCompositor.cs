@@ -20,16 +20,15 @@ internal static class HighlightCompositor
     public static IReadOnlyList<ScreenCaptureResult> Composite(IReadOnlyList<ScreenCaptureResult> screens, HighlightGesture g, string accentHex)
     {
         var colour = Color.FromArgb(Alpha, ColorTranslator.FromHtml(SettingsCatalog.SnapAccent(accentHex)));
-        return screens.Select(s => Draw(s, g, colour)).ToList();
+        // The describer's rule: a stroke belongs to the sent screen holding its centre, a rest to the one holding it.
+        return screens.Select((s, i) => Draw(s,
+            g.Strokes.Where(st => st.Points.Count >= 2 && HighlightDescriber.ScreenOf(st.Bounds, screens) == i).ToList(),
+            g.Dwells.Where(d => HighlightDescriber.ScreenOf(d, screens) == i).ToList(), colour)).ToList();
     }
 
-    private static ScreenCaptureResult Draw(ScreenCaptureResult s, HighlightGesture g, Color colour)
+    private static ScreenCaptureResult Draw(ScreenCaptureResult s, List<HighlightStroke> strokes, List<Pt> dwells, Color colour)
     {
-        if (!s.LooksLikeJpeg || s.MonitorWidth <= 0 || s.MonitorHeight <= 0 || s.PixelWidth <= 0 || s.PixelHeight <= 0) return s;
-        var monitor = new Box(s.MonitorLeft, s.MonitorTop, s.MonitorWidth, s.MonitorHeight);
-        var strokes = g.Strokes.Where(st => st.Points.Count >= 2 && Overlaps(st.Bounds.Inflate(StrokeWidth), monitor)).ToList();
-        var dwells = g.Dwells.Where(monitor.Contains).ToList();
-        if (strokes.Count == 0 && dwells.Count == 0) return s;
+        if (strokes.Count == 0 && dwells.Count == 0 || !s.LooksLikeJpeg) return s;
 
         var sx = s.PixelWidth / (float)s.MonitorWidth;
         var sy = s.PixelHeight / (float)s.MonitorHeight;
@@ -40,7 +39,7 @@ internal static class HighlightCompositor
         using (var pen = new Pen(colour, StrokeWidth * sx) { StartCap = LineCap.Round, EndCap = LineCap.Round, LineJoin = LineJoin.Round })
         {
             graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            // Drawn as one polyline each, so a stroke's overlaps do not darken (the image is clipped to its own bounds).
+            // One polyline each, so a stroke's overlaps do not darken; a part on another display is clipped off this image.
             foreach (var stroke in strokes) graphics.DrawLines(pen, stroke.Points.Select(Map).ToArray());
             foreach (var dwell in dwells)
             {
@@ -51,6 +50,4 @@ internal static class HighlightCompositor
         var (jpeg, width, height) = CaptureImageEncoder.BitmapToJpeg(image);
         return s with { JpegBytes = jpeg, PixelWidth = width, PixelHeight = height };
     }
-
-    private static bool Overlaps(Box a, Box b) => a.X < b.Right && b.X < a.Right && a.Y < b.Bottom && b.Y < a.Bottom;
 }

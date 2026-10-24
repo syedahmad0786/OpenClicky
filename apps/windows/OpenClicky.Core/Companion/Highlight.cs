@@ -8,11 +8,102 @@ namespace OpenClicky.Core.CompanionCursor;
 /// <summary>What a stroke the user drew while holding talk looks like.</summary>
 public enum StrokeKind { Circled, LineFromTo, LineAcross, Scribbled, Path }
 
-/// <summary>One classified stroke in virtual-screen px, with the screen text found under it (untrusted, may be empty).</summary>
-public sealed record HighlightStroke(StrokeKind Kind, IReadOnlyList<Pt> Points, Box Bounds, string TextUnder);
+/// <summary>A piece of screen text (untrusted) and the virtual-screen point it was read at.</summary>
+public readonly record struct HarvestedText(Pt At, string Text);
+
+/// <summary>
+/// One classified stroke in virtual-screen px, with the screen text found under it (untrusted, may be empty). Each text keeps
+/// where it was read, so text from a display that is not sent is never described.
+/// </summary>
+public sealed record HighlightStroke(StrokeKind Kind, IReadOnlyList<Pt> Points, Box Bounds, IReadOnlyList<HarvestedText> TextUnder);
 
 /// <summary>Everything drawn during one talk hold: the strokes, where the pointer rested, and when the hold ended.</summary>
 public sealed record HighlightGesture(IReadOnlyList<HighlightStroke> Strokes, IReadOnlyList<Pt> Dwells, DateTimeOffset EndedAt);
+
+/// <summary>
+/// One talk hold's recording and the last hold's gesture, shared by the UI thread (samples, release, Esc) and the turn that
+/// takes the gesture. Thread-safe.
+/// </summary>
+public sealed class HighlightRecorder
+{
+    private readonly object _gate = new();
+    private StrokeSegmenter? _strokes;
+    private Pt _last;
+    private Task<HighlightGesture?>? _pending;
+
+    public bool Recording { get { lock (_gate) return _strokes is not null; } }
+
+    /// <summary>A hold began with the pointer at <paramref name="p"/>; the previous hold's gesture is dropped.</summary>
+    public void Start(Pt p, long ms)
+    {
+        lock (_gate)
+        {
+            _pending = null;
+            _strokes = new StrokeSegmenter();
+            _strokes.Add(p, ms);
+            _last = p;
+        }
+    }
+
+    /// <summary>
+    /// One tick. <paramref name="physical"/> is the pointer when physical mouse input was seen since the last tick, else null:
+    /// the pointer then counts as unmoved (injected moves never draw), and time still passes so a rest is still a rest.
+    /// False when no hold is being recorded.
+    /// </summary>
+    public bool Sample(Pt? physical, long ms)
+    {
+        lock (_gate)
+        {
+            if (_strokes is null) return false;
+            _last = physical ?? _last;
+            _strokes.Add(_last, ms);
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Ends the hold: a cancelled one (<paramref name="keep"/> false) leaves nothing. Otherwise the strokes are classified (too
+    /// short ones dropped) and <paramref name="harvest"/> reads the text under each, off the calling thread, with what is left of
+    /// <paramref name="budget"/> for all of them. A hold that never moved stores nothing. False when no hold was being recorded.
+    /// </summary>
+    public bool End(bool keep, DateTimeOffset now, TimeSpan budget,
+        Func<IReadOnlyList<Pt>, TimeSpan, IReadOnlyList<HarvestedText>> harvest)
+    {
+        StrokeSegmenter? strokes;
+        lock (_gate) (strokes, _strokes) = (_strokes, null);
+        if (strokes is null) return false;
+        if (!keep) return true;
+        var classified = strokes.Finish()
+            .Select(points => (Kind: StrokeClassifier.Classify(points), Points: points))
+            .Where(s => s.Kind is not null).Select(s => (Kind: s.Kind!.Value, s.Points)).ToList();
+        var dwells = strokes.Dwells.ToArray();
+        if (classified.Count == 0 && dwells.Length == 0) return true;
+        var pending = Task.Run(() =>
+        {
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            var built = classified.Select(s => new HighlightStroke(s.Kind, s.Points, StrokeClassifier.BoundsOf(s.Points),
+                harvest(StrokeClassifier.SamplePoints(s.Kind, s.Points), budget - clock.Elapsed))).ToList();
+            return (HighlightGesture?)new HighlightGesture(built, dwells, now);
+        });
+        lock (_gate) _pending = pending;
+        return true;
+    }
+
+    /// <summary>The last hold's gesture, once; waits at most <paramref name="wait"/> for its text. Never call it on the UI thread.</summary>
+    public HighlightGesture? Take(TimeSpan wait)
+    {
+        Task<HighlightGesture?>? pending;
+        lock (_gate) (pending, _pending) = (_pending, null);
+        try { return pending is not null && pending.Wait(wait) ? pending.Result : null; }
+        catch (AggregateException) { return null; } // the text could not be read: no gesture rather than a half one
+    }
+
+    /// <summary>Drops the recording and the gesture (Esc, Screen highlight turned off).</summary>
+    public void Clear()
+    {
+        lock (_gate) (_strokes, _pending) = (null, null);
+    }
+}
 
 /// <summary>
 /// Splits pointer samples into strokes. A point is kept once it is more than <see cref="DwellRadius"/> px from the last kept
@@ -172,20 +263,22 @@ public static class HighlightDescriber
         var lines = new List<string>();
         foreach (var stroke in g.Strokes)
         {
-            if (CoordinateMapper.ToScreenshot((int)MathF.Floor(stroke.Bounds.Centre.X), (int)MathF.Floor(stroke.Bounds.Centre.Y), screens)
-                is not { } centre) continue;
+            if (At(stroke.Bounds.Centre, screens) is not { } centre) continue; // the same rule as ScreenOf
             var s = screens[centre.Screen - 1];
             var (x1, y1) = CoordinateMapper.ToPixels(s, stroke.Bounds.X, stroke.Bounds.Y);
             var (x2, y2) = CoordinateMapper.ToPixels(s, stroke.Bounds.Right, stroke.Bounds.Bottom);
             var region = Rows[Math.Clamp(centre.Y * 3 / s.PixelHeight, 0, 2)] + " " + Columns[Math.Clamp(centre.X * 3 / s.PixelWidth, 0, 2)];
             var line = new StringBuilder($"{lines.Count + 1}. {Words(stroke, s)}, box {x1},{y1} to {x2},{y2} on screen{centre.Screen} ({(region == "centre centre" ? "centre" : region)})");
-            var text = stroke.TextUnder.Trim();
+            // Only text read on a display that is sent: what was read on a left-out (protected) display goes nowhere.
+            var text = string.Join(" | ", stroke.TextUnder
+                .Where(t => At(t.At, screens) is not null)
+                .Select(t => t.Text.Trim()).Where(t => t.Length > 0).Distinct(StringComparer.Ordinal));
             if (text.Length > 0) line.Append("; text under it: ").Append(JsonSerializer.Serialize(text.Length > MaxTextChars ? text[..MaxTextChars] + "…" : text, Quote));
             lines.Add(line.ToString());
         }
         foreach (var dwell in g.Dwells)
         {
-            if (CoordinateMapper.ToScreenshot((int)MathF.Floor(dwell.X), (int)MathF.Floor(dwell.Y), screens) is { } at)
+            if (At(dwell, screens) is { } at)
                 lines.Add($"- rested on {at.X},{at.Y} on screen{at.Screen}");
         }
         if (lines.Count == 0) return "";
@@ -202,6 +295,19 @@ public static class HighlightDescriber
         }
         return sb.ToString();
     }
+
+    /// <summary>
+    /// The index of the sent screen a stroke belongs to: the one holding the centre of its bounds, or null. The compositor draws
+    /// a stroke only there, and only those strokes are described.
+    /// </summary>
+    public static int? ScreenOf(Box bounds, IReadOnlyList<ScreenCaptureResult> screens) => At(bounds.Centre, screens)?.Screen - 1;
+
+    /// <summary>The index of the sent screen holding a rest point, or null (the same rule for the image and the words).</summary>
+    public static int? ScreenOf(Pt p, IReadOnlyList<ScreenCaptureResult> screens) => At(p, screens)?.Screen - 1;
+
+    /// <summary>A virtual-screen point on a sent screen (1-based) in its screenshot pixels, or null.</summary>
+    private static (int Screen, int X, int Y)? At(Pt p, IReadOnlyList<ScreenCaptureResult> screens) =>
+        CoordinateMapper.ToScreenshot((int)MathF.Floor(p.X), (int)MathF.Floor(p.Y), screens);
 
     private static string Words(HighlightStroke stroke, ScreenCaptureResult s)
     {

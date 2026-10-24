@@ -83,16 +83,20 @@ internal static class Program
             new(Jpeg(), 200, 100, 400, 0, 400, 200, false, "screen 2 of 2"),
         ];
         var gesture = new OpenClicky.Core.CompanionCursor.HighlightGesture(
-            [new(OpenClicky.Core.CompanionCursor.StrokeKind.LineAcross, [new(40, 100), new(360, 100)], new(40, 100, 320, 0), "")],
+            [
+                new(OpenClicky.Core.CompanionCursor.StrokeKind.LineAcross, [new(40, 100), new(360, 100)], new(40, 100, 320, 0), []),
+                // Its centre is on screen 1, so it is drawn there only (as it is described), though it runs onto screen 2.
+                new(OpenClicky.Core.CompanionCursor.StrokeKind.LineAcross, [new(300, 150), new(480, 150)], new(300, 150, 180, 0), []),
+            ],
             [new(200, 160)], DateTimeOffset.UtcNow);
         var result = OpenClicky.App.HighlightCompositor.Composite(screens, gesture, "#FF4C4C");
         using var stream = new MemoryStream(result[0].JpegBytes);
         using var image = new Bitmap(stream);
         bool Red(int x, int y) { var c = image.GetPixel(x, y); return c.R > 200 && c.G < 200 && c.R - c.G > 50; }
         bool White(int x, int y) { var c = image.GetPixel(x, y); return c.R > 235 && c.G > 235 && c.B > 235; }
-        var failure = !ReferenceEquals(result[1], screens[1]) ? "a screen without marks was re-encoded"
+        var failure = !ReferenceEquals(result[1], screens[1]) ? "a screen holding no mark's centre was re-encoded"
             : result[0].PixelWidth != 200 || result[0].PixelHeight != 100 || image.Width != 200 ? "the screenshot changed size"
-            : !Red(100, 50) || !Red(30, 50) ? "the stroke is missing"
+            : !Red(100, 50) || !Red(30, 50) || !Red(160, 75) ? "a stroke is missing"
             : !Red(110, 80) || !White(100, 80) ? "the rest ring is missing or filled"
             : !White(100, 20) || !White(190, 50) ? "paint outside the marks" : null;
         Console.WriteLine(failure is null ? "PASS: highlight compositor" : "FAIL: highlight compositor " + failure);

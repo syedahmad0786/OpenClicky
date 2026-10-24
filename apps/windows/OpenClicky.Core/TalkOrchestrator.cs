@@ -28,6 +28,8 @@ public sealed class TalkOrchestrator : IDisposable
     private CancellationTokenSource? _turnCts;
     /// <summary>The turn the talk shortcut's last press started (null when the press joined one already listening).</summary>
     private CancellationTokenSource? _shortcutTurn;
+    /// <summary>The held talk turn whose hold may have drawn a highlight: only that turn may use it.</summary>
+    private CancellationTokenSource? _highlightTurn;
     private CompanionVoiceState _state;
     private bool _disposed;
     private ILiveSttClient? _liveStt;
@@ -105,17 +107,26 @@ public sealed class TalkOrchestrator : IDisposable
         catch (Exception ex) when (ex is not OutOfMemoryException) { _log($"visible_windows_error={ex.GetType().Name}"); return null; }
     }
 
-    /// <summary>Takes (consumes) what the user drew during the last talk hold, if it ended within <see cref="HighlightMaxAge"/>.</summary>
-    private HighlightGesture? TakeHighlight()
+    /// <summary>
+    /// Every turn takes (consumes) the last hold's gesture as it starts, so a gesture never outlives the turn after its hold.
+    /// Only the held talk turn that hold started gets it; any other turn drops it. Off the caller's thread: the take may wait
+    /// briefly for the text under the strokes.
+    /// </summary>
+    private Task<HighlightGesture?> TakeHighlightFor(CancellationTokenSource turn)
     {
-        if (_takeHighlight is null) return null;
-        try
+        if (_takeHighlight is not { } take) return Task.FromResult<HighlightGesture?>(null);
+        var owned = ReferenceEquals(Interlocked.CompareExchange(ref _highlightTurn, null, turn), turn);
+        return Task.Run(() =>
         {
-            var gesture = _takeHighlight();
-            var age = DateTimeOffset.UtcNow - gesture?.EndedAt;
-            return age is { } a && a >= TimeSpan.FromSeconds(-1) && a <= HighlightMaxAge ? gesture : null; // a second of clock slack
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException) { _log($"highlight_take_error={ex.GetType().Name}"); return null; }
+            try
+            {
+                var gesture = take();
+                var age = DateTimeOffset.UtcNow - gesture?.EndedAt;
+                // Older than HighlightMaxAge it belongs to an earlier question; a second of clock slack the other way.
+                return owned && age is { } a && a >= TimeSpan.FromSeconds(-1) && a <= HighlightMaxAge ? gesture : null;
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { _log($"highlight_take_error={ex.GetType().Name}"); return null; }
+        });
     }
 
     /// <summary>
@@ -558,6 +569,7 @@ public sealed class TalkOrchestrator : IDisposable
         if (!RevealHeldListening()) return;
         _overlay.FinishDrawing(); // a half-revealed drawing jumps to what the next question will be asked about
         _shortcutTurn = _state == CompanionVoiceState.Listening ? _turnCts : null;
+        _highlightTurn = _shortcutTurn;
         HeldTalkStarted?.Invoke();
     }
 
@@ -662,6 +674,7 @@ public sealed class TalkOrchestrator : IDisposable
         (int X, int Y, int Width, int Height)? selectedRegion = null, WalkthroughRequest? walkthrough = null,
         bool publishRequestBeforeInterception = false, string? displayAs = null)
     {
+        var highlight = TakeHighlightFor(turn); // consumed by every turn, used only below on the all-monitor capture
         var token = turn.Token;
         var entered = false;
         string? displayedRequest = null;
@@ -780,7 +793,6 @@ public sealed class TalkOrchestrator : IDisposable
             if (selfContainedVisual) screens = [];
             else if (selectedRegion is { } region)
             {
-                _ = TakeHighlight(); // the user chose an area: what they drew while talking is not part of it
                 // A region capture is not own-window-excluded: the overlay hidden above must leave the frame first.
                 await Task.Delay(IOverlayController.HideSettleMilliseconds, token).ConfigureAwait(false);
                 var selected = await Task.Run(() => _capture.CaptureRegionJpegAsync(region, token), token).ConfigureAwait(false);
@@ -812,9 +824,9 @@ public sealed class TalkOrchestrator : IDisposable
                 }
                 screens = MonitorCap.Apply(allowed, MonitorCap.Max, bounds);
                 // Taken after the protected-display filter: marks and text on a display that is not sent go nowhere.
-                if (TakeHighlight() is { } highlight)
+                if (await highlight.ConfigureAwait(false) is { } gesture)
                 {
-                    (screens, var marks) = WithHighlight(screens, highlight);
+                    (screens, var marks) = WithHighlight(screens, gesture);
                     context += marks;
                 }
             }

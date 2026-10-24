@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Automation;
 using OpenClicky.Core;
+using OpenClicky.Core.CompanionCursor;
 using OpenClicky.Core.Drawing;
 
 namespace OpenClicky.Agent;
@@ -14,19 +15,20 @@ public static class UiaTextHarvester
 {
     public const int MaxChars = 500;
     private const int MaxSamples = 25; // 24 along the stroke, plus a circle's centre
-    private const uint GaRoot = 2;
+    private const uint GaRoot = 2, GaRootOwner = 3;
 
     /// <summary>
-    /// Collects the distinct names and values of the elements at <paramref name="samples"/> (virtual-screen px), at most
-    /// <see cref="MaxChars"/> characters, joined by " | ". Returns what was found when <paramref name="budget"/> runs out; a hung
-    /// target app can hold one UIA call past it, but never the caller.
+    /// Collects the distinct names and values of the elements at <paramref name="samples"/> (virtual-screen px), each with the
+    /// point it was read at, at most <see cref="MaxChars"/> characters in all. Returns what was found when
+    /// <paramref name="budget"/> runs out; a hung target app can hold one UIA call past it, but never the caller.
     /// </summary>
     /// <param name="extraDenyFragments">Extra title fragments the user excluded (Settings → Access), on top of the built-in deny list.</param>
-    public static string Harvest(IReadOnlyList<Pt> samples, int ownProcessId, TimeSpan budget, IEnumerable<string>? extraDenyFragments = null)
+    public static IReadOnlyList<HarvestedText> Harvest(IReadOnlyList<Pt> samples, int ownProcessId, TimeSpan budget,
+        IEnumerable<string>? extraDenyFragments = null)
     {
-        if (samples.Count == 0 || budget <= TimeSpan.Zero) return "";
+        if (samples.Count == 0 || budget <= TimeSpan.Zero) return [];
         var extras = extraDenyFragments?.ToList();
-        var found = new List<string>();
+        var found = new List<HarvestedText>();
         var length = 0;
         var clock = System.Diagnostics.Stopwatch.StartNew();
         var work = Task.Run(() =>
@@ -38,32 +40,41 @@ public static class UiaTextHarvester
                 {
                     lock (found)
                     {
-                        if (length >= MaxChars || clock.Elapsed >= budget) return;
-                        if (found.Contains(text, StringComparer.Ordinal)) continue;
-                        found.Add(text);
-                        length += text.Length + 3;
+                        if (clock.Elapsed >= budget) return;
+                        if (length + text.Length > MaxChars || found.Any(f => f.Text == text)) continue;
+                        found.Add(new(p, text));
+                        length += text.Length;
                     }
                 }
             }
         });
         try { work.Wait(budget); }
         catch (AggregateException) { } // a UIA failure keeps whatever was read before it
-        lock (found)
+        lock (found) return found.ToArray();
+    }
+
+    /// <summary>
+    /// A point refuses when the top-level window under it or that window's root owner belongs to OpenClicky or to no readable
+    /// process, or carries a deny-listed title: an owned popup without a title of its own (a protected app's menu or dialog) is
+    /// judged by its owner as well.
+    /// </summary>
+    private static bool Refused(nint window, int ownProcessId, IReadOnlyList<string>? extras)
+    {
+        var root = GetAncestor(window, GaRoot);
+        if (root == 0) root = window;
+        foreach (var hwnd in new[] { root, GetAncestor(window, GaRootOwner) }.Where(h => h != 0).Distinct())
         {
-            var joined = string.Join(" | ", found);
-            return joined.Length > MaxChars ? joined[..MaxChars] : joined;
+            _ = GetWindowThreadProcessId(hwnd, out var pid);
+            if (pid == 0 || pid == ownProcessId || AgentDenyList.IsDenied(Title(hwnd), extras)) return true;
         }
+        return false;
     }
 
     private static IEnumerable<string> At(int x, int y, int ownProcessId, IReadOnlyList<string>? extras)
     {
         // The window under the point decides first, without asking UIA (or our own UI thread) anything.
         var window = WindowFromPoint(new NativePoint { X = x, Y = y });
-        if (window == 0) yield break;
-        var root = GetAncestor(window, GaRoot);
-        if (root == 0) root = window;
-        _ = GetWindowThreadProcessId(root, out var pid);
-        if (pid == 0 || pid == ownProcessId || AgentDenyList.IsDenied(Title(root), extras)) yield break;
+        if (window == 0 || Refused(window, ownProcessId, extras)) yield break;
 
         AutomationElement? element;
         try { element = AutomationElement.FromPoint(new System.Windows.Point(x, y)); }
@@ -75,18 +86,21 @@ public static class UiaTextHarvester
             var current = element.Current;
             if (current.ProcessId == ownProcessId || current.IsPassword) yield break;
             name = current.Name;
-            if (element.TryGetCurrentPattern(ValuePattern.Pattern, out var pattern) && pattern is ValuePattern v) value = v.Current.Value;
+            // A document's value is the whole document, not what is under the stroke.
+            if (current.ControlType != ControlType.Document
+                && element.TryGetCurrentPattern(ValuePattern.Pattern, out var pattern) && pattern is ValuePattern v) value = v.Current.Value;
         }
         catch (Exception ex) when (ex is ElementNotAvailableException or COMException or InvalidOperationException) { }
         if (Clean(name) is { } n) yield return n;
         if (Clean(value) is { } val) yield return val;
     }
 
+    /// <summary>Whitespace flattened; null when empty or longer than <see cref="MaxChars"/> (then it is more than what is under the stroke).</summary>
     private static string? Clean(string? text)
     {
         if (string.IsNullOrWhiteSpace(text)) return null;
         var flat = string.Join(' ', text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
-        return flat.Length > MaxChars ? flat[..MaxChars] : flat;
+        return flat.Length > MaxChars ? null : flat;
     }
 
     private static string? Title(nint hwnd)

@@ -14,16 +14,22 @@ internal sealed partial class TrayApplicationContext
 
     // The screen highlight: what the user draws with the pointer while holding talk, for that turn's screenshot.
     private static readonly TimeSpan HighlightHarvestBudget = TimeSpan.FromMilliseconds(400);
-    private readonly object _highlightGate = new();
+    private readonly HighlightRecorder _highlight = new();
     private readonly System.Diagnostics.Stopwatch _highlightClock = new();
-    /// <summary>The hold being recorded; null when none is.</summary>
-    private StrokeSegmenter? _highlightStrokes;
-    /// <summary>The last hold's gesture, its screen text still being read; taken (once) by the turn that hold started.</summary>
-    private Task<HighlightGesture?>? _pendingHighlight;
+    /// <summary>
+    /// Set (UI thread) by raw input when a physical mouse event arrives; each highlight tick takes it. Injected input (an agent
+    /// action) never sets it, so injected pointer moves never draw.
+    /// </summary>
+    private bool _physicalMouseSinceTick;
 
     /// <summary>UI thread: at startup, after a cursor.* patch, Pause/Resume, the classic settings form, and when a turn starts
     /// (Windows' reduced-motion setting is read fresh each time).</summary>
-    private void ApplyCompanionStyle() => _overlay.ApplyStyle(CompanionStyle.From(_settings, GeneralBehaviour.ReducedMotion()));
+    private void ApplyCompanionStyle()
+    {
+        var style = CompanionStyle.From(_settings, GeneralBehaviour.ReducedMotion());
+        _overlay.ApplyStyle(style);
+        if (!style.ScreenHighlight || style.Presence == CursorPresence.Off) ClearHighlight(); // turned off: nothing drawn is kept or sent
+    }
 
     /// <summary>UI thread, once at startup: clicking the detached companion talks, and any listening that no held press
     /// started still drives the listening bars.</summary>
@@ -78,86 +84,72 @@ internal sealed partial class TrayApplicationContext
 
     /// <summary>
     /// UI thread, in the constructor before Talk subscribes to the shortcut: our release handler then runs first, so the
-    /// gesture is stored before the turn the release starts looks for it.
+    /// gesture is stored before the turn the release starts takes it.
     /// </summary>
     private void WireHighlight()
     {
         _talk.HeldTalkStarted += StartHighlight;
         _hotkey.Released += (_, e) => EndHighlight(keep: e is not ShortcutEndedEventArgs { Cancelled: true });
+        _physicalInput.UserActivity += activity => { if (activity.Category == PhysicalUserActivityCategory.Mouse) _physicalMouseSinceTick = true; };
     }
 
     /// <summary>UI thread: a visible talk hold began. Records the pointer every 16 ms while Screen highlight is on and the companion is not off.</summary>
     private void StartHighlight()
     {
         if (!_settings.ScreenHighlight || CompanionStyle.From(_settings, reducedMotion: false).Presence == CursorPresence.Off) return;
-        lock (_highlightGate)
-        {
-            _pendingHighlight = null;
-            _highlightStrokes = new StrokeSegmenter();
-            _highlightClock.Restart();
-        }
+        var p = System.Windows.Forms.Cursor.Position;
+        _highlightClock.Restart();
+        _physicalMouseSinceTick = false;
+        _highlight.Start(new Pt(p.X, p.Y), 0);
         _overlay.ClearHighlight(); // the last hold's fading trail must not join this one
+        _overlay.AddHighlightPoint(p.X, p.Y);
         var timer = new System.Windows.Forms.Timer { Interval = 16 };
         timer.Tick += (_, _) => { if (!SampleHighlight()) timer.Dispose(); };
-        if (SampleHighlight()) timer.Start();
-        else timer.Dispose();
+        timer.Start();
     }
 
-    /// <summary>UI thread: one GetCursorPos sample; false once the hold is over (a listening turn that ended without a release drops it).</summary>
+    /// <summary>
+    /// UI thread: one GetCursorPos sample, kept only when physical mouse input arrived since the last tick (otherwise the
+    /// pointer counts as unmoved). False once the hold is over; a listening turn that ended without a release drops it.
+    /// </summary>
     private bool SampleHighlight()
     {
-        if (_talk.State != CompanionVoiceState.Listening) { EndHighlight(keep: false); return false; }
-        var p = System.Windows.Forms.Cursor.Position;
-        lock (_highlightGate)
+        if (_talk.State != CompanionVoiceState.Listening)
         {
-            if (_highlightStrokes is not { } strokes) return false;
-            strokes.Add(new Pt(p.X, p.Y), _highlightClock.ElapsedMilliseconds);
+            if (_highlight.Recording) EndHighlight(keep: false);
+            return false;
         }
-        _overlay.AddHighlightPoint(p.X, p.Y);
+        Pt? physical = null;
+        if (_physicalMouseSinceTick)
+        {
+            var p = System.Windows.Forms.Cursor.Position;
+            physical = new Pt(p.X, p.Y);
+        }
+        _physicalMouseSinceTick = false;
+        if (!_highlight.Sample(physical, _highlightClock.ElapsedMilliseconds)) return false;
+        if (physical is { } moved) _overlay.AddHighlightPoint((int)moved.X, (int)moved.Y);
         return true;
     }
 
     /// <summary>
-    /// The hold ended: a cancelled one leaves nothing. Otherwise the strokes are classified (too-short ones dropped) and the
-    /// text under them is read off the UI thread within 400 ms in all; a hold that never moved stores nothing.
+    /// UI thread: the hold ended. A cancelled one clears the trail and leaves nothing; otherwise the text under the strokes is
+    /// read off the UI thread within 400 ms in all.
     /// </summary>
     private void EndHighlight(bool keep)
     {
-        StrokeSegmenter? strokes;
-        lock (_highlightGate) (strokes, _highlightStrokes) = (_highlightStrokes, null);
-        if (strokes is null) return;
-        if (!keep) { _overlay.ClearHighlight(); return; }
-        var ended = DateTimeOffset.UtcNow;
-        var classified = strokes.Finish()
-            .Select(points => (Kind: StrokeClassifier.Classify(points), Points: points))
-            .Where(s => s.Kind is not null).Select(s => (Kind: s.Kind!.Value, s.Points)).ToList();
-        var dwells = strokes.Dwells.ToArray();
-        if (classified.Count == 0 && dwells.Length == 0) return;
         var exclusions = AgentDenyList.ParseExtraFragments(_settings.AgentDenyListExtra);
-        var pending = Task.Run(() =>
-        {
-            var clock = System.Diagnostics.Stopwatch.StartNew();
-            var built = classified.Select(s => new HighlightStroke(s.Kind, s.Points, StrokeClassifier.BoundsOf(s.Points),
-                UiaTextHarvester.Harvest(StrokeClassifier.SamplePoints(s.Kind, s.Points), Environment.ProcessId,
-                    HighlightHarvestBudget - clock.Elapsed, exclusions))).ToList();
-            return (HighlightGesture?)new HighlightGesture(built, dwells, ended);
-        });
-        lock (_highlightGate) _pendingHighlight = pending;
+        if (_highlight.End(keep, DateTimeOffset.UtcNow, HighlightHarvestBudget,
+                (samples, budget) => UiaTextHarvester.Harvest(samples, Environment.ProcessId, budget, exclusions)) && !keep)
+            _overlay.ClearHighlight();
     }
 
-    /// <summary>Talk's turn, any thread (not the UI thread): the last hold's gesture, once. Waits at most a second for its text.</summary>
-    private HighlightGesture? TakeHighlight()
-    {
-        Task<HighlightGesture?>? pending;
-        lock (_highlightGate) (pending, _pendingHighlight) = (_pendingHighlight, null);
-        try { return pending is not null && pending.Wait(TimeSpan.FromSeconds(1)) ? pending.Result : null; }
-        catch (AggregateException ex) { Log("highlight_error=" + ex.InnerException?.GetType().Name); return null; }
-    }
+    /// <summary>Talk's turn, on a thread-pool thread: the last hold's gesture, once. Waits at most a second for its text.</summary>
+    private HighlightGesture? TakeHighlight() => _highlight.Take(TimeSpan.FromSeconds(1));
 
-    /// <summary>Esc: the trail comes off the screen and the gesture is dropped.</summary>
+    /// <summary>Esc, or Screen highlight turned off: the trail comes off the screen and the recording and gesture are dropped.</summary>
     private void ClearHighlight()
     {
-        lock (_highlightGate) (_highlightStrokes, _pendingHighlight) = (null, null);
+        _highlight.Clear();
         _overlay.ClearHighlight();
     }
 
