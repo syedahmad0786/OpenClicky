@@ -6,7 +6,8 @@ namespace OpenClicky.Core.Drawing;
 /// The strokes each drawing op is made of, in the op's own coordinates (virtual pixels for a mapped part). <paramref name="dip"/>
 /// is the monitor scale for fixed DIP sizes (arrow heads, bracket caps, corners); <paramref name="scale"/> converts the op's
 /// screenshot-pixel size keys (<c>size</c>, <c>r</c>) to the op's coordinates. Ops drawn another way (text, label, dot, point,
-/// target and the C7/C8 helpers) have no strokes here.
+/// target, spotlight, badge, button, card, sticky and the figure) have no strokes here; the graph, timeline, scroll and tie
+/// strokes come from <see cref="HelperGeometry"/>.
 /// </summary>
 public static class ShapeGeometry
 {
@@ -47,7 +48,7 @@ public static class ShapeGeometry
                 var x = p[0];
                 var h = size * 0.4f;
                 return [[new(x.X - h, x.Y - h), new(x.X + h, x.Y + h)], [new(x.X + h, x.Y - h), new(x.X - h, x.Y + h)]];
-            default: return [];
+            default: return HelperGeometry.Outline(op, dip); // graph, timeline, scroll and tie; the rest are drawn as fills
         }
     }
 

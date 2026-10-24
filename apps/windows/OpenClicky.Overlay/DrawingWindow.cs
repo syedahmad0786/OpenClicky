@@ -11,7 +11,7 @@ namespace OpenClicky.Overlay;
 internal sealed class DrawingWindow : IDisposable
 {
     private const double FrameSeconds = 0.033, ReducedFadeSeconds = 0.12;
-    private const long MaxPixels = 2L * 3840 * 2160;
+    private const long MaxPixels = DrawingRenderer.MaxInkPixels;
 
     private readonly LayeredWindow _window;
     private IReadOnlyList<DrawingRenderer.PartLayout> _layouts = [];
@@ -76,6 +76,16 @@ internal sealed class DrawingWindow : IDisposable
         return null;
     }
 
+    /// <summary>
+    /// The drawn buttons that can be clicked now: fully revealed, at most three, in drawing order. Rects are virtual-screen
+    /// pixels, rounded out to the pill that was painted.
+    /// </summary>
+    public IReadOnlyList<(string Label, string Prompt, Rectangle Rect)> LiveButtons() =>
+        _layouts.Where(l => l.ButtonRect is not null && !_reveals.ContainsKey((l.Part.Id, l.Part.Seq)))
+            .Take(DrawingRenderer.MaxButtons)
+            .Select(l => (l.Part.Op.Text ?? "", l.Part.Op.Args.GetValueOrDefault("prompt") ?? "", Rectangle.Round(l.ButtonRect!.Value)))
+            .ToArray();
+
     /// <summary>Presents the drawing if it changed or is animating; true while an animation still runs.</summary>
     public bool Render(double now, Color accent, bool reducedMotion)
     {
@@ -120,7 +130,8 @@ internal sealed class DrawingWindow : IDisposable
             g.Clear(Color.Transparent);
             CursorRenderer.Prepare(g);
             g.TranslateTransform(-area.X, -area.Y);
-            foreach (var layout in _layouts)
+            // A spotlight dims what is under it, so it goes first: every other part stays bright whenever it was added.
+            foreach (var layout in _layouts.OrderBy(l => l.Part.Op.Kind == DrawOpKind.Spotlight ? 0 : 1))
             {
                 var (progress, alpha) = State(layout.Part, now, reducedMotion);
                 DrawingRenderer.Draw(g, layout, progress, alpha, accent);

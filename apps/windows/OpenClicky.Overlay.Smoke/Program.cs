@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using OpenClicky.Core;
 using OpenClicky.Core.CompanionCursor;
 using OpenClicky.Overlay;
+using CoreDrawing = OpenClicky.Core.Drawing;
 
 namespace OpenClicky.Overlay.Smoke;
 
@@ -59,9 +60,16 @@ internal static class Program
             return 17;
         }
 
+        var helperFailure = ValidateHelperLayout();
+        if (helperFailure is not null)
+        {
+            Console.Error.WriteLine("FAIL: helper layout " + helperFailure);
+            return 18;
+        }
+
         if (args.Contains("--geometry-only", StringComparer.OrdinalIgnoreCase))
         {
-            Console.WriteLine("PASS: region, response bubble, message bubble and drawing layout geometry");
+            Console.WriteLine("PASS: region, response bubble, message bubble, drawing layout and helper (graph, card, button) geometry");
             return 0;
         }
 
@@ -83,10 +91,10 @@ internal static class Program
         }
 
         Console.WriteLine($"overlay_hwnd=0x{overlay.WindowHandle:X}");
-        if (overlay.WindowHandles.Count != 4 || overlay.WindowHandles.Distinct().Count() != 4 || overlay.WindowHandles.Contains(IntPtr.Zero)
+        if (overlay.WindowHandles.Count != 7 || overlay.WindowHandles.Distinct().Count() != 7 || overlay.WindowHandles.Contains(IntPtr.Zero)
             || overlay.BuddyTipHandle != overlay.WindowHandle || overlay.WindowHandles[3] != overlay.DrawingHandle)
         {
-            Console.Error.WriteLine($"FAIL: expected the cursor, ring, click-catcher and drawing windows, got [{string.Join(",", overlay.WindowHandles)}]");
+            Console.Error.WriteLine($"FAIL: expected the cursor, ring, click-catcher, drawing and three drawing-button windows, got [{string.Join(",", overlay.WindowHandles)}]");
             return 2;
         }
 
@@ -257,6 +265,14 @@ internal static class Program
             return 16;
         }
         Console.WriteLine("PASS: drawing reveals in its own window, Hide hides it, it persists, an empty drawing clears it");
+
+        var helperLiveFailure = ValidateHelperDrawing(overlay, vs);
+        if (helperLiveFailure is not null)
+        {
+            Console.Error.WriteLine("FAIL: helper drawing " + helperLiveFailure);
+            return 19;
+        }
+        Console.WriteLine("PASS: spotlight dims the screen outside its box, a card paints, button click targets raise ButtonClicked and follow Hide and a running task");
 
         var dockFailure = ValidateDockAndDetach(overlay, fixture, vs, targetX, targetY);
         if (dockFailure is not null)
@@ -471,6 +487,226 @@ internal static class Program
         }
         finally
         {
+            overlay.ShowDrawing([], []);
+            overlay.Hide();
+            Cursor.Position = saved;
+        }
+    }
+
+    /// <summary>A part parsed from a real tag, as the model would write it (screenshot pixels, scale 1).</summary>
+    private static CoreDrawing.DrawPart Tagged(string tag, int seq = 1)
+    {
+        var op = Assert1(CoreDrawing.DrawCommandParser.Parse(tag).Ops);
+        return new(op.Id ?? $"t{seq}", op, op, 1, seq);
+
+        static CoreDrawing.DrawOp Assert1(IReadOnlyList<CoreDrawing.DrawOp> ops) =>
+            ops.Count == 1 ? ops[0] : throw new InvalidOperationException($"the smoke tag did not parse to one op: {ops.Count}");
+    }
+
+    /// <summary>
+    /// The screen helpers lay out whole on the monitor: graphs and timelines get strokes and a text path, a card is 280 DIP (or its
+    /// <c>w</c>) wide with at most eight lines of text and a small tilt, a sticky is 160 DIP square, the paper stocks are ours,
+    /// only three buttons are kept, and anything that would leave the monitor is dropped.
+    /// </summary>
+    private static string? ValidateHelperLayout()
+    {
+        var mon = Screen.PrimaryScreen!.Bounds;
+        int x = mon.Left + 200, y = mon.Top + 200;
+        static string Hex(Color c) => $"#{c.R:X2}{c.G:X2}{c.B:X2}";
+        DrawingRenderer.PartLayout One(string tag, int seq = 1) =>
+            DrawingRenderer.Layout([Tagged(tag, seq)]) is [var only] ? only : throw new InvalidOperationException("not laid out: " + tag);
+
+        try
+        {
+            var graph = One($"[DRAW:graph id=g x={x} y={y} w=400 h=240 xlabel=\"day\" ylabel=\"users\" series=\"3,5,4,9;2,2,3,4\"]");
+            if (graph.Strokes.Count != 13 || graph.StrokeColours.Count != 13 || graph.LabelPath is null || graph.LabelBox is not { } graphText)
+                return $"graph strokes={graph.Strokes.Count} colours={graph.StrokeColours.Count} labels={graph.LabelPath is not null}";
+            if (graph.StrokeColours[0] != ColorTranslator.FromHtml("#1F2430") || graph.StrokeColours[1] is not null || graph.StrokeColours[2] is null)
+                return "graph stroke colours: ink axes, the part's own first line, a distinct second line";
+            if (!graph.Bounds.Contains(graphText)) return "graph bounds do not cover its text";
+
+            var timeline = One($"[DRAW:timeline id=t x={x} y={y} w=500 items=\"one;two;three\"]");
+            if (timeline.Strokes.Count != 4 || timeline.LabelPath is null) return $"timeline strokes={timeline.Strokes.Count}";
+            if (One($"[DRAW:scroll id=s x={x} y={y} dir=down]").Strokes.Count != 3) return "scroll is not three chevrons";
+            if (One($"[DRAW:tie id=i pts={x},{y},{x + 200},{y}]").Strokes.Count != 1) return "tie is not one arc";
+
+            var spot = One($"[DRAW:spotlight id=o x={x} y={y} w=200 h=100]");
+            if (spot.Spot is not { } s || s.Hole != new RectangleF(x, y, 200, 100) || !s.Screen.Contains(s.Hole)) return "spotlight hole is not the box inside the dimmed area";
+            if (One($"[DRAW:badge id=b x={x} y={y} n=3]").Badge is not { Text: "3" }) return "badge has no numeral";
+
+            var card = One($"[DRAW:card id=c x={x} y={y} title=Hello text=\"Some words here\" stock=sky]");
+            if (card.Paper is not { } paper) return "card has no paper";
+            if (Math.Abs(paper.Rect.Width - 280 * card.Dip) > 1) return $"card width {paper.Rect.Width} is not 280 DIP";
+            if (Hex(paper.Fill) != "#DCEBFF" || Math.Abs(paper.Tilt) > 2) return $"card stock {Hex(paper.Fill)} tilt {paper.Tilt}";
+            if (!card.Bounds.Contains(paper.Rect)) return "card bounds do not cover the paper";
+            if (One($"[DRAW:card id=c x={x} y={y} w=360 title=Hello text=\"Some words here\"]").Paper!.Rect.Width != 360) return "card ignores its w";
+            var sticky = One($"[DRAW:sticky id=k x={x} y={y} text=\"Remember this\"]").Paper;
+            if (sticky is null || Math.Abs(sticky.Rect.Width - 160 * card.Dip) > 1 || Math.Abs(sticky.Rect.Height - sticky.Rect.Width) > 1 || Hex(sticky.Fill) != "#FFF1B8")
+                return "sticky is not a 160 DIP butter square";
+
+            // Eight lines at most: a very long body is cut to the same height however long it is.
+            DrawingRenderer.PartLayout Body(int chars)
+            {
+                var text = string.Join(' ', Enumerable.Repeat("word", chars / 5));
+                var part = Tagged($"[DRAW:card id=c x={x} y={y} title=Hello text=\"hi\"]");
+                var op = part.Op with { Text = text, Args = new Dictionary<string, string>(part.Op.Args) { ["text"] = text } };
+                return DrawingRenderer.Layout([part with { Op = op, Source = op }])[0];
+            }
+            var shortCard = Body(10).Paper!.Rect.Height;
+            var cappedA = Body(2000).Paper!.Rect.Height;
+            var cappedB = Body(5000).Paper!.Rect.Height;
+            if (!(shortCard < cappedA) || Math.Abs(cappedA - cappedB) > 0.5f) return $"card height not capped at eight lines: {shortCard} / {cappedA} / {cappedB}";
+
+            // At most three buttons are kept; the fourth is dropped.
+            var buttons = Enumerable.Range(0, 4).Select(i => Tagged($"[DRAW:button id=b{i} x={x} y={y + i * 60} text=\"Go {i}\" prompt=\"more\"]", i + 1)).ToArray();
+            var kept = DrawingRenderer.Layout(buttons);
+            if (kept.Count != 3 || kept.Any(k => k.ButtonRect is not { Height: > 0 })) return $"{kept.Count} buttons kept, expected 3";
+
+            if (Environment.GetEnvironmentVariable("OPENCLICKY_HELPER_SHOT") is { Length: > 0 } shot) // local eyeballing only
+            {
+                var sheet = new[]
+                {
+                    Tagged($"[DRAW:graph id=g x={x} y={y} w=420 h=260 xlabel=\"week\" ylabel=\"signups\" series=\"3,5,4,9,7,12;2,2,3,4,6,5\"]", 1),
+                    Tagged($"[DRAW:timeline id=t x={x} y={y + 340} w=520 items=\"plan;build;test a longer one;ship\"]", 2),
+                    Tagged($"[DRAW:scroll id=s x={x + 470} y={y + 40} dir=down]", 3),
+                    Tagged($"[DRAW:tie id=i pts={x + 500},{y + 150},{x + 640},{y + 260}]", 4),
+                    Tagged($"[DRAW:badge id=b x={x + 700} y={y + 20} n=7]", 5),
+                    Tagged($"[DRAW:card id=c x={x + 720} y={y + 60} title=\"Try this\" text=\"Open the settings page, then pick the Cursor tab and choose a colour you like.\" stock=sky]", 6),
+                    Tagged($"[DRAW:sticky id=k x={x + 1060} y={y + 60} text=\"Remember to save before closing the window.\"]", 7),
+                    Tagged($"[DRAW:button id=u x={x + 720} y={y + 300} text=\"Show me an example\" prompt=\"show one\"]", 8),
+                };
+                var layouts = DrawingRenderer.Layout(sheet);
+                var union = layouts.Select(l => l.Bounds).Aggregate(RectangleF.Union);
+                using var picture = new Bitmap((int)Math.Ceiling(union.Width), (int)Math.Ceiling(union.Height));
+                using (var g = Graphics.FromImage(picture))
+                {
+                    g.Clear(Color.FromArgb(0xEE, 0xEE, 0xF2));
+                    CursorRenderer.Prepare(g);
+                    g.TranslateTransform(-union.X, -union.Y);
+                    foreach (var l in layouts) DrawingRenderer.Draw(g, l, 1, 1, Color.FromArgb(0x33, 0x80, 0xFF));
+                }
+                picture.Save(shot, System.Drawing.Imaging.ImageFormat.Png);
+            }
+
+            // Whole on the monitor or dropped: a card at the right edge, a badge at the corner.
+            if (DrawingRenderer.Layout([Tagged($"[DRAW:card id=c x={mon.Right - 60} y={y} title=Hello text=\"edge\"]")]).Count != 0) return "a card running off its monitor was kept";
+            if (DrawingRenderer.Layout([Tagged($"[DRAW:badge id=b x={mon.Right - 2} y={mon.Top + 2} n=1]")]).Count != 0) return "a badge half off its monitor was kept";
+            return null;
+        }
+        catch (InvalidOperationException ex)
+        {
+            return ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// Live proof for the helpers (the real screen, not the window rectangles): a spotlight darkens a strip outside its box and
+    /// leaves one inside alone; a card paints; each fully drawn button gets a click target over its pill that raises
+    /// ButtonClicked with its label and prompt (a click sent to our own target window, a press dragged off it is no click); the
+    /// targets are down after Hide, while an agent task runs, and once the drawing is cleared. Nothing else is clicked or typed.
+    /// </summary>
+    private static string? ValidateHelperDrawing(BuddyOverlayController overlay, Rectangle vs)
+    {
+        const int WmLButtonDown = 0x201, WmLButtonUp = 0x202;
+        static bool Visible(IntPtr hwnd) => NativeMethods.IsWindowVisible(hwnd);
+        static void Pump(int ms) => PumpUntil(() => false, TimeSpan.FromMilliseconds(ms));
+        static IntPtr Lp(int px, int py) => (IntPtr)((py << 16) | (px & 0xFFFF));
+        var catchers = overlay.WindowHandles.Skip(4).ToArray();
+
+        var saved = Cursor.Position;
+        var mon = Screen.PrimaryScreen!.Bounds;
+        int x = mon.Left + mon.Width / 4, y = mon.Top + mon.Height / 3;
+        var clicks = new List<(string Label, string Prompt)>();
+        void OnClick(string label, string prompt) => clicks.Add((label, prompt));
+        overlay.ButtonClicked += OnClick;
+        try
+        {
+            Cursor.Position = new Point(vs.Left + vs.Width * 3 / 4, vs.Top + vs.Height * 3 / 4); // the companion stays clear
+            overlay.ShowIdle();
+            Pump(300);
+
+            // Spotlight: dim outside, clear inside.
+            var hole = new Rectangle(x, y, 240, 140);
+            var spot = Tagged($"[DRAW:spotlight id=o x={hole.X} y={hole.Y} w={hole.Width} h={hole.Height}]");
+            overlay.ShowDrawing([spot], [new(spot, TimeSpan.Zero, TimeSpan.FromSeconds(0.3), false)]);
+            if (!PumpUntil(() => Visible(overlay.DrawingHandle), TimeSpan.FromSeconds(2))) return "the spotlight window never appeared";
+            Pump(1000);
+            var outside = new Rectangle(hole.Right + 40, hole.Y + 20, 60, 60);
+            var inside = new Rectangle(hole.X + 60, hole.Y + 40, 60, 60);
+            var dimmed = Grab(outside);
+            var clear = Grab(inside);
+            overlay.Hide();
+            Pump(IOverlayController.HideSettleMilliseconds + 60);
+            var dimChanged = CountChanged(dimmed, Grab(outside));
+            var holeChanged = CountChanged(clear, Grab(inside));
+            if (dimChanged < 1500 || holeChanged > 40) return $"spotlight pixels: outside changed {dimChanged} (of 3600), inside {holeChanged}";
+            Console.WriteLine($"spotlight_outside_changed={dimChanged} inside_changed={holeChanged}");
+
+            // A card paints where it was put.
+            var card = Tagged($"[DRAW:card id=c x={x} y={y} title=Notes text=\"Check the drawing\" stock=mint]");
+            overlay.ShowDrawing([card], [new(card, TimeSpan.Zero, TimeSpan.FromSeconds(0.3), false)]);
+            overlay.ShowIdle();
+            Pump(1000);
+            var dip = DpiScale.ForPoint(new Point(x, y));
+            var paperBox = new Rectangle(x + (int)(20 * dip), y + (int)(26 * dip), 30, 6); // well inside the tilted paper
+            var onScreen = Grab(paperBox);
+            overlay.Hide();
+            Pump(IOverlayController.HideSettleMilliseconds + 60);
+            var paperChanged = CountChanged(onScreen, Grab(paperBox));
+            if (paperChanged < 90) return $"the screen shows no card paper (changed pixels={paperChanged} of 180)";
+
+            // Buttons.
+            var parts = new[]
+            {
+                Tagged($"[DRAW:button id=b1 x={x} y={y} text=\"First\" prompt=\"say one\"]", 1),
+                Tagged($"[DRAW:button id=b2 x={x} y={y + 80} text=\"Second\" prompt=\"say two\"]", 2),
+            };
+            var pills = DrawingRenderer.Layout(parts).Select(l => Rectangle.Round(l.ButtonRect!.Value)).ToArray();
+            overlay.ShowDrawing(parts, parts.Select((p, i) => new CoreDrawing.PartAnimation(p, TimeSpan.FromMilliseconds(100 * i), TimeSpan.FromSeconds(0.3), false)).ToArray());
+            overlay.ShowIdle();
+            if (!PumpUntil(() => Visible(catchers[0]) && Visible(catchers[1]), TimeSpan.FromSeconds(3))) return "the click targets never appeared over the buttons";
+            if (Visible(catchers[2])) return "a third click target was up for two buttons";
+            for (var i = 0; i < 2; i++)
+            {
+                if (!NativeMethods.GetWindowRect(catchers[i], out var r) || new Rectangle(r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top) != pills[i])
+                    return $"click target {i} is not over its pill {pills[i]}";
+            }
+            if (Visible(catchers[0]) && Environment.GetEnvironmentVariable("OPENCLICKY_BUTTON_SHOT") is { Length: > 0 } shot) // local eyeballing only
+                Grab(Rectangle.Inflate(pills[0], 30, 30)).Save(shot, System.Drawing.Imaging.ImageFormat.Png);
+            var pixels = Grab(pills[0]);
+            overlay.Hide();
+            if (catchers.Any(Visible)) return "Hide left a click target visible";
+            Pump(IOverlayController.HideSettleMilliseconds + 60);
+            var buttonChanged = CountChanged(pixels, Grab(pills[0]));
+            if (buttonChanged < pills[0].Width * pills[0].Height / 3) return $"the screen shows no button pill (changed pixels={buttonChanged})";
+            overlay.ShowIdle();
+            if (!PumpUntil(() => Visible(catchers[0]) && Visible(catchers[1]), TimeSpan.FromSeconds(3))) return "the click targets did not come back after Hide";
+
+            // A click on our own target raises the event; a press dragged off it does not.
+            NativeMethods.SendMessage(catchers[1], WmLButtonDown, (IntPtr)1, Lp(5, 5));
+            NativeMethods.SendMessage(catchers[1], WmLButtonUp, IntPtr.Zero, Lp(5, 5));
+            if (clicks.Count != 1 || clicks[0] != ("Second", "say two")) return $"a click raised {clicks.Count} events: {string.Join("; ", clicks)}";
+            NativeMethods.SendMessage(catchers[0], WmLButtonDown, (IntPtr)1, Lp(5, 5));
+            NativeMethods.SendMessage(catchers[0], WmLButtonUp, IntPtr.Zero, Lp(5000, 5));
+            if (clicks.Count != 1) return "a press released outside the button counted as a click";
+
+            // A running agent task takes the targets down (its own clicks must reach the screen) and a stray click is ignored.
+            overlay.DetachSuppressed = () => true;
+            if (!PumpUntil(() => !Visible(catchers[0]) && !Visible(catchers[1]), TimeSpan.FromSeconds(2))) return "a running task left the click targets up";
+            NativeMethods.SendMessage(catchers[0], WmLButtonDown, (IntPtr)1, Lp(5, 5));
+            NativeMethods.SendMessage(catchers[0], WmLButtonUp, IntPtr.Zero, Lp(5, 5));
+            if (clicks.Count != 1) return "a click was acted on while a task was running";
+            overlay.DetachSuppressed = () => false;
+            if (!PumpUntil(() => Visible(catchers[0]) && Visible(catchers[1]), TimeSpan.FromSeconds(2))) return "the click targets did not return after the task";
+
+            overlay.ShowDrawing([], []);
+            if (!PumpUntil(() => !catchers.Any(Visible), TimeSpan.FromSeconds(2))) return "clearing the drawing left a click target up";
+            return null;
+        }
+        finally
+        {
+            overlay.ButtonClicked -= OnClick;
+            overlay.DetachSuppressed = null;
             overlay.ShowDrawing([], []);
             overlay.Hide();
             Cursor.Position = saved;

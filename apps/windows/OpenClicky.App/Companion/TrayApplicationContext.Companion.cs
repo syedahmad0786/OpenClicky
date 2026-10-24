@@ -20,10 +20,23 @@ internal sealed partial class TrayApplicationContext
     private void WireCompanion()
     {
         _overlay.DetachedClicked += ToggleConversation;
+        _overlay.ButtonClicked += OnDrawingButtonClicked;
         // An agent task that is running (not paused) injects input: it must not detach the companion or have a click swallowed.
         _overlay.DetachSuppressed = () => _taskCts is not null && !_taskControl.IsPaused;
         _talk.StateChanged += state => OnUi(() => { if (state == CompanionVoiceState.Listening && _micWatch is null) WatchMicLevels(); });
         WatchForStaleDrawing();
+    }
+
+    /// <summary>
+    /// UI thread: a button the model drew was clicked. Its prompt is model-authored, untrusted text: it runs as an ordinary talk
+    /// turn (quoted as the user's request, the label shown as their message), so any [OPEN]/[TYPE] it provokes still follows
+    /// AgentAccessPolicy. No agent task is running then: the overlay takes the click targets down while one does.
+    /// </summary>
+    private async void OnDrawingButtonClicked(string label, string prompt)
+    {
+        if (_taskCts is not null && !_taskControl.IsPaused) return;
+        try { await _talk.SubmitTextAsync(OpenClicky.Core.Drawing.DrawingButtons.Request(label, prompt), displayAs: label); }
+        catch (Exception ex) { Log($"drawing_button_failed={ex.GetType().Name}"); }
     }
 
     /// <summary>

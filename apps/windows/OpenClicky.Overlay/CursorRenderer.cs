@@ -192,8 +192,9 @@ internal static class CursorRenderer
         g.FillPath(brush, path);
     }
 
-    private static GraphicsPath RoundedRect(RectangleF rect, float radius)
+    internal static GraphicsPath RoundedRect(RectangleF rect, float radius)
     {
+        radius = Math.Max(0.5f, Math.Min(radius, Math.Min(rect.Width, rect.Height) / 2));
         var path = new GraphicsPath();
         var d = radius * 2;
         path.AddArc(rect.X, rect.Y, d, d, 180, 90);

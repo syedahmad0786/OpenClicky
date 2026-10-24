@@ -14,10 +14,52 @@ namespace OpenClicky.Overlay;
 public static class DrawingRenderer
 {
     private const float MarkerDip = 6, DotDip = 5, TextDip = 14, TextMaxWidthDip = 360, HaloDip = 3, PillGapDip = 6;
+    private const float SpotCornerDip = 8, SpotDim = 0.55f, BadgeDip = 22, BadgeTextDip = 12;
+    private const float CardWidthDip = 280, StickyDip = 160, PaperPadDip = 14, TitleDip = 14, BodyDip = 12, PaperGapDip = 6, PaperCornerDip = 3;
+    private const float TapeWidthDip = 40, TapeHeightDip = 12, ButtonTextDip = 13, ButtonHeightDip = 32, ButtonPadDip = 14, ButtonMaxWidthDip = 300;
+    private const float ChartTextDip = 11, ChartGapDip = 6;
     private const int HaloAlpha = 179; // 70 %
+    private const int MaxBodyLines = 8;
+    /// <summary>At most three buttons are drawn (and clickable); a fourth is dropped.</summary>
+    public const int MaxButtons = 3;
+    /// <summary>The largest ink bitmap in pixels (two 4K monitors, 64 MB).</summary>
+    public const long MaxInkPixels = 2L * 3840 * 2160;
     private static readonly string HandFamily = Installed("Segoe Print") ? "Segoe Print" : "Segoe UI";
+    // Semibold is a named instance of the variable font; fall back to its bold, then to the static Segoe UI faces.
+    private static readonly (string Family, FontStyle Style) Semibold =
+        Installed("Segoe UI Variable Display Semibold") ? ("Segoe UI Variable Display Semibold", FontStyle.Regular)
+        : Installed("Segoe UI Variable Display") ? ("Segoe UI Variable Display", FontStyle.Bold)
+        : Installed("Segoe UI Semibold") ? ("Segoe UI Semibold", FontStyle.Regular) : ("Segoe UI", FontStyle.Bold);
+    private static readonly Color InkColour = ColorTranslator.FromHtml(HelperGeometry.Ink);
+    /// <summary>Series colours after the accent for a graph with more than one line.</summary>
+    private static readonly Color[] SeriesColours = [Color.Empty, Color.FromArgb(0xE4, 0x57, 0x2E), Color.FromArgb(0x17, 0xA3, 0x98), Color.FromArgb(0x8E, 0x5B, 0xD9)];
     private static readonly Graphics Measure = Graphics.FromImage(new Bitmap(1, 1));
     private static readonly StringFormat TextFormat = new(StringFormat.GenericTypographic) { Trimming = StringTrimming.None };
+    private static readonly StringFormat LineFormat = new(StringFormat.GenericTypographic) { Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
+    private static readonly StringFormat BodyFormat = new(StringFormat.GenericTypographic) { Trimming = StringTrimming.EllipsisWord };
+    private static readonly StringFormat CentreFormat = new(StringFormat.GenericTypographic)
+    {
+        Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap,
+    };
+    private static readonly Dictionary<(string, FontStyle, float), Font> Fonts = [];
+
+    // ponytail: fonts are cached for the life of the process; there are a handful of sizes (DIP times the monitor scales in use).
+    private static Font FontOf(string family, FontStyle style, float px)
+    {
+        if (!Fonts.TryGetValue((family, style, px), out var font)) Fonts[(family, style, px)] = font = new Font(family, px, style, GraphicsUnit.Pixel);
+        return font;
+    }
+
+    /// <summary>A card or sticky: the paper (before tilt), its text boxes and the stock.</summary>
+    internal sealed class PaperLayout
+    {
+        public RectangleF Rect, TitleRect, BodyRect;
+        public string? Title;
+        public string Body = "";
+        public Color Fill;
+        public float Tilt;
+        public PointF Centre => new(Rect.X + Rect.Width / 2, Rect.Y + Rect.Height / 2);
+    }
 
     /// <summary>One part laid out for painting: wobbled strokes, text box, label pill or ring, and everything it can paint.</summary>
     public sealed class PartLayout
@@ -33,6 +75,17 @@ public static class DrawingRenderer
         public string? PillText { get; internal set; }
         public RectangleF? Pill { get; internal set; }
         internal (Box Ring, float Corner)? Ring { get; set; }
+        /// <summary>Spotlight: the area to dim (the screen) and the box that stays clear.</summary>
+        internal (RectangleF Screen, RectangleF Hole, float Corner)? Spot { get; set; }
+        internal (PointF Centre, float Radius, string Text)? Badge { get; set; }
+        internal PaperLayout? Paper { get; set; }
+        /// <summary>A button's pill in virtual pixels (a click catcher sits over it) and its label.</summary>
+        public RectangleF? ButtonRect { get; internal set; }
+        // ponytail: not disposed, as TextPath.
+        internal GraphicsPath? LabelPath { get; set; }
+        internal RectangleF? LabelBox { get; set; }
+        /// <summary>Per-stroke colour (null: the part's own), aligned with <see cref="Strokes"/>: a graph's axes are ink, its lines differ.</summary>
+        internal IReadOnlyList<Color?> StrokeColours { get; set; } = [];
         public RectangleF Bounds { get; internal set; }
     }
 
@@ -48,6 +101,7 @@ public static class DrawingRenderer
         var bounds = screen ?? SystemInformation.VirtualScreen;
         var layouts = new List<PartLayout>();
         var pills = new List<(PartLayout Layout, Box Pill, Rectangle WorkArea)>();
+        var buttons = 0;
         foreach (var part in parts)
         {
             var op = part.Op;
@@ -58,8 +112,50 @@ public static class DrawingRenderer
             var work = Screen.FromPoint(at).WorkingArea;
             var layout = new PartLayout(part, dip);
             var paint = RectangleF.Empty;
+            // Fills (badge, button, paper) must sit whole on the monitor under their anchor, like strokes: dropped, never clamped.
+            bool OnMonitor(RectangleF r) => RectangleF.Inflate(Screen.FromPoint(at).Bounds, 1, 1).Contains(r);
             switch (op.Kind)
             {
+                case DrawOpKind.Spotlight:
+                {
+                    var screenArea = (long)bounds.Width * bounds.Height <= MaxInkPixels ? bounds : Screen.FromPoint(at).Bounds;
+                    var hole = RectangleF.Intersect(ToRect(op.Box), screenArea);
+                    if (hole.Width <= 0 || hole.Height <= 0) continue;
+                    layout.Spot = (screenArea, hole, SpotCornerDip * dip);
+                    paint = screenArea;
+                    break;
+                }
+                case DrawOpKind.Badge:
+                {
+                    var r = BadgeDip * dip / 2;
+                    var disc = new RectangleF(anchor.X - r, anchor.Y - r, 2 * r, 2 * r);
+                    if (!op.Args.TryGetValue("n", out var number) || !OnMonitor(disc)) continue;
+                    layout.Badge = (new PointF(anchor.X, anchor.Y), r, number);
+                    paint = Inflate(disc, 3 * dip);
+                    break;
+                }
+                case DrawOpKind.Button:
+                {
+                    if (op.Text is not { Length: > 0 } label || !op.Args.ContainsKey("prompt") || buttons >= MaxButtons) continue;
+                    var width = Math.Min(ButtonMaxWidthDip * dip, Measure.MeasureString(label, FontOf(Semibold.Family, Semibold.Style, ButtonTextDip * dip), 10_000, TextFormat).Width + 2 * ButtonPadDip * dip);
+                    var pill = new RectangleF(anchor.X, anchor.Y, width, ButtonHeightDip * dip);
+                    if (!OnMonitor(pill)) continue;
+                    buttons++;
+                    layout.ButtonRect = pill;
+                    paint = Inflate(pill, 5 * dip);
+                    break;
+                }
+                case DrawOpKind.Card or DrawOpKind.Sticky:
+                {
+                    var paper = LayoutPaper(op, part.Id, dip, anchor);
+                    if (paper is null) continue;
+                    var corners = Turned(paper.Rect, paper.Tilt, paper.Centre);
+                    var cover = RectangleF.FromLTRB(corners.Min(c => c.X), corners.Min(c => c.Y), corners.Max(c => c.X), corners.Max(c => c.Y));
+                    if (!OnMonitor(cover)) continue;
+                    layout.Paper = paper;
+                    paint = Inflate(cover, (TapeHeightDip / 2 + 8) * dip);
+                    break;
+                }
                 case DrawOpKind.Text or DrawOpKind.Label:
                 {
                     if (string.IsNullOrEmpty(op.Text)) continue;
@@ -111,6 +207,24 @@ public static class DrawingRenderer
                             ? wobbled.Take(wobbled.Count - 1).Append(wobbled[0]).ToArray() : wobbled;
                     }).ToArray();
                     paint = Inflate(Extent(layout.Strokes), BandWidth(layout) / 2 + 2 * dip + 2);
+                    if (op.Kind == DrawOpKind.Graph)
+                    {
+                        // Axes and tick marks in ink; the first line takes the part's colour, further lines their own.
+                        var lines = layout.Strokes.Count - 1 - 2 * HelperGeometry.TickCount;
+                        Color? StrokeColour(int i)
+                        {
+                            if (i == 0 || i > lines) return InkColour;
+                            var own = SeriesColours[(i - 1) % SeriesColours.Length];
+                            return own.IsEmpty ? null : own;
+                        }
+                        layout.StrokeColours = Enumerable.Range(0, layout.Strokes.Count).Select(StrokeColour).ToArray();
+                    }
+                    if (op.Kind is DrawOpKind.Graph or DrawOpKind.Timeline && ChartLabels(op, dip) is { } chart)
+                    {
+                        layout.LabelPath = chart.Path;
+                        layout.LabelBox = chart.Box;
+                        paint = RectangleF.Union(paint, Inflate(chart.Box, HaloDip * dip + 2));
+                    }
                     if (op.Args.GetValueOrDefault("label") is { Length: > 0 } label)
                     {
                         var size = CursorRenderer.LabelSize(label, dip);
@@ -160,15 +274,8 @@ public static class DrawingRenderer
         switch (op.Kind)
         {
             case DrawOpKind.Text or DrawOpKind.Label when layout.TextBox is { } box && layout.TextPath is { } path:
-            {
-                var state = g.Save();
-                g.SetClip(new RectangleF(box.X - HaloDip * dip - 2, box.Y - HaloDip * dip - 2, (box.Width + 2 * HaloDip * dip + 4) * progress, box.Height + 2 * HaloDip * dip + 4));
-                using (var halo = new Pen(Fade(Color.White, HaloAlpha / 255f), 2 * HaloDip * dip) { LineJoin = LineJoin.Round })
-                    g.DrawPath(halo, path);
-                using (var fill = new SolidBrush(Fade(colour))) g.FillPath(fill, path);
-                g.Restore(state);
+                DrawTextPath(g, path, box, progress, dip, colour, alpha);
                 break;
-            }
             case DrawOpKind.Dot:
             {
                 var c = op.Points[0];
@@ -180,8 +287,29 @@ public static class DrawingRenderer
             case DrawOpKind.Point or DrawOpKind.Target when layout.Ring is { } ring:
                 CursorRenderer.DrawClickRing(g, ToRect(ring.Ring), ring.Corner, dip, colour, alpha * progress);
                 break;
+            case DrawOpKind.Spotlight when layout.Spot is { } spot:
+            {
+                using var dimmed = new GraphicsPath(FillMode.Alternate);
+                dimmed.AddRectangle(spot.Screen);
+                using (var clear = CursorRenderer.RoundedRect(spot.Hole, spot.Corner)) dimmed.AddPath(clear, false);
+                using var dim = new SolidBrush(Color.FromArgb((int)Math.Round(255 * SpotDim * progress * alpha), Color.Black));
+                g.FillPath(dim, dimmed);
+                break;
+            }
+            case DrawOpKind.Badge when layout.Badge is { } badge:
+                DrawBadge(g, badge, colour, dip, alpha * progress);
+                break;
+            case DrawOpKind.Button when layout.ButtonRect is { } buttonRect:
+                DrawButton(g, buttonRect, op.Text!, colour, dip, alpha * progress);
+                break;
+            case DrawOpKind.Card or DrawOpKind.Sticky when layout.Paper is { } paper:
+                DrawPaper(g, paper, dip, alpha * progress);
+                break;
             default:
                 DrawStrokes(g, layout, progress, colour, alpha);
+                // Tick numbers, axis titles and timeline items are written once the lines are mostly in.
+                if (layout.LabelPath is { } labels && layout.LabelBox is { } labelBox && progress > 0.5f)
+                    DrawTextPath(g, labels, labelBox, 1, dip, InkColour, alpha * Math.Min(1, (progress - 0.5f) * 2));
                 break;
         }
 
@@ -233,6 +361,7 @@ public static class DrawingRenderer
         for (var s = 0; s < visible.Count; s++)
         {
             var stroke = visible[s];
+            pen.Color = Color.FromArgb((int)Math.Round(255 * alpha), s < layout.StrokeColours.Count ? layout.StrokeColours[s] ?? colour : colour);
             var total = InkStyle.Length(layout.Strokes[s]);
             var along = 0f;
             for (var i = 1; i < stroke.Count; i++)
@@ -244,6 +373,165 @@ public static class DrawingRenderer
                 along += length;
             }
         }
+    }
+
+    /// <summary>Text drawn as a path: a white halo, then the fill; <paramref name="progress"/> uncovers it from the left.</summary>
+    private static void DrawTextPath(Graphics g, GraphicsPath path, RectangleF box, float progress, float dip, Color colour, float alpha)
+    {
+        Color Fade(Color c, float a = 1) => Color.FromArgb((int)Math.Round(c.A * a * alpha), c);
+        var state = g.Save();
+        g.SetClip(new RectangleF(box.X - HaloDip * dip - 2, box.Y - HaloDip * dip - 2, (box.Width + 2 * HaloDip * dip + 4) * progress, box.Height + 2 * HaloDip * dip + 4));
+        using (var halo = new Pen(Fade(Color.White, HaloAlpha / 255f), 2 * HaloDip * dip) { LineJoin = LineJoin.Round })
+            g.DrawPath(halo, path);
+        using (var fill = new SolidBrush(Fade(colour))) g.FillPath(fill, path);
+        g.Restore(state);
+    }
+
+    /// <summary>White on a dark fill, ink on a light one (the yellow accent).</summary>
+    private static Color OnColour(Color fill) => (0.299f * fill.R + 0.587f * fill.G + 0.114f * fill.B) > 160 ? InkColour : Color.White;
+
+    private static void DrawBadge(Graphics g, (PointF Centre, float Radius, string Text) badge, Color colour, float dip, float alpha)
+    {
+        Color Fade(Color c, float a = 1) => Color.FromArgb((int)Math.Round(c.A * a * alpha), c);
+        var disc = new RectangleF(badge.Centre.X - badge.Radius, badge.Centre.Y - badge.Radius, 2 * badge.Radius, 2 * badge.Radius);
+        using (var shadow = new SolidBrush(Fade(Color.Black, 0.18f)))
+            g.FillEllipse(shadow, disc.X, disc.Y + dip, disc.Width, disc.Height);
+        using (var fill = new SolidBrush(Fade(colour))) g.FillEllipse(fill, disc);
+        using (var rim = new Pen(Fade(Color.White, 0.9f), 1.5f * dip)) g.DrawEllipse(rim, disc);
+        using var text = new SolidBrush(Fade(OnColour(colour)));
+        g.DrawString(badge.Text, FontOf(Semibold.Family, Semibold.Style, BadgeTextDip * dip), text, disc, CentreFormat);
+    }
+
+    private static void DrawButton(Graphics g, RectangleF pill, string label, Color colour, float dip, float alpha)
+    {
+        Color Fade(Color c, float a = 1) => Color.FromArgb((int)Math.Round(c.A * a * alpha), c);
+        using (var shadow = new SolidBrush(Fade(Color.Black, 0.2f)))
+            CursorRenderer.FillRounded(g, shadow, new RectangleF(pill.X, pill.Y + 2 * dip, pill.Width, pill.Height), pill.Height / 2);
+        using (var fill = new SolidBrush(Fade(colour))) CursorRenderer.FillRounded(g, fill, pill, pill.Height / 2);
+        using var text = new SolidBrush(Fade(OnColour(colour)));
+        var inner = RectangleF.Inflate(pill, -ButtonPadDip * dip / 2, 0);
+        g.DrawString(label, FontOf(Semibold.Family, Semibold.Style, ButtonTextDip * dip), text, inner, CentreFormat);
+    }
+
+    /// <summary>
+    /// A card or sticky: a card is <c>w</c> wide (default 280 DIP) with a title and up to eight lines; a sticky is 160 DIP square.
+    /// The paper's top left is the anchor. Null when it has no text to show.
+    /// </summary>
+    private static PaperLayout? LayoutPaper(DrawOp op, string id, float dip, Pt anchor)
+    {
+        var sticky = op.Kind == DrawOpKind.Sticky;
+        var body = op.Text;
+        var title = sticky ? null : op.Args.GetValueOrDefault("title");
+        if (string.IsNullOrEmpty(body) && string.IsNullOrEmpty(title)) return null;
+        float pad = PaperPadDip * dip, width = sticky ? StickyDip * dip : op.Box.W > 0 ? op.Box.W : CardWidthDip * dip;
+        var inner = width - 2 * pad;
+        var titleFont = FontOf(Semibold.Family, Semibold.Style, TitleDip * dip);
+        var bodyFont = FontOf(HandFamily, FontStyle.Regular, BodyDip * dip);
+        var titleHeight = title is null ? 0 : titleFont.Height;
+        var lineLimit = MaxBodyLines * bodyFont.Height;
+        var bodyLimit = sticky ? Math.Min(lineLimit, inner) : lineLimit; // a sticky's text stays on the square
+        var bodyHeight = string.IsNullOrEmpty(body) ? 0 : Math.Min(bodyLimit, MathF.Ceiling(Measure.MeasureString(body, bodyFont, new SizeF(inner, bodyLimit), BodyFormat).Height));
+        var gap = title is null || bodyHeight == 0 ? 0 : PaperGapDip * dip;
+        var height = sticky ? width : 2 * pad + titleHeight + gap + bodyHeight;
+        var x = anchor.X;
+        var y = anchor.Y;
+        return new PaperLayout
+        {
+            Rect = new RectangleF(x, y, width, height),
+            TitleRect = new RectangleF(x + pad, y + pad, inner, titleHeight),
+            BodyRect = new RectangleF(x + pad, y + pad + titleHeight + gap, inner, sticky ? height - 2 * pad - titleHeight - gap : bodyHeight),
+            Title = title,
+            Body = body ?? "",
+            Fill = ColorTranslator.FromHtml(HelperGeometry.StockColour(op.Args.GetValueOrDefault("stock"), sticky)),
+            Tilt = HelperGeometry.TiltDegrees(id),
+        };
+    }
+
+    /// <summary>The four corners of <paramref name="rect"/> turned by <paramref name="degrees"/> about <paramref name="about"/>.</summary>
+    private static PointF[] Turned(RectangleF rect, float degrees, PointF about)
+    {
+        PointF[] corners = [new(rect.Left, rect.Top), new(rect.Right, rect.Top), new(rect.Right, rect.Bottom), new(rect.Left, rect.Bottom)];
+        using var turn = new Matrix();
+        turn.RotateAt(degrees, about);
+        turn.TransformPoints(corners);
+        return corners;
+    }
+
+    /// <summary>Paper on the screen: a soft shadow of three offset fills, the stock, ink text, and a strip of tape across the top edge, all tilted together.</summary>
+    private static void DrawPaper(Graphics g, PaperLayout paper, float dip, float alpha)
+    {
+        Color Fade(Color c, float a = 1) => Color.FromArgb((int)Math.Round(c.A * a * alpha), c);
+        var state = g.Save();
+        var centre = paper.Centre;
+        g.TranslateTransform(centre.X, centre.Y);
+        g.RotateTransform(paper.Tilt);
+        g.TranslateTransform(-centre.X, -centre.Y);
+
+        var rect = paper.Rect;
+        float[] shadowAlpha = [0.10f, 0.08f, 0.06f];
+        for (var i = 0; i < shadowAlpha.Length; i++)
+        {
+            var step = (i + 1) * dip;
+            using var shadow = new SolidBrush(Fade(Color.Black, shadowAlpha[i]));
+            CursorRenderer.FillRounded(g, shadow, new RectangleF(rect.X + step * 0.6f, rect.Y + step * 1.4f, rect.Width, rect.Height), PaperCornerDip * dip + step / 2);
+        }
+        using (var fill = new SolidBrush(Fade(paper.Fill))) CursorRenderer.FillRounded(g, fill, rect, PaperCornerDip * dip);
+        using (var edge = new Pen(Fade(InkColour, 0.12f), dip)) g.DrawRectangle(edge, rect.X, rect.Y, rect.Width, rect.Height);
+
+        using var ink = new SolidBrush(Fade(InkColour));
+        if (paper.Title is { } title)
+            g.DrawString(title, FontOf(Semibold.Family, Semibold.Style, TitleDip * dip), ink, paper.TitleRect, LineFormat);
+        if (paper.Body.Length > 0)
+            g.DrawString(paper.Body, FontOf(HandFamily, FontStyle.Regular, BodyDip * dip), ink, paper.BodyRect, BodyFormat);
+
+        var tape = new RectangleF(centre.X - TapeWidthDip * dip / 2, rect.Top - TapeHeightDip * dip / 2, TapeWidthDip * dip, TapeHeightDip * dip);
+        using (var strip = new SolidBrush(Fade(Color.White, 0.6f))) g.FillRectangle(strip, tape);
+        using (var stripEdge = new Pen(Fade(InkColour, 0.10f), dip)) g.DrawRectangle(stripEdge, tape.X, tape.Y, tape.Width, tape.Height);
+        g.Restore(state);
+    }
+
+    /// <summary>
+    /// Tick numbers and axis titles of a graph, or the items of a timeline (alternately above and below the line), as one text
+    /// path in the hand font. Null when there is nothing to write.
+    /// </summary>
+    private static (GraphicsPath Path, RectangleF Box)? ChartLabels(DrawOp op, float dip)
+    {
+        var px = ChartTextDip * dip;
+        var font = FontOf(HandFamily, FontStyle.Regular, px);
+        var path = new GraphicsPath();
+        RectangleF? box = null;
+        // anchor: 0 puts x at the text's left edge, 0.5 at its centre, 1 at its right edge.
+        void Put(string text, float x, float y, float anchor)
+        {
+            var size = Measure.MeasureString(text, font, 10_000, TextFormat);
+            var at = new PointF(x - size.Width * anchor, y);
+            path.AddString(text, font.FontFamily, (int)font.Style, px, at, TextFormat);
+            var written = new RectangleF(at, size);
+            box = box is { } b ? RectangleF.Union(b, written) : written;
+        }
+        var gap = ChartGapDip * dip;
+        if (op.Kind == DrawOpKind.Graph)
+        {
+            var (axes, _, ticks) = HelperGeometry.Graph(op);
+            for (var i = 0; i < ticks.Count; i++)
+            {
+                if (i < HelperGeometry.TickCount) Put(ticks[i].Text, ticks[i].At.X - gap, ticks[i].At.Y - px / 2, 1);
+                else Put(ticks[i].Text, ticks[i].At.X, ticks[i].At.Y + gap, 0.5f);
+            }
+            if (op.Args.GetValueOrDefault("ylabel") is { Length: > 0 } ylabel) Put(ylabel, axes[0].X, axes[0].Y - px - gap, 0);
+            if (op.Args.GetValueOrDefault("xlabel") is { Length: > 0 } xlabel) Put(xlabel, (axes[1].X + axes[2].X) / 2, axes[1].Y + 2 * gap + px, 0.5f);
+        }
+        else
+        {
+            var (_, items) = HelperGeometry.Timeline(op);
+            for (var i = 0; i < items.Count; i++)
+            {
+                var label = items[i].Label.Length > 24 ? items[i].Label[..23] + "…" : items[i].Label;
+                Put(label, items[i].Tick.X, i % 2 == 0 ? items[i].Tick.Y - 2 * gap - px : items[i].Tick.Y + 2 * gap, 0.5f);
+            }
+        }
+        if (box is not { } all) { path.Dispose(); return null; }
+        return (path, all);
     }
 
     private static float BandWidth(PartLayout layout)

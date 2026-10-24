@@ -444,13 +444,14 @@ public sealed class TalkOrchestrator : IDisposable
         await RunTurnAsync(null, wav, turn).ConfigureAwait(false);
     }
 
-    public Task SubmitTextAsync(string text, bool remember = true)
+    /// <param name="displayAs">What the chat shows as the user's message when it should differ from the request sent (a clicked drawing button shows its label).</param>
+    public Task SubmitTextAsync(string text, bool remember = true, string? displayAs = null)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (string.IsNullOrWhiteSpace(text)) return Task.CompletedTask;
         Cancel();
         var turn = _turnCts = new CancellationTokenSource();
-        return RunTurnAsync(text.Trim(), Array.Empty<byte>(), turn, remember);
+        return RunTurnAsync(text.Trim(), Array.Empty<byte>(), turn, remember, displayAs: displayAs);
     }
 
     public Task SubmitLocalTextAsync(string text)
@@ -620,7 +621,7 @@ public sealed class TalkOrchestrator : IDisposable
 
     private async Task RunTurnAsync(string? transcript, byte[] wav, CancellationTokenSource turn, bool remember = true,
         (int X, int Y, int Width, int Height)? selectedRegion = null, WalkthroughRequest? walkthrough = null,
-        bool publishRequestBeforeInterception = false)
+        bool publishRequestBeforeInterception = false, string? displayAs = null)
     {
         var token = turn.Token;
         var entered = false;
@@ -685,8 +686,8 @@ public sealed class TalkOrchestrator : IDisposable
             }
             if (!requestPublished)
             {
-                MessageReceived?.Invoke(screenFallback ? "Screen help" : "You", transcript!);
-                if (!screenFallback) displayedRequest = transcript;
+                MessageReceived?.Invoke(screenFallback ? "Screen help" : "You", !screenFallback && displayAs is { Length: > 0 } ? displayAs : transcript!);
+                if (!screenFallback) displayedRequest = displayAs is { Length: > 0 } ? displayAs : transcript;
             }
             if (walkthrough is null && !Walkthrough.View.Active && (transcript.StartsWith("show me how", StringComparison.OrdinalIgnoreCase)
                 || transcript.StartsWith("guide me", StringComparison.OrdinalIgnoreCase)))

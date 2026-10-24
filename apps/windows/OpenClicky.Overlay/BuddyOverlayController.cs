@@ -84,6 +84,11 @@ public sealed class BuddyOverlayController : IOverlayController
     private volatile bool _hasDrawing;
     private int _drawingGeneration;
     private readonly ClickCatcher _catcher;
+    /// <summary>One invisible click target over each drawn button (at most <see cref="DrawingRenderer.MaxButtons"/>).</summary>
+    private readonly ClickCatcher[] _buttonCatchers = new ClickCatcher[DrawingRenderer.MaxButtons];
+    private readonly Rectangle?[] _buttonRects = new Rectangle?[DrawingRenderer.MaxButtons];
+    private readonly (string Label, string Prompt)[] _buttonActions = new (string, string)[DrawingRenderer.MaxButtons];
+    private bool _buttonsLive;
     private readonly System.Windows.Forms.Timer _timer = new() { Interval = 16 };
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private CancellationTokenSource? _selectionCancellation;
@@ -144,6 +149,12 @@ public sealed class BuddyOverlayController : IOverlayController
         _drawing = new(log);
         _catcher = new("OpenClicky Companion Click");
         _catcher.Clicked += OnCatcherClicked;
+        for (var i = 0; i < _buttonCatchers.Length; i++)
+        {
+            var index = i;
+            _buttonCatchers[i] = new($"OpenClicky Drawing Button {i + 1}");
+            _buttonCatchers[i].Clicked += () => OnButtonClicked(index);
+        }
         _accent = ParseAccent(_style.AccentHex);
         _timer.Tick += (_, _) => Frame();
     }
@@ -163,8 +174,17 @@ public sealed class BuddyOverlayController : IOverlayController
     /// </summary>
     public Func<bool>? DetachSuppressed { get; set; }
 
-    /// <summary>Every overlay window exists from construction until disposal.</summary>
-    public IReadOnlyList<nint> WindowHandles => _disposed ? [] : [_cursorWindow.Handle, _drawingWindow.Handle, _catcher.Handle, _drawing.Handle];
+    /// <summary>
+    /// Raised (UI thread) with the label and the model-authored prompt when a drawn button is clicked. The prompt is untrusted
+    /// text: the subscriber runs it as an ordinary talk request, never with extra permission.
+    /// </summary>
+    public event Action<string, string>? ButtonClicked;
+
+    /// <summary>
+    /// Every overlay window exists from construction until disposal: the cursor, the marks and ring, the detach click target,
+    /// the ink, then the three drawing-button click targets (shown only over a live button).
+    /// </summary>
+    public IReadOnlyList<nint> WindowHandles => _disposed ? [] : [_cursorWindow.Handle, _drawingWindow.Handle, _catcher.Handle, _drawing.Handle, .. _buttonCatchers.Select(c => c.Handle)];
 
     /// <summary>The model's drawing window. Smoke / diagnostics only.</summary>
     public IntPtr DrawingHandle => _drawing.Handle;
@@ -362,6 +382,7 @@ public sealed class BuddyOverlayController : IOverlayController
             _flightPending = _pointTarget is not null;
             _pointArrived = false;
             HideCatcher();
+            HideButtons(); // synchronous like the windows: nothing of ours is left to take a click before a capture
             _cursorShown = false;
             ApplyDockEffect(_dock.Interrupt()); // docking is abandoned; the next appearance grows out of the notch
             DropDetach();
@@ -386,6 +407,7 @@ public sealed class BuddyOverlayController : IOverlayController
             _drawingWindow.Dispose();
             _drawing.Dispose();
             _catcher.Dispose();
+            foreach (var button in _buttonCatchers) button.Dispose();
             _cursorBitmap?.Dispose();
             _drawingBitmap?.Dispose();
             _ui.Dispose();
@@ -497,7 +519,50 @@ public sealed class BuddyOverlayController : IOverlayController
         DrawCursorFrame(now, dt);
         var drawingAnimating = DrawDrawingFrame(now);
         var inkAnimating = _drawing.Render(now, _accent, _style.ReducedMotion);
-        if (!CursorVisible && !drawingAnimating && !inkAnimating) _timer.Stop();
+        SyncButtons();
+        // ponytail: with a live button the timer keeps ticking (cheap) so a starting agent task takes the click targets down.
+        if (!CursorVisible && !drawingAnimating && !inkAnimating && !_buttonsLive) _timer.Stop();
+    }
+
+    /// <summary>
+    /// Puts a click target over each fully drawn button and takes the rest down. None is up while an agent task runs: it injects
+    /// clicks of its own, and a target on top of a button would swallow one.
+    /// </summary>
+    private void SyncButtons()
+    {
+        var live = DetachSuppressed?.Invoke() == true ? Array.Empty<(string Label, string Prompt, Rectangle Rect)>() : _drawing.LiveButtons();
+        _buttonsLive = live.Count > 0;
+        for (var i = 0; i < _buttonCatchers.Length; i++)
+        {
+            if (i >= live.Count)
+            {
+                HideButton(i);
+                continue;
+            }
+            _buttonActions[i] = (live[i].Label, live[i].Prompt);
+            if (_buttonRects[i] == live[i].Rect && _buttonCatchers[i].IsShown) continue;
+            _buttonCatchers[i].Show(live[i].Rect);
+            _buttonRects[i] = live[i].Rect;
+        }
+    }
+
+    private void HideButton(int index)
+    {
+        _buttonCatchers[index].Hide();
+        _buttonRects[index] = null;
+    }
+
+    private void HideButtons()
+    {
+        for (var i = 0; i < _buttonCatchers.Length; i++) HideButton(i);
+        _buttonsLive = false;
+    }
+
+    private void OnButtonClicked(int index)
+    {
+        if (_disposed || _hidden || DetachSuppressed?.Invoke() == true || _buttonRects[index] is null) return;
+        var (label, prompt) = _buttonActions[index];
+        ButtonClicked?.Invoke(label, prompt);
     }
 
     private void DrawCursorFrame(double now, double dt)
