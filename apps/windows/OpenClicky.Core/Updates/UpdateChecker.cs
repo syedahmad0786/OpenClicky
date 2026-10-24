@@ -27,6 +27,8 @@ public sealed class UpdateChecker
 
     public async Task<UpdateCheckResult?> CheckAsync(CancellationToken ct)
     {
+        // Fail closed: if we cannot tell which version is running, never claim an update is available.
+        if (ParseSemVer(_currentVersion) is null) return null;
         try
         {
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -69,7 +71,7 @@ public sealed class UpdateChecker
         }
 
         var release = new ReleaseInfo(version, tag.Trim(), page, zipUrl, zipSize, Str(root, "body"));
-        var current = ParseSemVer(_currentVersion) ?? new SemVer(0, 0, 0, null);
+        var current = ParseSemVer(_currentVersion)!.Value; // validated in CheckAsync
         return new(latest.CompareTo(current) > 0 ? UpdateStatus.Available : UpdateStatus.UpToDate, release);
     }
 
@@ -80,54 +82,63 @@ public sealed class UpdateChecker
     /// </summary>
     public async Task<string?> DownloadAsync(ReleaseInfo release, string targetDirectory, IProgress<double>? progress, CancellationToken ct)
     {
-        if (release.PortableZipUrl is not { } url || !IsAllowedHost(url)) return null;
-        string? path = null;
+        if (release.PortableZipUrl is not { } url || !IsInitialHost(url)) return null;
+        string? part = null;
         try
         {
             Directory.CreateDirectory(targetDirectory);
             var safe = string.Concat(release.Version.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
-            path = Path.Combine(targetDirectory, $"OpenClicky-{safe}-portable.zip");
+            var path = Path.Combine(targetDirectory, $"OpenClicky-{safe}-portable.zip");
+            part = path + ".part"; // a failed attempt must never clobber a previously downloaded good ZIP
 
             using var request = NewRequest(url.ToString(), "application/octet-stream");
             using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode) return null;
-            // Redirects (github.com -> *.githubusercontent.com) must stay on GitHub too.
-            if (response.RequestMessage?.RequestUri is { } finalUri && !IsAllowedHost(finalUri)) return null;
+            // After redirects the final host must still be GitHub's; an unknown final URI is a failure.
+            if (response.RequestMessage?.RequestUri is not { } finalUri || !IsFinalHost(finalUri)) return null;
             var total = response.Content.Headers.ContentLength ?? release.PortableZipSize;
             if (total > MaxDownloadBytes) return null;
 
             long written = 0;
             await using (var source = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false))
-            await using (var file = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None))
+            await using (var file = new FileStream(part, FileMode.Create, FileAccess.Write, FileShare.None))
             {
                 var buffer = new byte[81920];
                 int read;
                 while ((read = await source.ReadAsync(buffer, ct).ConfigureAwait(false)) > 0)
                 {
                     written += read;
-                    if (written > MaxDownloadBytes) { file.Close(); Discard(path); return null; }
+                    if (written > MaxDownloadBytes) return null;
                     await file.WriteAsync(buffer.AsMemory(0, read), ct).ConfigureAwait(false);
                     if (total > 0) progress?.Report(Math.Min(1.0, written / (double)total.Value));
                 }
             }
 
-            if (release.PortableZipSize is { } expected && expected != written) { Discard(path); return null; }
-            if (!ContainsExe(path)) { Discard(path); return null; }
+            if (release.PortableZipSize is { } expected && expected != written) return null;
+            if (!ContainsExe(part)) return null;
+            File.Move(part, path, overwrite: true);
+            part = null;
             progress?.Report(1.0);
             return path;
         }
-        catch (OperationCanceledException) { Discard(path); throw; }
+        // Only the caller's cancellation propagates; HttpClient's own timeout (also a TaskCanceledException) is a failed download.
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return null; }
         catch (Exception e) when (e is HttpRequestException or IOException or UnauthorizedAccessException or InvalidDataException or NotSupportedException)
         {
-            Discard(path);
             return null;
+        }
+        finally
+        {
+            Discard(part);
         }
     }
 
-    // github.com and its asset CDN (objects.githubusercontent.com, or the release-assets.* host GitHub redirects to today).
-    private static bool IsAllowedHost(Uri u) =>
-        u.Scheme == Uri.UriSchemeHttps &&
-        (u.Host == "github.com" || u.Host == "githubusercontent.com" || u.Host.EndsWith(".githubusercontent.com", StringComparison.Ordinal));
+    // The URL we are asked to fetch must be github.com itself; only redirects may reach the asset CDN.
+    private static bool IsInitialHost(Uri u) => u.Scheme == Uri.UriSchemeHttps && u.Host == "github.com";
+
+    private static readonly string[] FinalHosts = ["github.com", "objects.githubusercontent.com", "release-assets.githubusercontent.com"];
+
+    private static bool IsFinalHost(Uri u) => u.Scheme == Uri.UriSchemeHttps && FinalHosts.Contains(u.Host);
 
     private static bool ContainsExe(string zipPath)
     {
@@ -156,7 +167,7 @@ public sealed class UpdateChecker
 
     private static string StripV(string v) => v.Length > 0 && (v[0] == 'v' || v[0] == 'V') ? v[1..] : v;
 
-    /// <summary>major.minor.patch (missing = 0), optional -pre-release; +build metadata ignored.</summary>
+    /// <summary>major.minor.patch[.revision ignored] (missing = 0), optional -pre-release; +build metadata ignored.</summary>
     private static SemVer? ParseSemVer(string v)
     {
         var plus = v.IndexOf('+');
@@ -165,8 +176,8 @@ public sealed class UpdateChecker
         var dash = v.IndexOf('-');
         if (dash >= 0) { pre = v[(dash + 1)..]; v = v[..dash]; }
         var parts = v.Split('.');
-        if (parts.Length > 3) return null;
-        var n = new int[3];
+        if (parts.Length > 4) return null; // a 4th numeric part (0.6.0.0 from assembly versions) is accepted and ignored
+        var n = new int[4];
         for (var i = 0; i < parts.Length; i++)
             if (!int.TryParse(parts[i], NumberStyles.None, CultureInfo.InvariantCulture, out n[i])) return null;
         return new SemVer(n[0], n[1], n[2], string.IsNullOrEmpty(pre) ? null : pre);

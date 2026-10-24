@@ -20,7 +20,9 @@ public sealed class UpdateCheckerTests : IDisposable
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             Requests.Add(request);
-            return Task.FromResult(respond(request));
+            var response = respond(request);
+            response.RequestMessage ??= request; // HttpClientHandler does this; a redirect test sets its own final request
+            return Task.FromResult(response);
         }
     }
 
@@ -207,6 +209,7 @@ public sealed class UpdateCheckerTests : IDisposable
     [InlineData("https://evil.example.com/p.zip")]
     [InlineData("http://github.com/p.zip")]
     [InlineData("https://github.com.evil.com/p.zip")]
+    [InlineData("https://x.githubusercontent.com.evil.com/p.zip")]
     public async Task DownloadRejectsNonGitHubHosts(string url)
     {
         var handler = new FakeHandler(_ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(MakeZip("OpenClicky.exe")) });
@@ -216,11 +219,121 @@ public sealed class UpdateCheckerTests : IDisposable
     }
 
     [Fact]
-    public async Task DownloadAllowsObjectsHostAndUnknownSize()
+    public async Task DownloadAllowsUnknownSize()
     {
         var zip = MakeZip("OpenClicky.exe");
-        var path = await Downloader(zip).DownloadAsync(Release("https://objects.githubusercontent.com/p.zip", null), _dir, null, CancellationToken.None);
+        var path = await Downloader(zip).DownloadAsync(Release("https://github.com/x/p.zip", null), _dir, null, CancellationToken.None);
         Assert.NotNull(path);
+    }
+
+    [Theory]
+    [InlineData("https://objects.githubusercontent.com/p.zip")]
+    [InlineData("https://release-assets.githubusercontent.com/p.zip")]
+    public async Task DownloadAcceptsRedirectToGitHubAssetHosts(string finalUrl)
+    {
+        var zip = MakeZip("OpenClicky.exe");
+        var path = await RedirectingDownloader(zip, finalUrl).DownloadAsync(Release("https://github.com/x/p.zip", zip.Length), _dir, null, CancellationToken.None);
+        Assert.NotNull(path);
+        Assert.Empty(Directory.GetFiles(_dir, "*.part"));
+    }
+
+    [Theory]
+    [InlineData("https://evil.example/p.zip")]
+    [InlineData("https://objects.githubusercontent.com.evil.com/p.zip")]
+    [InlineData("https://other.githubusercontent.com/p.zip")]
+    [InlineData("http://objects.githubusercontent.com/p.zip")]
+    public async Task DownloadRejectsRedirectToOtherHostsAndLeavesNoFile(string finalUrl)
+    {
+        var zip = MakeZip("OpenClicky.exe");
+        var path = await RedirectingDownloader(zip, finalUrl).DownloadAsync(Release("https://github.com/x/p.zip", zip.Length), _dir, null, CancellationToken.None);
+        Assert.Null(path);
+        Assert.Empty(Directory.GetFiles(_dir));
+    }
+
+    [Fact]
+    public async Task DownloadWithNoFinalRequestUriIsFailure()
+    {
+        var handler = new NullRequestMessageHandler(MakeZip("OpenClicky.exe"));
+        var path = await new UpdateChecker(new HttpClient(handler), "1.0.0").DownloadAsync(Release("https://github.com/x/p.zip", null), _dir, null, CancellationToken.None);
+        Assert.Null(path);
+        Assert.Empty(Directory.GetFiles(_dir));
+    }
+
+    [Fact]
+    public async Task DownloadFromAssetCdnAsInitialUrlIsRejected()
+    {
+        var zip = MakeZip("OpenClicky.exe");
+        Assert.Null(await Downloader(zip).DownloadAsync(Release("https://objects.githubusercontent.com/p.zip", null), _dir, null, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task HttpClientTimeoutDuringDownloadReturnsNullWithoutFile()
+    {
+        var handler = new FakeHandler(_ => throw new TaskCanceledException("timeout"));
+        var path = await new UpdateChecker(new HttpClient(handler), "1.0.0").DownloadAsync(Release("https://github.com/x/p.zip", 10), _dir, null, CancellationToken.None);
+        Assert.Null(path);
+        Assert.Empty(Directory.GetFiles(_dir));
+    }
+
+    [Fact]
+    public async Task CallerCancellationDuringDownloadPropagatesWithoutFile()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        var handler = new CancelAwareHandler();
+        var checker = new UpdateChecker(new HttpClient(handler), "1.0.0");
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => checker.DownloadAsync(Release("https://github.com/x/p.zip", 10), _dir, null, cts.Token));
+        Assert.Empty(Directory.GetFiles(_dir));
+    }
+
+    [Fact]
+    public async Task FailedRedownloadKeepsPreviousGoodZip()
+    {
+        var good = MakeZip("OpenClicky.exe");
+        var first = await Downloader(good).DownloadAsync(Release("https://github.com/x/p.zip", good.Length), _dir, null, CancellationToken.None);
+        Assert.NotNull(first);
+        var bad = MakeZip("nope.txt");
+        Assert.Null(await Downloader(bad).DownloadAsync(Release("https://github.com/x/p.zip", bad.Length), _dir, null, CancellationToken.None));
+        Assert.Equal(good, await File.ReadAllBytesAsync(first!));
+        Assert.Single(Directory.GetFiles(_dir));
+    }
+
+    private UpdateChecker RedirectingDownloader(byte[] body, string finalUrl) =>
+        new(new HttpClient(new FakeHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(body),
+            RequestMessage = new HttpRequestMessage(HttpMethod.Get, finalUrl),
+        })), "1.0.0");
+
+    private sealed class NullRequestMessageHandler(byte[] body) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(body) });
+    }
+
+    // ---- current-version parsing ----
+
+    [Theory]
+    [InlineData("0.6.0.0", "v0.6.1", true)]
+    [InlineData("0.6.0.0", "v0.6.0", false)]
+    [InlineData("0.6.0.3", "v0.6.0", false)]
+    [InlineData("1.0.0.0+abc", "v1.0.1", true)]
+    public async Task FourPartCurrentVersionIsAccepted(string current, string tag, bool newer)
+    {
+        var result = await Checker(ReleaseJson(tag), current, out _).CheckAsync(CancellationToken.None);
+        Assert.Equal(newer ? UpdateStatus.Available : UpdateStatus.UpToDate, result!.Status);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("dev")]
+    [InlineData("1.x.0")]
+    [InlineData("1.2.3.4.5")]
+    public async Task UnparseableCurrentVersionFailsClosedWithoutRequest(string current)
+    {
+        var checker = Checker(ReleaseJson("v9.0.0"), current, out var handler);
+        Assert.Null(await checker.CheckAsync(CancellationToken.None));
+        Assert.Empty(handler.Requests);
     }
 
     [Fact]
