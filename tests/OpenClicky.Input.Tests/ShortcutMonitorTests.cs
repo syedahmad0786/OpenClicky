@@ -104,10 +104,13 @@ public class ShortcutMonitorTests
     [Fact]
     public void TheHookThreadRunsQueuedCallsAndEndsARecordingOnStop()
     {
-        // No SynchronizationContext here: events run on the hook thread itself; Stop joins it.
+        // Clear xunit's context so events run on the hook thread itself; Stop joins it.
         using var monitor = new ShortcutMonitor();
         var calls = new List<HotkeyBinding?>();
-        monitor.Start();
+        var previous = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(null);
+        try { monitor.Start(); }
+        finally { SynchronizationContext.SetSynchronizationContext(previous); }
         var moved = ShortcutBindings.Default with { Talk = new HotkeyBinding(["Ctrl", "Shift"], HotkeyTrigger.Hold) };
         monitor.Bindings = moved;
         monitor.Record(ShortcutAction.Talk, calls.Add);

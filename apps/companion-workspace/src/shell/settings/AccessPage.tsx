@@ -28,7 +28,7 @@ export function AccessPage({ state }: { state: ShellState }) {
       <Group title="Protected windows">
         <div className="settings-field">
           <label className="settings-field__label" htmlFor="settings-denylist">Protected window titles</label>
-          <span className="settings-field__hint">One per line. OpenClicky will not look at or act in windows whose title contains one of these, on any display. A display showing one is left out of what Talk sends.</span>
+          <span className="settings-field__hint">One per line. OpenClicky will not act in a window whose title contains one of these, and Talk leaves out any display showing one. An area you select yourself is sent as you selected it.</span>
           <textarea id="settings-denylist" className="settings-input settings-input--area" rows={5} maxLength={2000} spellCheck={false}
             value={deny} onChange={(e) => setDeny(e.target.value)}
             onBlur={() => { if (deny !== a.denyList) patch("access.denyList", deny); }} />
