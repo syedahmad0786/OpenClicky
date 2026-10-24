@@ -131,8 +131,9 @@ public sealed class ShortcutStateMachine
         return commands;
     }
 
-    /// <summary>Any physical mouse button went down: poisons the current key session (Ctrl+click is not a Ctrl tap)
-    /// and forgets a half-done double-tap.</summary>
+    /// <summary>Any physical mouse button went down: poisons the current key session for everything that has not
+    /// fired yet (Ctrl+click is not a Ctrl tap; a hold still inside its 150 ms never starts) and forgets a half-done
+    /// double-tap. An already running hold stays active through clicks and drags and ends normally on release.</summary>
     public IReadOnlyList<ShortcutCommand> OnMouseButton(long nowMs)
     {
         var commands = new List<ShortcutCommand>();
@@ -265,7 +266,8 @@ public sealed class ShortcutStateMachine
 
     private void Update(Slot slot, HashSet<string> pressed, long nowMs, List<ShortcutCommand> commands)
     {
-        var poisoned = _sessionKeys.Any(k => !slot.Contains(k));
+        // A click poisons only what has not started: a running hold keeps going (sub-project C draws while talking).
+        var poisoned = _sessionKeys.Any(k => !slot.Contains(k) && !(slot.Held && k == MouseButton));
         var exact = !poisoned && pressed.Count == slot.Binding.Keys.Count && pressed.All(slot.Contains);
         if (exact)
         {

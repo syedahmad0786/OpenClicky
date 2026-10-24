@@ -365,6 +365,25 @@ public class ShortcutStateMachineTests
     }
 
     [Fact]
+    public void ClicksDuringAnActiveHoldKeepTalking()
+    {
+        var d = new Driver();
+        d.Down(LCtrl); d.Down(LAlt);
+        Assert.Equal([Cmd(K.TalkStart)], d.Wait(300));
+        Assert.Empty(d.Machine.OnMouseButton(d.Now + 10)); // drawing on screen while holding talk
+        Assert.Empty(d.Machine.OnMouseButton(d.Now + 200));
+        d.Wait(700);
+        Assert.Equal([Cmd(K.TalkEnd)], d.Up(LAlt)); // a normal end: the turn is sent
+        d.Up(LCtrl);
+
+        // The click still poisons the rest of that session: Ctrl+Alt down again after the hold ended does not restart.
+        d.Down(LCtrl, 1000); d.Down(LAlt); d.Wait(300);
+        d.Machine.OnMouseButton(d.Now);
+        d.Up(LAlt); d.Wait(50); d.Down(LAlt); d.Wait(500); d.Up(LAlt); d.Up(LCtrl);
+        Assert.Equal([Cmd(K.TalkStart), Cmd(K.TalkEnd), Cmd(K.TalkStart), Cmd(K.TalkEnd, true)], d.All);
+    }
+
+    [Fact]
     public void ChangingBindingsKeepsUnchangedShortcutsAndCancelsChangedOnes()
     {
         var d = new Driver();
