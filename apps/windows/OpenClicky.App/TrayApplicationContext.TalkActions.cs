@@ -8,22 +8,32 @@ namespace OpenClicky.App;
 /// <summary>Runs the [OPEN]/[COPY]/[TYPE] actions in a talk reply under the access mode the reply arrived with.</summary>
 internal sealed partial class TrayApplicationContext
 {
-    /// <summary>(int)mode + 1 snapshotted when the turn's reply arrives, 0 when none; any thread.</summary>
-    private int _talkReplyAccess;
     /// <summary>UI thread: the last talk copy, for its Undo.</summary>
     private (string? Previous, string Copied)? _talkCopy;
 
+    /// <summary>UI thread: the clipboard text from before a reply first changed it (muted-speaker copy or a COPY tag).</summary>
+    private sealed class ReplyClipboard
+    {
+        public bool Captured;
+        public string? Original;
+
+        public void CaptureOnce()
+        {
+            if (Captured) return;
+            Original = Clipboard.ContainsText() ? Clipboard.GetText(TextDataFormat.UnicodeText) : null;
+            Captured = true;
+        }
+    }
+
+    /// <summary>UI thread: replaced when a turn starts processing.</summary>
+    private ReplyClipboard _replyClipboard = new();
+
     private void WireTalkActions()
     {
-        // Raised on the turn's thread right after parsing, before speech: the mode the reply was received under.
-        _talk.AssistantResponseChanged += (_, complete) =>
+        // The orchestrator snapshots the mode when the reply arrives; a later change can only narrow it.
+        _talk.ActionsRequested += (actions, replyAccess) =>
         {
-            if (complete) Interlocked.Exchange(ref _talkReplyAccess, (int)_settings.AgentAccess + 1);
-        };
-        _talk.ActionsRequested += actions =>
-        {
-            var snapshot = Interlocked.Exchange(ref _talkReplyAccess, 0);
-            var mode = TalkActionPolicy.EffectiveMode(snapshot == 0 ? null : (AgentAccessMode)(snapshot - 1), _settings.AgentAccess);
+            var mode = TalkActionPolicy.EffectiveMode(replyAccess, _settings.AgentAccess);
             _uiContext.Post(_ => _ = RunTalkActionsAsync(actions, mode), null);
         };
     }
@@ -31,6 +41,7 @@ internal sealed partial class TrayApplicationContext
     /// <summary>UI thread, one action at a time. A failed action shows a notice and never reaches the tray.</summary>
     private async Task RunTalkActionsAsync(IReadOnlyList<TalkAction> actions, AgentAccessMode mode)
     {
+        var clipboard = _replyClipboard; // posted in order with the turn's state changes: still this reply's
         foreach (var action in actions)
         {
             try
@@ -49,11 +60,11 @@ internal sealed partial class TrayApplicationContext
                         await TypeTalkTextAsync(action, ask: true);
                         break;
                     case TalkActionDecision.AskFirst:
-                        if (await _confirm.ConfirmTalkAsync(TalkActionText.ConfirmSummary(action), restoreTarget: false, _lifetime.Token)) RunTalkAction(action, asked: true);
+                        if (await _confirm.ConfirmTalkAsync(TalkActionText.ConfirmSummary(action), restoreTarget: false, _lifetime.Token)) RunTalkAction(action, asked: true, clipboard);
                         break;
                     default:
                         if (action.Kind == TalkActionKind.Type) await TypeTalkTextAsync(action, ask: false);
-                        else RunTalkAction(action, asked: false);
+                        else RunTalkAction(action, asked: false, clipboard);
                         break;
                 }
             }
@@ -71,9 +82,9 @@ internal sealed partial class TrayApplicationContext
         }
     }
 
-    private void RunTalkAction(TalkAction action, bool asked)
+    private void RunTalkAction(TalkAction action, bool asked, ReplyClipboard clipboard)
     {
-        if (action.Kind == TalkActionKind.Copy) { CopyTalkText(action.Value); return; }
+        if (action.Kind == TalkActionKind.Copy) { CopyTalkText(action.Value, clipboard); return; }
         // The parser validated it; check again right before handing it to the shell.
         if (!Uri.TryCreate(action.Value, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https") || uri.UserInfo.Length != 0)
         {
@@ -84,11 +95,12 @@ internal sealed partial class TrayApplicationContext
         if (!asked) ShowTalkActionCard(TalkActionText.Opened(uri.AbsoluteUri));
     }
 
-    private void CopyTalkText(string text)
+    /// <summary>Undo puts back what the user had before this reply touched the clipboard, not an earlier COPY of the same reply.</summary>
+    private void CopyTalkText(string text, ReplyClipboard clipboard)
     {
-        var previous = Clipboard.ContainsText() ? Clipboard.GetText(TextDataFormat.UnicodeText) : null;
+        clipboard.CaptureOnce();
         Clipboard.SetText(text, TextDataFormat.UnicodeText);
-        _talkCopy = (previous, text);
+        _talkCopy = (clipboard.Original, text);
         if (_shell is { IsActive: true }) _shell.AddCard(TalkActionText.Copied(text));
         else _home.AddMessage("OpenClicky", TalkActionText.Copied(text).Title);
     }
@@ -139,6 +151,12 @@ internal sealed partial class TrayApplicationContext
         if (!await WaitForModifiersReleasedAsync(_lifetime.Token))
         {
             TalkActionNotice("I didn't type it because keys were still held down.");
+            return;
+        }
+        // A task may have started or resumed while the dialog was open or keys were held: it may be typing too.
+        if (_taskCts is not null && !_taskControl.IsPaused)
+        {
+            ShowTalkActionCard(TalkActionText.TypeHeldForTask(action));
             return;
         }
         var text = TalkActionText.SanitizeForTyping(action.Value);

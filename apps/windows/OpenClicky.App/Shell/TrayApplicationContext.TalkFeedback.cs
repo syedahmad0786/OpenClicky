@@ -36,7 +36,7 @@ internal sealed partial class TrayApplicationContext
                 Interlocked.Exchange(ref _speakerCheckArmed, state == CompanionVoiceState.Processing ? 1 : 0);
             OnUi(() =>
             {
-                if (state == CompanionVoiceState.Processing) { _replyText = null; _copyReplyPending = false; }
+                if (state == CompanionVoiceState.Processing) { _replyText = null; _copyReplyPending = false; _replyClipboard = new(); }
                 if (CaptionsPolicy.ClearOnState(state)) _shell?.ClearCaptions();
             });
         };
@@ -76,7 +76,7 @@ internal sealed partial class TrayApplicationContext
     {
         _copyReplyPending = false;
         if (string.IsNullOrWhiteSpace(_replyText)) return false;
-        try { Clipboard.SetText(_replyText, TextDataFormat.UnicodeText); return true; }
+        try { _replyClipboard.CaptureOnce(); Clipboard.SetText(_replyText, TextDataFormat.UnicodeText); return true; }
         catch (Exception ex) when (ex is System.Runtime.InteropServices.ExternalException or ThreadStateException)
         { Log("speaker_silent_copy_error=" + ex.GetType().Name); return false; }
     }

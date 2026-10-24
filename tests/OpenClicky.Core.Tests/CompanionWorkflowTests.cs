@@ -20,7 +20,7 @@ public class CompanionWorkflowTests
                 () => new Talk((_, _) => Task.FromResult("Opening it now. [OPEN:https://example.com] Copied. [COPY:hi there] [POINT:none]")), tts,
                 () => new AppSettings { PersistConversationHistory = true, SpeakReplies = true }, log: _ => { }, historyPath: historyPath);
             talk.MessageReceived += (role, text) => { if (role == "OpenClicky") messages.Add(text); };
-            talk.ActionsRequested += raised.Add;
+            talk.ActionsRequested += (a, _) => raised.Add(a);
             await talk.SubmitTextAsync("open example and copy hi");
             var saved = Assert.Single(ConversationHistoryStore.Load(historyPath, 100));
             Assert.Equal("Opening it now. Copied.", saved.assistant);
@@ -30,6 +30,27 @@ public class CompanionWorkflowTests
             Assert.Equal([new TalkAction(TalkActionKind.Open, "https://example.com/"), new TalkAction(TalkActionKind.Copy, "hi there")], actions);
         }
         finally { ConversationHistoryStore.Clear(historyPath); }
+    }
+
+    [Fact]
+    public async Task ActionsCarryTheAccessModeTheReplyArrivedWith()
+    {
+        var settings = new AppSettings { PersistConversationHistory = false, SpeakReplies = true, AgentAccess = AgentAccessMode.ConfirmEach };
+        AgentAccessMode? raisedMode = null;
+        using var talk = new TalkOrchestrator(new Hotkey(), new Overlay(), new Capture(), new Mic(), () => null,
+            () => new Talk((_, _) => Task.FromResult("Typing it. [TYPE:hi] [POINT:none]")),
+            new WideningTts(() => settings.AgentAccess = AgentAccessMode.FullAccess), // widened while the reply is spoken
+            () => settings, log: _ => { });
+        talk.ActionsRequested += (_, mode) => raisedMode = mode;
+        await talk.SubmitTextAsync("type hi", false);
+        Assert.Equal(AgentAccessMode.ConfirmEach, raisedMode);
+        Assert.Equal(AgentAccessMode.FullAccess, settings.AgentAccess);
+    }
+
+    private sealed class WideningTts(Action onSpeak) : ITtsClient
+    {
+        public Task SpeakAsync(string text, CancellationToken token = default) { onSpeak(); return Task.CompletedTask; }
+        public void Stop() { }
     }
 
     [Fact]
@@ -765,7 +786,7 @@ public class CompanionWorkflowTests
             () => new StreamingTalk(["Done.", @"Done. [COPY:a \] b", "Done. " + tag + " Next.", "Done. " + tag + " Next."]),
             tts, () => new AppSettings { PersistConversationHistory = false, SpeakReplies = true }, log: _ => { });
         talk.AssistantResponseChanged += (text, complete) => { if (!complete) partials.Add(text); };
-        talk.ActionsRequested += _ => raised++;
+        talk.ActionsRequested += (_, _) => raised++;
 
         await talk.SubmitTextAsync("copy it", false);
 
@@ -786,7 +807,7 @@ public class CompanionWorkflowTests
             tts, () => new AppSettings { PersistConversationHistory = false, SpeakReplies = true }, log: _ => { });
         talk.AssistantResponseChanged += (text, complete) => { if (!complete) partials.Add(text); };
         IReadOnlyList<TalkAction>? actions = null;
-        talk.ActionsRequested += a => actions = a;
+        talk.ActionsRequested += (a, _) => actions = a;
 
         await talk.SubmitTextAsync("open and type", false);
 

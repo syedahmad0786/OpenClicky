@@ -26,9 +26,11 @@ public static class TalkActionText
         return line[..cut] + "…";
     }
 
-    /// <summary>The address as shown, plus the punycode host when the host has non-ASCII letters (lookalike domains).</summary>
+    /// <summary>The address as shown, plus the punycode host when the host has non-ASCII letters (lookalike domains).
+    /// IP literals have no letters to fake (IdnHost drops an IPv6 literal's brackets, which is not a difference).</summary>
     public static string DescribeUrl(string url) =>
-        Uri.TryCreate(url, UriKind.Absolute, out var uri) && !string.Equals(uri.IdnHost, uri.Host, StringComparison.OrdinalIgnoreCase)
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.HostNameType == UriHostNameType.Dns
+        && !string.Equals(uri.IdnHost, uri.Host, StringComparison.OrdinalIgnoreCase)
             ? url + "\r\n(the site's real address is " + uri.IdnHost + ")"
             : url;
 

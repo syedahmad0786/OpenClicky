@@ -61,6 +61,9 @@ public class TalkActionTextTests
         Assert.Contains("xn--pple-43d.com", TalkActionText.Opened(cyrillic).Body);
         Assert.Contains("xn--pple-43d.com", TalkActionText.Preview(new(TalkActionKind.Open, cyrillic)).Body);
         Assert.Equal("https://example.com/", TalkActionText.DescribeUrl("https://example.com/"));
+        Assert.Equal("http://[::1]:8080/", TalkActionText.DescribeUrl("http://[::1]:8080/"));
+        Assert.Equal("http://[2001:db8::1]/a", TalkActionText.DescribeUrl("http://[2001:db8::1]/a"));
+        Assert.Equal("http://192.168.0.1/", TalkActionText.DescribeUrl("http://192.168.0.1/"));
     }
 
     [Fact]
