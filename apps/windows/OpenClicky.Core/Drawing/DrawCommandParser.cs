@@ -5,8 +5,8 @@ namespace OpenClicky.Core.Drawing;
 
 /// <summary>
 /// Extracts <c>[DRAW:&lt;op&gt; key=value …]</c> tags from a reply. Every tag is removed from the returned text; only valid
-/// ones (the first 24 tags, at most 3 buttons) become ops. A tag ends at the first unescaped ']' and never crosses a line
-/// break, so an unclosed tag or quote cannot swallow the rest of the reply. Model output is untrusted: anything malformed,
+/// ones (the first 24 tags, at most 3 buttons) become ops. A tag ends at the first unescaped ']' outside double quotes and
+/// never crosses a line break, so an unclosed tag or quote cannot swallow the rest of the reply. Model output is untrusted: anything malformed,
 /// unknown or out of range drops the whole tag.
 /// </summary>
 public static class DrawCommandParser
@@ -83,13 +83,20 @@ public static class DrawCommandParser
         return ops;
     }
 
-    /// <summary>Index of the closing ']', or of the line break / end of text when the tag is unclosed. A backslash escapes the next character.</summary>
+    /// <summary>
+    /// Index of the closing ']' (outside double quotes), or of the line break / end of text when the tag is unclosed.
+    /// A backslash escapes the next character; a line break always ends the tag, even inside an unterminated quote.
+    /// </summary>
     private static int FindClose(string s, int start)
     {
+        var quoted = false;
         for (var j = start; j < s.Length; j++)
         {
-            if (s[j] == '\\' && j + 1 < s.Length && s[j + 1] is not ('\r' or '\n')) j++;
-            else if (s[j] is ']' or '\r' or '\n') return j;
+            var c = s[j];
+            if (c is '\r' or '\n') return j;
+            if (c == '\\' && j + 1 < s.Length && s[j + 1] is not ('\r' or '\n')) j++;
+            else if (c == '"') quoted = !quoted;
+            else if (c == ']' && !quoted) return j;
         }
         return s.Length;
     }
@@ -249,6 +256,11 @@ public static class DrawCommandParser
         return true;
     }
 
+    /// <summary>Bidi embedding/override/isolate controls and directional marks, which could reorder model text on screen.
+    /// Other format characters (such as the emoji joiner U+200D) stay allowed.</summary>
+    private static bool IsBidiControl(char c) =>
+        c is >= '‪' and <= '‮' or >= '⁦' and <= '⁩' or '‎' or '‏' or '؜';
+
     private static Box Bounds(IReadOnlyList<Pt> points)
     {
         if (points.Count == 0) return default;
@@ -266,7 +278,7 @@ public static class DrawCommandParser
         {
             Known.Add(key);
             if (!raw.TryGetValue(key, out var value)) { Bad |= required; return null; }
-            if (value.Length == 0 || value.Length > max || value.Any(char.IsControl)) { Bad = true; return null; }
+            if (value.Length == 0 || value.Length > max || value.Any(c => char.IsControl(c) || IsBidiControl(c))) { Bad = true; return null; }
             return value;
         }
 
@@ -287,6 +299,7 @@ public static class DrawCommandParser
         public Pt[] Points(int min, int max)
         {
             if (Str("pts", true, int.MaxValue) is not { } value) return [];
+            if (value.Count(c => c == ',') + 1 > 2 * max) { Bad = true; return []; }
             var parts = value.Split(',');
             var points = new Pt[parts.Length / 2];
             for (var i = 0; i < parts.Length && !Bad; i++)

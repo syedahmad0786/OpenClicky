@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using OpenClicky.Core.Drawing;
 
 namespace OpenClicky.Core;
 
@@ -89,7 +90,7 @@ public sealed partial class GuidedWalkthrough
             }
 
             var clean = GuideTags().Replace(raw, "").Trim();
-            var plain = Limit(VisualTags().Replace(clean, "").Trim(), MaximumInstructionLength);
+            var plain = Limit(VisualTags().Replace(DrawCommandParser.Parse(clean).Text, "").Trim(), MaximumInstructionLength);
             if (plain.Length == 0)
             {
                 RejectResponse();
@@ -187,7 +188,7 @@ public sealed partial class GuidedWalkthrough
     [GeneratedRegex(@"\[GUIDE:[^\]\r\n]*(?:\]|$)", RegexOptions.CultureInvariant)]
     private static partial Regex GuideLikeTags();
 
-    // DRAW values escape ']' as \], so a backslash pair never ends the tag.
-    [GeneratedRegex(@"\[(?:POINT|MARK|DRAW):(?:\\[^\r\n]|[^\\\]\r\n])*(?:\]|$)", RegexOptions.CultureInvariant)]
+    // POINT/MARK close at their first ']'. DRAW is stripped by DrawCommandParser first (quote- and escape-aware close).
+    [GeneratedRegex(@"\[(?:POINT|MARK):[^\]\r\n]*(?:\]|$)", RegexOptions.CultureInvariant)]
     private static partial Regex VisualTags();
 }

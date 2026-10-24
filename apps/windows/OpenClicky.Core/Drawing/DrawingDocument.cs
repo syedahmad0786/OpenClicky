@@ -74,12 +74,17 @@ public sealed class DrawingDocument
                 {
                     var index = IndexOf(op.Id);
                     if (index < 0) break;
+                    var edited = Edit(_parts[index], op);
+                    // An edit that would blow geometry up (repeated scale=4, huge moves) is refused; the part stays as it was.
+                    if (!Sane(edited.Op) || !Sane(edited.Source)) break;
                     Push();
-                    _parts[index] = Edit(_parts[index], op);
+                    _parts[index] = edited;
                     break;
                 }
                 default:
                 {
+                    // Auto ids skip ids the model chose, so an unnamed part never replaces a named one.
+                    if (op.Id is null) while (IndexOf($"p{_seq + 1}") >= 0) _seq++;
                     var id = op.Id ?? $"p{_seq + 1}";
                     var index = IndexOf(id);
                     if (index < 0 && _parts.Count >= MaxParts) break;
@@ -125,6 +130,15 @@ public sealed class DrawingDocument
     }
 
     private static int Round(float value) => (int)MathF.Round(value);
+
+    private const float MaxCoordinate = 99_999;
+
+    private static bool Sane(DrawOp op)
+    {
+        static bool Ok(float v) => float.IsFinite(v) && Math.Abs(v) <= MaxCoordinate;
+        return Ok(op.Box.X) && Ok(op.Box.Y) && Ok(op.Box.W) && Ok(op.Box.H) && Ok(op.Box.Right) && Ok(op.Box.Bottom)
+            && op.Points.All(p => Ok(p.X) && Ok(p.Y));
+    }
 
     private int IndexOf(string? id) => id is null ? -1 : _parts.FindIndex(p => p.Id == id);
 

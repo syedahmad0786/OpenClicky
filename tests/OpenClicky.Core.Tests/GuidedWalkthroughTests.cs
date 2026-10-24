@@ -129,6 +129,18 @@ public class GuidedWalkthroughTests
     }
 
     [Theory]
+    // MARK/POINT close at their first ']' even after a backslash; DRAW closes outside quotes only.
+    [InlineData("[GUIDE:step] Click [MARK:circle:1,2,3,4:C\\] then Save", "Click  then Save")]
+    [InlineData("[GUIDE:step] Click [POINT:1,2:dir\\] then Save", "Click  then Save")]
+    [InlineData("[GUIDE:step] Press [DRAW:text x=1 y=1 text=\"[OK] \\\" \\]\"] now", "Press now")]
+    public void VisualTagsAreStrippedFromInstruction(string raw, string instruction)
+    {
+        var guide = new GuidedWalkthrough();
+        Assert.NotNull(guide.Accept(guide.Begin("Save"), raw));
+        Assert.Equal(instruction, guide.View.Instruction);
+    }
+
+    [Theory]
     [InlineData("No marker")]
     [InlineData("[GUIDE:maybe] Guess")]
     [InlineData("[GUIDE:step] One [GUIDE:wait] two")]

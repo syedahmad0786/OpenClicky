@@ -82,6 +82,63 @@ public class DrawCommandParserTests
         Assert.Equal("""say "hi" ] ok \ end""", Assert.Single(ops).Text);
     }
 
+    [Fact]
+    public void BracketInsideQuotesDoesNotCloseTag()
+    {
+        const string reply = """Look. [DRAW:text x=1 y=1 text="Click [OK] now"] Then.""";
+        var (text, ops) = DrawCommandParser.Parse(reply);
+        Assert.Equal("Look. Then.", text);
+        Assert.Equal("Click [OK] now", Assert.Single(ops).Text);
+        Assert.Equal("Look. Then.", StreamingReplySpeech.Clean(reply));
+        // An unterminated quote swallows the rest of its line (never spoken, no op) but ends at the line break.
+        var (cut, none) = DrawCommandParser.Parse("Look. [DRAW:text x=1 y=1 text=\"Click [OK] now] after.\nNext.");
+        Assert.Equal("Look.\nNext.", cut);
+        Assert.Empty(none);
+    }
+
+    [Theory]
+    [InlineData("‮")]
+    [InlineData("‪")]
+    [InlineData("⁦")]
+    [InlineData("⁩")]
+    [InlineData("‎")]
+    [InlineData("‏")]
+    [InlineData("؜")]
+    public void RejectsBidiControls(string control)
+    {
+        Assert.Empty(DrawCommandParser.Parse($"[DRAW:point x=1 y=1 label=\"a{control}b\"]").Ops);
+        Assert.Empty(DrawCommandParser.Parse($"[DRAW:text x=1 y=1 text=\"a{control}b\"]").Ops);
+    }
+
+    [Fact]
+    public void KeepsEmojiJoiners()
+    {
+        const string family = "\U0001F468‍\U0001F469‍\U0001F467";
+        Assert.Equal(family, Assert.Single(DrawCommandParser.Parse($"[DRAW:text x=1 y=1 text=\"{family}\"]").Ops).Text);
+    }
+
+    [Fact]
+    public void EverySplitPointNeverLeaksTagText()
+    {
+        const string reply = "First [DRAW:text x=1 y=1 text=\"Click [OK] now\"] line. "
+            + "[DRAW:rect id=a x=1 y=1 w=5 h=5 label=\"a \\\"b\\\" \\] c \\\\\"] Second line! [DRAW:dot x=2 y=2]\n"
+            + "[DRAW:path d=\"M1 1 L2 2\"] Third? [DRAW:undo]";
+        for (var length = 0; length <= reply.Length; length++)
+        {
+            var prefix = reply[..length];
+            foreach (var spoken in new[] { StreamingReplySpeech.Clean(prefix), DrawCommandParser.Parse(prefix, partial: true).Text })
+            {
+                Assert.DoesNotContain("DRAW", spoken);
+                Assert.DoesNotContain("[DRA", spoken);
+                Assert.True(spoken.IndexOfAny(['[', ']', '"', '=', '\\']) < 0, $"residue at {length}: {spoken}");
+            }
+        }
+        Assert.Equal("First line. Second line!\nThird?", StreamingReplySpeech.Clean(reply));
+        var ops = DrawCommandParser.Parse(reply).Ops;
+        Assert.Equal(5, ops.Count);
+        Assert.Equal("a \"b\" ] c \\", ops[1].Text);
+    }
+
     [Theory]
     [InlineData("blob x=1 y=1")]
     [InlineData("ring x=5 y=5")]
@@ -96,7 +153,6 @@ public class DrawCommandParserTests
     [InlineData("DOT x=1 y=5")]
     [InlineData("dot x=1 y=5 X=3")]
     [InlineData("dot x=1y=5")]
-    [InlineData("text x=1 y=5 text=\"unterminated")]
     [InlineData("text x=1 y=5 text=\"bell\a\"")]
     [InlineData("text x=1 y=5 text=\"ok\" size=60")]
     [InlineData("curve pts=1,2,3,4,5,6")]

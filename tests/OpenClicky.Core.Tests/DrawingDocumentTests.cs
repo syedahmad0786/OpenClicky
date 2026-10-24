@@ -85,6 +85,32 @@ public class DrawingDocumentTests
     }
 
     [Fact]
+    public void RepeatedScaleStopsBeforeGeometryBlowsUp()
+    {
+        var doc = new DrawingDocument();
+        Apply(doc, "[DRAW:rect id=a x=0 y=0 w=1000 h=400]");
+        Apply(doc, string.Concat(Enumerable.Repeat("[DRAW:scale id=a factor=4]", 6)));
+        var part = Assert.Single(doc.Parts);
+        // Virtual 2000 -> 8000 -> 32000; the next step (128000) is refused and leaves the part unchanged.
+        Assert.Equal(32000, part.Op.Box.W);
+        Assert.Equal(16000, part.Source.Box.W);
+        Apply(doc, "[DRAW:move id=a dx=99999 dy=0]");
+        Assert.Equal(16000, Assert.Single(doc.Parts).Source.Box.W);
+        Assert.Equal(-15000, doc.Parts[0].Op.Box.X);
+        // Refused edits push no undo snapshot: one undo goes back to the previous accepted scale.
+        Apply(doc, "[DRAW:undo]");
+        Assert.Equal(8000, doc.Parts[0].Op.Box.W);
+    }
+
+    [Fact]
+    public void AutoIdsSkipModelChosenIds()
+    {
+        var doc = new DrawingDocument();
+        Apply(doc, "[DRAW:dot id=p2 x=1 y=1][DRAW:dot x=2 y=2][DRAW:dot x=3 y=3]");
+        Assert.Equal(["p2", "p3", "p4"], doc.Parts.Select(p => p.Id));
+    }
+
+    [Fact]
     public void EraseReturnsReverseAnimation()
     {
         var doc = new DrawingDocument();
