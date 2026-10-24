@@ -10,7 +10,20 @@ public sealed class UiaSnapshotService
     {
         var root = AutomationElement.RootElement;
         var focused = AutomationElement.FocusedElement ?? root;
-        var window = FindAncestorWindow(focused) ?? root;
+        var window = FindAncestorWindow(focused);
+        if (window is null) return "No accessible foreground application window. No desktop tree was read.";
+        return CaptureWindow(window, maxNodes);
+    }
+
+    public string CaptureWindow(nint handle, int maxNodes = 80)
+    {
+        if (handle == nint.Zero) throw new ArgumentException("A foreground window is required.", nameof(handle));
+        return CaptureWindow(AutomationElement.FromHandle(handle), maxNodes);
+    }
+
+    private static string CaptureWindow(AutomationElement window, int maxNodes)
+    {
+        maxNodes = Math.Clamp(maxNodes, 1, 200);
 
         var name = Safe(() => window.Current.Name) ?? "(unnamed)";
         var sb = new StringBuilder();
@@ -49,6 +62,7 @@ public sealed class UiaSnapshotService
             try
             {
                 var current = el.Current;
+                if (current.IsPassword) continue;
                 if (string.IsNullOrWhiteSpace(current.Name) && current.ControlType == ControlType.Text)
                 {
                     continue;
@@ -65,6 +79,11 @@ public sealed class UiaSnapshotService
                 sb.AppendLine(
                     $"{current.ControlType.ProgrammaticName} name=\"{Escape(current.Name)}\" " +
                     $"center=({centerX},{centerY}) bounds=[{(int)rect.X},{(int)rect.Y},{(int)rect.Width},{(int)rect.Height}]");
+                if (current.ControlType == ControlType.Edit && el.TryGetCurrentPattern(ValuePattern.Pattern, out var pattern))
+                {
+                    var value = ((ValuePattern)pattern).Current.Value;
+                    sb.AppendLine($"value=\"{Escape(value[..Math.Min(value.Length, 2000)])}\"");
+                }
                 count++;
             }
             catch

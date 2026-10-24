@@ -6,9 +6,14 @@ public static class ProviderFactory
 {
     public static string ResolveBaseUrl(AppSettings settings)
     {
-        if (settings.UseLocalProxy && !string.IsNullOrWhiteSpace(settings.LocalProxyBaseUrl))
+        if (settings.UseLocalProxy)
         {
-            var proxy = settings.LocalProxyBaseUrl.Trim().TrimEnd('/');
+            var address = settings.LocalProxyBaseUrl?.Trim();
+            if (!Uri.TryCreate(address, UriKind.Absolute, out var uri)
+                || !uri.IsLoopback || uri.Scheme is not ("http" or "https")
+                || uri.UserInfo.Length != 0 || uri.Query.Length != 0 || uri.Fragment.Length != 0)
+                throw new InvalidOperationException("The local proxy must use a localhost or loopback HTTP address, without credentials, query, or fragment.");
+            var proxy = address!.TrimEnd('/');
             // Local proxy exposes OpenAI-compatible paths at root; append /v1 if missing.
             return proxy.EndsWith("/v1", StringComparison.OrdinalIgnoreCase) ? proxy : $"{proxy}/v1";
         }
@@ -22,7 +27,7 @@ public static class ProviderFactory
         return cred?.HasUsableSession == true;
     }
 
-    public static ITalkClient? CreateTalkClient(AppSettings settings, ISecretStore? secrets = null)
+    public static ITalkClient? CreateTalkClient(AppSettings settings, ISecretStore? secrets = null, Action<string>? log = null)
     {
         // Opt-in offline smoke: canned [POINT:…] reply, no network / no API keys.
         if (OfflineTalkClient.IsEnvEnabled())
@@ -38,7 +43,7 @@ public static class ProviderFactory
             }
 
             var oauth = new ChatGptOAuthService();
-            return new ChatGptTalkClient(ct => oauth.GetAccessTokenAsync(settings, secrets, ct));
+            return new ChatGptTalkClient(ct => oauth.GetAccessTokenAsync(settings, secrets, ct), log: log);
         }
 
         if (string.IsNullOrWhiteSpace(settings.OpenRouterApiKey))
@@ -52,7 +57,7 @@ public static class ProviderFactory
     public static ISttClient? CreateSttClient(AppSettings settings, ISecretStore? secrets = null)
     {
         // STT stays on OpenRouter (Whisper-compatible) when a BYO key is present.
-        // ChatGPT plan usage is Responses API only — mic STT needs OpenRouter or a debug transcript.
+        // ChatGPT plan usage excludes audio; local Windows recognition is the app default.
         _ = secrets;
         if (string.IsNullOrWhiteSpace(settings.OpenRouterApiKey))
         {
@@ -65,7 +70,7 @@ public static class ProviderFactory
             ResolveBaseUrl(settings));
     }
 
-    public static IAgentPlanner? CreateAgentPlanner(AppSettings settings, ISecretStore? secrets = null)
+    public static IAgentPlanner? CreateAgentPlanner(AppSettings settings, ISecretStore? secrets = null, Action<string>? log = null)
     {
         // Opt-in offline smoke: fixed Notepad + type plan, no network / no API keys.
         // Confirmations still use WinFormsAgentConfirm in the tray path.
@@ -82,7 +87,7 @@ public static class ProviderFactory
             }
 
             var oauth = new ChatGptOAuthService();
-            return new ChatGptAgentPlanner(ct => oauth.GetAccessTokenAsync(settings, secrets, ct));
+            return new ChatGptAgentPlanner(ct => oauth.GetAccessTokenAsync(settings, secrets, ct), log: log);
         }
 
         if (string.IsNullOrWhiteSpace(settings.OpenRouterApiKey))

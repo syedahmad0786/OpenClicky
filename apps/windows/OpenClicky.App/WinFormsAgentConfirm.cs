@@ -11,13 +11,26 @@ namespace OpenClicky.App;
 internal sealed class WinFormsAgentConfirm : IAgentConfirm
 {
     private readonly SynchronizationContext _ui;
+    private readonly Func<(IntPtr window, IntPtr focus)?>? _testTarget;
+    private volatile bool _isDialogOpen;
+    public bool IsDialogOpen => _isDialogOpen;
 
-    public WinFormsAgentConfirm(SynchronizationContext uiContext)
+    public WinFormsAgentConfirm(SynchronizationContext uiContext, Func<(IntPtr window, IntPtr focus)?>? testTarget = null)
     {
         _ui = uiContext;
+        _testTarget = testTarget;
     }
 
     public Task<bool> ConfirmAsync(string summary, CancellationToken cancellationToken = default)
+        => ConfirmCoreAsync(summary, false, true, cancellationToken);
+
+    public Task<bool> ConfirmNonInputAsync(string summary, CancellationToken cancellationToken = default)
+        => ConfirmCoreAsync(summary, false, false, cancellationToken);
+
+    public Task<bool> ConfirmTaskAsync(string summary, CancellationToken cancellationToken = default)
+        => ConfirmCoreAsync(summary, true, true, cancellationToken);
+
+    private Task<bool> ConfirmCoreAsync(string summary, bool wholeTask, bool restoreTarget, CancellationToken cancellationToken)
     {
         var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         void Show()
@@ -28,27 +41,39 @@ internal sealed class WinFormsAgentConfirm : IAgentConfirm
                 return;
             }
 
-            var prior = ForegroundFocusRestorer.Capture();
+            var test = _testTarget?.Invoke();
+            var prior = test?.window ?? ForegroundFocusRestorer.Capture();
+            var focus = test?.focus ?? ForegroundFocusRestorer.CaptureFocus(prior);
+            _isDialogOpen = true;
             try
             {
-                using var dialog = new AgentConfirmDialog(summary);
+                using var dialog = new AgentConfirmDialog(summary, wholeTask);
+                using var registration = cancellationToken.Register(() => _ui.Post(_ =>
+                {
+                    if (!dialog.IsDisposed) dialog.Close();
+                }, null));
                 var result = dialog.ShowDialog();
                 // Form is closed/disposed; yield UI messages before restoring focus.
                 Application.DoEvents();
-                ForegroundFocusRestorer.Restore(prior);
-                tcs.TrySetResult(result == DialogResult.Yes);
+                var restored = !restoreTarget || ForegroundFocusRestorer.Restore(prior, test is not null, focus);
+                if (cancellationToken.IsCancellationRequested) tcs.TrySetCanceled(cancellationToken);
+                else if (result == DialogResult.Yes && !restored)
+                    tcs.TrySetException(new InvalidOperationException("I couldn't restore the target app and field. Select the app you want to use, then try again."));
+                else tcs.TrySetResult(result == DialogResult.Yes);
+                _isDialogOpen = false;
             }
             catch (Exception ex)
             {
                 try
                 {
-                    ForegroundFocusRestorer.Restore(prior);
+                    if (restoreTarget) ForegroundFocusRestorer.Restore(prior, test is not null, focus);
                 }
                 catch
                 {
                     // best-effort restore on failure path
                 }
 
+                _isDialogOpen = false;
                 tcs.TrySetException(ex);
             }
         }
@@ -60,54 +85,41 @@ internal sealed class WinFormsAgentConfirm : IAgentConfirm
     /// <summary>Top-most Yes/No form that fully closes before SendInput continues.</summary>
     private sealed class AgentConfirmDialog : Form
     {
-        public AgentConfirmDialog(string summary)
+        public AgentConfirmDialog(string summary, bool wholeTask)
         {
             Text = "OpenClicky Agent";
+            AppTheme.Apply(this);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterScreen;
             MinimizeBox = false;
             MaximizeBox = false;
-            ShowInTaskbar = false;
+            ShowInTaskbar = true;
             TopMost = true;
-            AutoScaleMode = AutoScaleMode.Font;
-            ClientSize = new Size(440, 180);
-            Padding = new Padding(16);
+            ClientSize = new Size(540, 340);
+            Padding = new Padding(24);
 
-            var label = new Label
+            var label = new TextBox
             {
-                AutoSize = false,
-                Dock = DockStyle.Top,
-                Height = 100,
-                Text = summary + "\n\nAllow this action?",
+                Dock = DockStyle.Fill, Multiline = true, ReadOnly = true,
+                ScrollBars = ScrollBars.Vertical, BorderStyle = BorderStyle.None,
+                BackColor = AppTheme.Background, ForeColor = AppTheme.Ink,
+                Text = (wholeTask ? "Approve this task plan?" : "Allow this one action?") + "\r\n\r\n" + summary + "\r\n\r\nThe task stops if you decline or press Escape.",
+                AccessibleName = "Proposed desktop action",
             };
 
-            var yes = new Button
-            {
-                Text = "Yes",
-                DialogResult = DialogResult.Yes,
-                Width = 96,
-                Height = 32,
-                Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
-            };
-            var no = new Button
-            {
-                Text = "No",
-                DialogResult = DialogResult.No,
-                Width = 96,
-                Height = 32,
-                Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
-            };
-
-            no.Location = new Point(ClientSize.Width - no.Width - 16, ClientSize.Height - no.Height - 16);
-            yes.Location = new Point(no.Left - yes.Width - 8, no.Top);
-
-            AcceptButton = yes;
+            var yes = AppTheme.Button(wholeTask ? "Approve task" : "Allow action", true);
+            yes.DialogResult = DialogResult.Yes;
+            var no = AppTheme.Button("Stop task");
+            no.DialogResult = DialogResult.No;
+            var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 58, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(0,12,0,0) };
+            buttons.Controls.AddRange(new Control[] { no, yes });
+            AcceptButton = no;
             CancelButton = no;
             Controls.Add(label);
-            Controls.Add(yes);
-            Controls.Add(no);
+            Controls.Add(buttons);
             // Default to No (same as MessageBoxDefaultButton.Button2).
             ActiveControl = no;
+            ResumeLayout(true);
         }
 
         protected override void OnFormClosed(FormClosedEventArgs e)

@@ -15,22 +15,13 @@ public sealed class PushToTalkHotkeyMonitor : IPushToTalkMonitor
     private const int WmKeyUp = 0x0101;
     private const int WmSysKeyDown = 0x0104;
     private const int WmSysKeyUp = 0x0105;
-    private const int VkLWin = 0x5B;
-    private const int VkRWin = 0x5C;
-    private const int VkMenu = 0x12;
-    private const int VkLMenu = 0xA4;
-    private const int VkRMenu = 0xA5;
-    private const int VkControl = 0x11;
-    private const int VkLControl = 0xA2;
-    private const int VkRControl = 0xA3;
-    private const int VkShift = 0x10;
-    private const int VkLShift = 0xA0;
-    private const int VkRShift = 0xA1;
 
     private readonly NativeMethods.LowLevelKeyboardProc _hookProc;
     private IntPtr _hookId = IntPtr.Zero;
     private bool _isChordDown;
     private bool _disposed;
+    private readonly HashSet<int> _pressedKeys = new();
+    private bool _cancelledUntilRelease;
 
     public PushToTalkHotkeyMonitor(HotkeyChord? chord = null)
     {
@@ -44,6 +35,8 @@ public sealed class PushToTalkHotkeyMonitor : IPushToTalkMonitor
     public event EventHandler? Pressed;
 
     public event EventHandler? Released;
+
+    public event EventHandler? Cancelled;
 
     public void Start()
     {
@@ -98,6 +91,8 @@ public sealed class PushToTalkHotkeyMonitor : IPushToTalkMonitor
 
         NativeMethods.UnhookWindowsHookEx(_hookId);
         _hookId = IntPtr.Zero;
+        _pressedKeys.Clear();
+        _cancelledUntilRelease = false;
         if (_isChordDown)
         {
             _isChordDown = false;
@@ -114,6 +109,18 @@ public sealed class PushToTalkHotkeyMonitor : IPushToTalkMonitor
             var vk = data.VkCode;
             var isDown = message is WmKeyDown or WmSysKeyDown;
             var isUp = message is WmKeyUp or WmSysKeyUp;
+
+            // Injected agent input must not retrigger voice or cancel its own task.
+            if ((data.Flags & 0x10) != 0) return NativeMethods.CallNextHookEx(_hookId, nCode, wParam, lParam);
+            if (isDown) _pressedKeys.Add(vk);
+            if (isUp) _pressedKeys.Remove(vk);
+            if (isDown && vk == 0x1B)
+            {
+                _cancelledUntilRelease = _isChordDown;
+                _isChordDown = false;
+                Cancelled?.Invoke(this, EventArgs.Empty);
+            }
+            if (!_pressedKeys.Contains(Chord.VirtualKey)) _cancelledUntilRelease = false;
 
             var wasDown = _isChordDown;
             if (isDown || isUp)
@@ -134,13 +141,8 @@ public sealed class PushToTalkHotkeyMonitor : IPushToTalkMonitor
 
     private void EvaluateChordState()
     {
-        var win = IsDown(VkLWin) || IsDown(VkRWin);
-        var alt = IsDown(VkMenu) || IsDown(VkLMenu) || IsDown(VkRMenu);
-        var control = IsDown(VkControl) || IsDown(VkLControl) || IsDown(VkRControl);
-        var shift = IsDown(VkShift) || IsDown(VkLShift) || IsDown(VkRShift);
-        var key = Chord.VirtualKey;
-        var keyDown = IsDown(key);
-        var matches = Chord.Matches(win, alt, control, shift, key) && keyDown;
+        // LL callbacks run before GetAsyncKeyState updates; track the event itself.
+        var matches = !_cancelledUntilRelease && Chord.MatchesPressedKeys(_pressedKeys);
 
         if (matches && !_isChordDown)
         {
@@ -153,8 +155,6 @@ public sealed class PushToTalkHotkeyMonitor : IPushToTalkMonitor
             Released?.Invoke(this, EventArgs.Empty);
         }
     }
-
-    private static bool IsDown(int virtualKey) => (NativeMethods.GetAsyncKeyState(virtualKey) & 0x8000) != 0;
 
     public void Dispose()
     {
@@ -197,7 +197,5 @@ public sealed class PushToTalkHotkeyMonitor : IPushToTalkMonitor
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, EntryPoint = "GetModuleHandleW")]
         public static extern IntPtr GetModuleHandle(IntPtr lpModuleName);
 
-        [DllImport("user32.dll")]
-        public static extern short GetAsyncKeyState(int vKey);
     }
 }

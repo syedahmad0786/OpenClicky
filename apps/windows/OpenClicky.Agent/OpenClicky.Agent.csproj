@@ -10,4 +10,7 @@
   <ItemGroup>
     <ProjectReference Include="..\OpenClicky.Core\OpenClicky.Core.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="OpenClicky.Input.Tests" />
+  </ItemGroup>
 </Project>

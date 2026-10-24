@@ -15,11 +15,14 @@ public sealed class ChatGptOAuthService
 {
     private readonly HttpClient _http;
     private readonly Action<string> _log;
+    private readonly string? _settingsPath;
+    private static readonly SemaphoreSlim RefreshGate = new(1, 1);
 
-    public ChatGptOAuthService(Action<string>? log = null, HttpClient? httpClient = null)
+    public ChatGptOAuthService(Action<string>? log = null, HttpClient? httpClient = null, string? settingsPath = null)
     {
         _log = log ?? (_ => { });
         _http = httpClient ?? new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
+        _settingsPath = settingsPath;
     }
 
     public async Task<ChatGptCredential> SignInAsync(
@@ -28,6 +31,7 @@ public sealed class ChatGptOAuthService
         CancellationToken cancellationToken = default)
     {
         settings.EnsureChatGptHostId();
+        SettingsStore.Save(settings, _settingsPath);
         var existing = ChatGptCredentialStore.Load(secrets);
         var isNewRegistration = string.IsNullOrWhiteSpace(settings.ChatGptIssuedClientId);
         var clientIdForAuth = isNewRegistration
@@ -51,7 +55,8 @@ public sealed class ChatGptOAuthService
             settings.ChatGptHostId!,
             isNewRegistration,
             existing?.IdToken,
-            settings.ChatGptAccountEmail);
+            settings.ChatGptAccountEmail,
+            existing is { AccessToken.Length: > 0, HasUsableSession: false });
 
         OpenBrowser(authUrl);
         _log("chatgpt_oauth_browser_opened");
@@ -86,6 +91,8 @@ public sealed class ChatGptOAuthService
 
         issuedClientId ??= settings.ChatGptIssuedClientId
                            ?? throw new InvalidOperationException("Missing issued ChatGPT client_id.");
+        settings.ChatGptIssuedClientId = issuedClientId;
+        SettingsStore.Save(settings, _settingsPath);
 
         var token = await ExchangeCodeAsync(
             issuedClientId,
@@ -98,28 +105,10 @@ public sealed class ChatGptOAuthService
             throw new InvalidOperationException("Token response missing id_token.");
         }
 
-        ValidatedIdToken identity;
-        try
-        {
-            identity = await ChatGptIdTokenValidator.ValidateAsync(
-                token.IdToken!,
-                issuedClientId,
-                nonce,
-                cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _log($"chatgpt_id_token_jwks_fallback={ex.Message}");
-            identity = ChatGptIdTokenValidator.ValidateClaimsOnly(token.IdToken!, issuedClientId, nonce);
-        }
-
-        var scopes = SplitScopes(token.Scope ?? callback.Scope);
-        if (!scopes.Any(s => s.Equals(ChatGptOAuthConstants.PlanUsageScope, StringComparison.OrdinalIgnoreCase)))
-        {
-            throw new InvalidOperationException(
-                "ChatGPT plan usage was not granted (missing chatgpt.tokens.use.direct). " +
-                "Enable plan sharing for this app in ChatGPT settings and try again.");
-        }
+        var identity = await ChatGptIdTokenValidator.ValidateAsync(
+            token.IdToken!, issuedClientId, nonce, cancellationToken, _http).ConfigureAwait(false);
+        ValidateReturningIdentity(existing, issuedClientId, identity);
+        var scopes = SplitScopes(token.Scope);
 
         var credential = new ChatGptCredential
         {
@@ -133,23 +122,33 @@ public sealed class ChatGptOAuthService
             RefreshToken = token.RefreshToken,
             TokenType = token.TokenType ?? "Bearer",
             ExpiresIn = token.ExpiresIn,
-            AccessTokenExpiresAt = DateTimeOffset.UtcNow.AddSeconds(Math.Max(60, token.ExpiresIn)),
+            AccessTokenExpiresAt = DateTimeOffset.UtcNow.AddSeconds(token.ExpiresIn),
             Scopes = scopes,
             SavedAt = DateTimeOffset.UtcNow,
         };
 
-        ChatGptCredentialStore.Save(secrets, credential);
+        await RefreshGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try { ChatGptCredentialStore.Save(secrets, credential); }
+        finally { RefreshGate.Release(); }
         settings.ChatGptIssuedClientId = issuedClientId;
         settings.ChatGptAccountEmail = credential.Email;
         settings.AuthProvider = AuthProvider.ChatGPT;
-        SettingsStore.Save(settings);
-        _log($"chatgpt_signed_in email={credential.Email ?? "(unknown)"} client_id={issuedClientId}");
+        SettingsStore.Save(settings, _settingsPath);
+        _log($"chatgpt_signed_in plan_usage={credential.HasUsableSession}");
         return credential;
     }
 
-    public async Task SignOutAsync(AppSettings settings, ISecretStore secrets, CancellationToken cancellationToken = default)
+    public async Task<bool> SignOutAsync(AppSettings settings, ISecretStore secrets, CancellationToken cancellationToken = default)
+    {
+        await RefreshGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try { return await SignOutCoreAsync(settings, secrets, cancellationToken).ConfigureAwait(false); }
+        finally { RefreshGate.Release(); }
+    }
+
+    private async Task<bool> SignOutCoreAsync(AppSettings settings, ISecretStore secrets, CancellationToken cancellationToken)
     {
         var credential = ChatGptCredentialStore.Load(secrets);
+        var revoked = credential?.RefreshToken is not { Length: > 0 };
         if (credential is { RefreshToken: { Length: > 0 }, ClientId: { Length: > 0 } })
         {
             try
@@ -164,29 +163,32 @@ public sealed class ChatGptOAuthService
                 using var response = await _http.PostAsync(revokeUrl, content, cancellationToken)
                     .ConfigureAwait(false);
                 _log($"chatgpt_revoke status={(int)response.StatusCode}");
+                revoked = response.IsSuccessStatusCode;
             }
             catch (Exception ex)
             {
-                _log($"chatgpt_revoke_error={ex.Message}");
+                _log($"chatgpt_revoke_error={ex.GetType().Name}");
             }
         }
 
-        ChatGptCredentialStore.Delete(secrets);
-        settings.ChatGptAccountEmail = null;
-        // Keep ChatGptIssuedClientId + ChatGptHostId for reauthorization.
-        if (settings.AuthProvider == AuthProvider.ChatGPT)
-        {
-            settings.AuthProvider = AuthProvider.OpenRouter;
-        }
+        if (credential is not null) ClearTokens(secrets, credential);
 
-        SettingsStore.Save(settings);
+        SettingsStore.Save(settings, _settingsPath);
         _log("chatgpt_signed_out");
+        return revoked;
     }
 
     public async Task<string> GetAccessTokenAsync(
         AppSettings settings,
         ISecretStore secrets,
         CancellationToken cancellationToken = default)
+    {
+        await RefreshGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try { return await GetAccessTokenCoreAsync(settings, secrets, cancellationToken).ConfigureAwait(false); }
+        finally { RefreshGate.Release(); }
+    }
+
+    private async Task<string> GetAccessTokenCoreAsync(AppSettings settings, ISecretStore secrets, CancellationToken cancellationToken)
     {
         var credential = ChatGptCredentialStore.Load(secrets)
                          ?? throw new InvalidOperationException("Not signed in with ChatGPT.");
@@ -207,19 +209,25 @@ public sealed class ChatGptOAuthService
             throw new InvalidOperationException("ChatGPT refresh token missing — sign in again.");
         }
 
-        var refreshed = await RefreshAsync(credential.ClientId!, credential.RefreshToken!, cancellationToken)
-            .ConfigureAwait(false);
+        TokenResponse refreshed;
+        try { refreshed = await RefreshAsync(credential.ClientId!, credential.RefreshToken!, cancellationToken).ConfigureAwait(false); }
+        catch (InvalidOperationException ex) when (IsTerminalRefreshError(ex.Message))
+        {
+            ClearTokens(secrets, credential);
+            throw new InvalidOperationException("ChatGPT session expired or disconnected. Continue with ChatGPT in Settings.", ex);
+        }
         credential.AccessToken = refreshed.AccessToken;
         credential.RefreshToken = refreshed.RefreshToken ?? credential.RefreshToken;
         credential.IdToken = refreshed.IdToken ?? credential.IdToken;
         credential.ExpiresIn = refreshed.ExpiresIn;
-        credential.AccessTokenExpiresAt = DateTimeOffset.UtcNow.AddSeconds(Math.Max(60, refreshed.ExpiresIn));
-        if (!string.IsNullOrWhiteSpace(refreshed.Scope))
+        credential.AccessTokenExpiresAt = DateTimeOffset.UtcNow.AddSeconds(refreshed.ExpiresIn);
+        if (refreshed.Scope is not null)
         {
             credential.Scopes = SplitScopes(refreshed.Scope);
         }
 
         ChatGptCredentialStore.Save(secrets, credential);
+        if (!credential.HasUsableSession) throw new InvalidOperationException("ChatGPT plan usage is disabled. Enable it in ChatGPT usage settings, then reconnect.");
         settings.ChatGptAccountEmail = credential.Email ?? settings.ChatGptAccountEmail;
         return credential.AccessToken!;
     }
@@ -241,7 +249,7 @@ public sealed class ChatGptOAuthService
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
-            throw new InvalidOperationException($"ChatGPT token refresh {(int)response.StatusCode}: {body}");
+            throw new InvalidOperationException(OAuthFailure("refresh", response, body));
         }
 
         return ParseTokenResponse(body);
@@ -268,7 +276,7 @@ public sealed class ChatGptOAuthService
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
-            throw new InvalidOperationException($"ChatGPT code exchange {(int)response.StatusCode}: {body}");
+            throw new InvalidOperationException(OAuthFailure("code exchange", response, body));
         }
 
         return ParseTokenResponse(body);
@@ -280,13 +288,18 @@ public sealed class ChatGptOAuthService
         var root = doc.RootElement;
         var access = root.GetProperty("access_token").GetString()
                      ?? throw new InvalidOperationException("Token response missing access_token.");
+        if (string.IsNullOrWhiteSpace(access)) throw new InvalidOperationException("Token response missing access_token.");
+        var expires = root.TryGetProperty("expires_in", out var expiry) ? expiry.GetInt32() : 3600;
+        if (expires <= 0) throw new InvalidOperationException("Token response has an invalid expiry.");
+        var tokenType = root.TryGetProperty("token_type", out var tt) ? tt.GetString() : "Bearer";
+        if (!string.Equals(tokenType, "Bearer", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("Unsupported OAuth token type.");
         var idToken = root.TryGetProperty("id_token", out var id) ? id.GetString() : null;
         return new TokenResponse(
             access,
             root.TryGetProperty("refresh_token", out var rt) ? rt.GetString() : null,
             idToken,
-            root.TryGetProperty("token_type", out var tt) ? tt.GetString() : "Bearer",
-            root.TryGetProperty("expires_in", out var ei) ? ei.GetInt32() : 3600,
+            tokenType,
+            expires,
             root.TryGetProperty("scope", out var sc) ? sc.GetString() : null);
     }
 
@@ -299,7 +312,8 @@ public sealed class ChatGptOAuthService
         string hostId,
         bool newRegistration,
         string? idTokenHint,
-        string? loginHint)
+        string? loginHint,
+        bool requestConsent = false)
     {
         var pairs = new List<KeyValuePair<string, string>>
         {
@@ -318,6 +332,7 @@ public sealed class ChatGptOAuthService
         {
             pairs.Add(new("agent_name_hint", ChatGptOAuthConstants.AgentNameHint));
         }
+        if (requestConsent) pairs.Add(new("prompt", "consent"));
 
         if (!string.IsNullOrWhiteSpace(idTokenHint))
         {
@@ -334,13 +349,13 @@ public sealed class ChatGptOAuthService
         return $"{ChatGptOAuthConstants.AuthorizeUrl}?{query}";
     }
 
-    private static HttpListener CreateLoopbackListener(out string redirectUri)
+    internal static HttpListener CreateLoopbackListener(out string redirectUri)
     {
         // Bind an ephemeral 127.0.0.1 port; path must remain /auth/callback per OSS SIWC docs.
         for (var attempt = 0; attempt < 12; attempt++)
         {
             var port = 17_000 + Random.Shared.Next(0, 2000);
-            var prefix = $"http://127.0.0.1:{port}{ChatGptOAuthConstants.CallbackPath}/";
+            var prefix = $"http://127.0.0.1:{port}/";
             var listener = new HttpListener();
             listener.Prefixes.Add(prefix);
             try
@@ -358,7 +373,7 @@ public sealed class ChatGptOAuthService
         throw new InvalidOperationException("Could not bind a loopback port for ChatGPT OAuth callback.");
     }
 
-    private static async Task<CallbackResult> WaitForCallbackAsync(
+    internal static async Task<CallbackResult> WaitForCallbackAsync(
         HttpListener listener,
         string expectedState,
         CancellationToken cancellationToken)
@@ -387,7 +402,12 @@ public sealed class ChatGptOAuthService
 
         var query = ctx.Request.QueryString;
         var state = query["state"];
-        var html = "<html><body><p>OpenClicky sign-in complete. You can close this tab.</p></body></html>";
+        if (ctx.Request.HttpMethod != "GET" || ctx.Request.Url?.AbsolutePath != ChatGptOAuthConstants.CallbackPath)
+        {
+            await WriteHtmlAsync(ctx.Response, 400, "Invalid callback.").ConfigureAwait(false);
+            throw new InvalidOperationException("Unexpected OAuth callback path or method.");
+        }
+        var html = "<html><body><p>OpenClicky received the sign-in response. Return to OpenClicky to check the connection.</p></body></html>";
         if (!string.Equals(state, expectedState, StringComparison.Ordinal))
         {
             html = "<html><body><p>OpenClicky sign-in failed: state mismatch.</p></body></html>";
@@ -433,9 +453,11 @@ public sealed class ChatGptOAuthService
                 cancellationToken).ConfigureAwait(false);
             using var doc = JsonDocument.Parse(discovery);
             if (doc.RootElement.TryGetProperty("revocation_endpoint", out var ep)
-                && ep.GetString() is { Length: > 0 } url)
+                && Uri.TryCreate(ep.GetString(), UriKind.Absolute, out var endpoint)
+                && endpoint.Scheme == "https" && endpoint.Host == "auth.openai.com"
+                && endpoint.UserInfo.Length == 0 && endpoint.Fragment.Length == 0)
             {
-                return url;
+                return endpoint.AbsoluteUri;
             }
         }
         catch
@@ -449,10 +471,42 @@ public sealed class ChatGptOAuthService
     private static List<string> SplitScopes(string? scope) =>
         string.IsNullOrWhiteSpace(scope)
             ? new List<string>()
-            : scope.Split([' ', '+'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            : scope.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .ToList();
 
-    private sealed record CallbackResult(
+    internal static void ValidateReturningIdentity(ChatGptCredential? existing, string clientId, ValidatedIdToken identity)
+    {
+        if (existing?.Subject is { Length: > 0 }
+            && (existing.ClientId != clientId || existing.Issuer != ChatGptOAuthConstants.Issuer || existing.Subject != identity.Subject))
+            throw new InvalidOperationException("ChatGPT account does not match the saved registration. The existing account was preserved.");
+    }
+
+    private static void ClearTokens(ISecretStore secrets, ChatGptCredential credential)
+    {
+        credential.AccessToken = credential.RefreshToken = credential.IdToken = null;
+        credential.AccessTokenExpiresAt = null;
+        credential.Scopes = new();
+        ChatGptCredentialStore.Save(secrets, credential);
+    }
+
+    private static bool IsTerminalRefreshError(string message) => new[]
+        { "invalid_grant", "invalid_refresh_token", "token_expired", "refresh_token_expired", "refresh_token_invalidated", "refresh_token_reused" }
+        .Any(code => message.EndsWith(": " + code, StringComparison.Ordinal));
+
+    private static string OAuthFailure(string action, HttpResponseMessage response, string body)
+    {
+        string? code = null;
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("error", out var error))
+                code = error.ValueKind == JsonValueKind.String ? error.GetString() : error.TryGetProperty("code", out var c) ? c.GetString() : null;
+        }
+        catch (JsonException) { }
+        return $"ChatGPT {action} failed (HTTP {(int)response.StatusCode}, request {ChatGptResponsesClient.RequestId(response)}): {code ?? "unknown_error"}";
+    }
+
+    internal sealed record CallbackResult(
         string? Code,
         string? State,
         string? ClientId,

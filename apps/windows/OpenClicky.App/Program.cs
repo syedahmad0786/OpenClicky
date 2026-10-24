@@ -5,17 +5,19 @@ internal static class Program
     private static Mutex? _singleInstance;
 
     [STAThread]
-    private static void Main()
+    private static void Main(string[] args)
     {
+        if (args.Length > 0 && args[0] == ChromeBridgeNativeHostApp.ExtensionOrigin)
+        {
+            Environment.ExitCode = ChromeBridgeNativeHostApp.RunAsync(args, Console.OpenStandardInput(), Console.OpenStandardOutput(), CancellationToken.None).GetAwaiter().GetResult();
+            return;
+        }
+        using var reopenRequest = new EventWaitHandle(false, EventResetMode.AutoReset, @"Local\OpenClicky.App.OpenWorkspace");
         // Prevent a second tray host from fighting over the same PTT hook / Credential Manager session.
         _singleInstance = new Mutex(initiallyOwned: true, @"Local\OpenClicky.App.SingleInstance", out var createdNew);
         if (!createdNew)
         {
-            MessageBox.Show(
-                "OpenClicky is already running in the system tray.",
-                "OpenClicky",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Information);
+            reopenRequest.Set();
             _singleInstance.Dispose();
             _singleInstance = null;
             return;
@@ -25,13 +27,19 @@ internal static class Program
         {
             ApplicationConfiguration.Initialize();
             Application.ApplicationExit += (_, _) => ReleaseMutex();
-            Application.Run(new TrayApplicationContext());
+            using var context = new TrayApplicationContext();
+            var reopenWait = RegisterReopenRequest(reopenRequest, context.RequestShowHome);
+            try { Application.Run(context); }
+            finally { reopenWait.Unregister(null); }
         }
         finally
         {
             ReleaseMutex();
         }
     }
+
+    internal static RegisteredWaitHandle RegisterReopenRequest(WaitHandle request, Action reopen) =>
+        ThreadPool.RegisterWaitForSingleObject(request, (_, _) => reopen(), null, Timeout.Infinite, executeOnlyOnce: false);
 
     private static void ReleaseMutex()
     {

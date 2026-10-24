@@ -56,7 +56,9 @@ public static class SettingsStore
         settings.PushToTalk = HotkeyChord.NormalizeOrDefault(settings.PushToTalk);
         var disk = CloneWithoutSecrets(settings);
         var json = JsonSerializer.Serialize(disk, JsonOptions);
-        File.WriteAllText(path, json);
+        var temporary = path + ".tmp";
+        File.WriteAllText(temporary, json);
+        File.Move(temporary, path, overwrite: true);
     }
 
     public static AppSettings CloneWithoutSecrets(AppSettings settings) =>
@@ -69,10 +71,17 @@ public static class SettingsStore
             OpenRouterApiKey = null,
             OpenRouterModel = settings.OpenRouterModel,
             TranscriptionModel = settings.TranscriptionModel,
+            UseWindowsSpeech = settings.UseWindowsSpeech,
+            MicrophoneDeviceId = settings.MicrophoneDeviceId,
+            SpeakReplies = settings.SpeakReplies,
+            AwarenessEnabled = settings.AwarenessEnabled,
+            AgentAccess = settings.AgentAccess,
             ChatGptHostId = settings.ChatGptHostId,
             ChatGptIssuedClientId = settings.ChatGptIssuedClientId,
             ChatGptAccountEmail = settings.ChatGptAccountEmail,
             ChatGptModel = settings.ChatGptModel,
+            ChatGptQuickModel = settings.ChatGptQuickModel,
+            ChatGptPlanWelcomeShown = settings.ChatGptPlanWelcomeShown,
             DebugTranscriptOverride = settings.DebugTranscriptOverride,
             PersistConversationHistory = settings.PersistConversationHistory,
             ForceGdiCapture = settings.ForceGdiCapture,

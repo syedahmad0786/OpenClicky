@@ -9,11 +9,16 @@ internal sealed class SandboxForm : Form
     private readonly TextBox _input;
     private readonly Label _status;
     private int _clicks;
+    private Button _clickMe = null!;
 
-    public SandboxForm()
+    public Point ButtonCenter => _clickMe.PointToScreen(new Point(_clickMe.Width / 2, _clickMe.Height / 2));
+    public Point InputCenter => _input.PointToScreen(new Point(_input.Width / 2, _input.Height / 2));
+    public bool HasVerifiedResult => _clicks > 0 && _input.Text == "hello";
+
+    public SandboxForm(bool multilineTarget = false)
     {
         Text = "OpenClicky Agent Sandbox";
-        ClientSize = new Size(480, 280);
+        ClientSize = new Size(480, multilineTarget ? 320 : 280);
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
@@ -30,7 +35,7 @@ internal sealed class SandboxForm : Form
         _status = new Label
         {
             Left = 16,
-            Top = 200,
+            Top = multilineTarget ? 240 : 200,
             Width = 440,
             Height = 48,
             Text = "Ready.",
@@ -55,6 +60,7 @@ internal sealed class SandboxForm : Form
             _status.Text = $"Green button clicked {_clicks} time(s).";
             _status.AccessibleName = _status.Text;
         };
+        _clickMe = clickMe;
         Controls.Add(clickMe);
 
         Controls.Add(new Label { Left = 16, Top = 130, Width = 200, Text = "Type target:" });
@@ -63,7 +69,9 @@ internal sealed class SandboxForm : Form
             Left = 16,
             Top = 152,
             Width = 440,
-            Height = 28,
+            Height = multilineTarget ? 70 : 28,
+            Multiline = multilineTarget,
+            AcceptsReturn = multilineTarget,
             AccessibleName = "Type target",
         };
         Controls.Add(_input);

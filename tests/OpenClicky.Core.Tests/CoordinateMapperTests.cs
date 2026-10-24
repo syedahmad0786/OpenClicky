@@ -31,4 +31,15 @@ public class CoordinateMapperTests
         var point = new PointingParseResult("hi", null, null, null, null, IsNone: true);
         Assert.Null(CoordinateMapper.ToVirtualScreen(point, []));
     }
+
+    [Theory]
+    [InlineData(-1, 5, null)]
+    [InlineData(100, 5, null)]
+    [InlineData(5, 50, null)]
+    [InlineData(5, 5, 2)]
+    public void ToVirtualScreen_RejectsTargetsOutsideCapturedImage(double x, double y, int? number)
+    {
+        var screen = new ScreenCaptureResult([0xff,0xd8],100,50,-200,0,200,100,true,"test");
+        Assert.Null(CoordinateMapper.ToVirtualScreen(new("",x,y,null,number,false), [screen]));
+    }
 }

@@ -1,8 +1,6 @@
 namespace OpenClicky.Core;
 
-/// <summary>
-/// Phase B Talk path: PTT → mic → STT → screen capture → vision LLM → POINT → TTS.
-/// </summary>
+/// <summary>One cancellable voice or text turn at a time, sharing the same screen-aware pipeline.</summary>
 public sealed class TalkOrchestrator : IDisposable
 {
     private readonly IPushToTalkMonitor _hotkey;
@@ -16,20 +14,39 @@ public sealed class TalkOrchestrator : IDisposable
     private readonly Func<string, CancellationToken, Task>? _agentRunner;
     private readonly Action<string> _log;
     private readonly List<(string user, string assistant)> _history = new();
+    private readonly SemaphoreSlim _turnGate = new(1, 1);
     private CancellationTokenSource? _turnCts;
-    private CompanionVoiceState _state = CompanionVoiceState.Idle;
+    private CompanionVoiceState _state;
+    private bool _disposed;
+    private ILiveSttClient? _liveStt;
+    private ILiveSttClient? _interruptionStt;
+    private readonly Func<string?>? _windowTitle;
+    private readonly Func<(int X, int Y, int Width, int Height)?>? _windowBounds;
+    private readonly Func<nint>? _windowHandle;
+    private readonly Func<bool>? _foregroundCaptureEligible;
+    private string? _previousApp;
+    private readonly Func<string>? _userContext;
+    private readonly Func<string, CancellationToken, Task<bool>>? _requestInterceptor;
+    private readonly Func<bool>? _canInterruptSpeech;
+    private readonly Func<ISttClient?> _interruptionSttFactory;
+    private readonly string? _historyPath;
+    private readonly string? _memoryPath;
+    private volatile bool _conversationActive;
+    private volatile bool _currentTurnRequiresScreen = true;
+    public GuidedWalkthrough Walkthrough { get; } = new();
+    public string? WalkthroughWindowTitle { get; private set; }
+    public event Action<WalkthroughView>? WalkthroughChanged;
 
-    public TalkOrchestrator(
-        IPushToTalkMonitor hotkey,
-        IOverlayController overlay,
-        IScreenCaptureService capture,
-        IMicrophoneRecorder mic,
-        Func<ISttClient?> sttFactory,
-        Func<ITalkClient?> talkFactory,
-        ITtsClient tts,
-        Func<AppSettings> settings,
-        Func<string, CancellationToken, Task>? agentRunner = null,
-        Action<string>? log = null)
+    public TalkOrchestrator(IPushToTalkMonitor hotkey, IOverlayController overlay,
+        IScreenCaptureService capture, IMicrophoneRecorder mic, Func<ISttClient?> sttFactory,
+        Func<ITalkClient?> talkFactory, ITtsClient tts, Func<AppSettings> settings,
+        Func<string, CancellationToken, Task>? agentRunner = null, Action<string>? log = null,
+        Func<string?>? windowTitle = null, Func<(int X, int Y, int Width, int Height)?>? windowBounds = null,
+        Func<string>? userContext = null,
+        Func<string, CancellationToken, Task<bool>>? requestInterceptor = null,
+        Func<nint>? windowHandle = null, Func<bool>? canInterruptSpeech = null,
+        Func<ISttClient?>? interruptionSttFactory = null, string? historyPath = null, string? memoryPath = null,
+        Func<bool>? foregroundCaptureEligible = null)
     {
         _hotkey = hotkey;
         _overlay = overlay;
@@ -41,277 +58,677 @@ public sealed class TalkOrchestrator : IDisposable
         _settings = settings;
         _agentRunner = agentRunner;
         _log = log ?? Console.WriteLine;
+        _windowTitle = windowTitle;
+        _windowBounds = windowBounds;
+        _userContext = userContext;
+        _requestInterceptor = requestInterceptor;
+        _windowHandle = windowHandle;
+        _foregroundCaptureEligible = foregroundCaptureEligible;
+        _canInterruptSpeech = canInterruptSpeech;
+        _interruptionSttFactory = interruptionSttFactory ?? sttFactory;
+        _historyPath = historyPath;
+        _memoryPath = memoryPath;
     }
 
     public CompanionVoiceState State => _state;
+    public bool ConversationActive => _conversationActive;
+    public bool CurrentTurnRequiresScreen => _currentTurnRequiresScreen;
+    public event Action<CompanionVoiceState>? StateChanged;
+    public event Action<string, string>? MessageReceived;
+    public event Action<string, bool>? AssistantResponseChanged;
+    public event Action<System.Text.Json.JsonElement>? VisualArtifactChanged;
+    public event Action<ConversationTurn>? TurnCommitted;
+    public event Action<string>? TranscriptChanged;
+    public event Action<IntelligentUiDocument?>? IntelligentUiChanged;
 
     public void Start()
     {
-        LoadPersistedHistory();
+        if (_settings().PersistConversationHistory)
+        {
+            _history.AddRange(ConversationHistoryStore.Load(_historyPath));
+            foreach (var (user, assistant) in _history)
+            {
+                MessageReceived?.Invoke("You", user);
+                MessageReceived?.Invoke("OpenClicky", assistant);
+            }
+        }
         _hotkey.Pressed += OnPressed;
         _hotkey.Released += OnReleased;
-        try
-        {
-            _hotkey.Start();
-            _log($"openclicky talk ready — hold {_hotkey.Chord.DisplayName}");
-        }
-        catch (Exception ex)
-        {
-            _log($"hotkey_start_error={ex.Message} — set a different chord in Settings or relaunch as a normal user session");
-        }
+        try { _hotkey.Start(); }
+        catch (Exception ex) { ReportAssistantMessage($"Voice shortcut unavailable: {ex.Message}. You can still type here."); }
     }
 
     public void ClearHistory()
     {
-        _history.Clear();
-        try
-        {
-            ConversationHistoryStore.Clear();
-            _log("history_cleared");
-        }
-        catch (Exception ex)
-        {
-            _log($"history_clear_error={ex.Message}");
-        }
+        Cancel();
+        try { lock (_history) { _history.Clear(); ConversationHistoryStore.Clear(_historyPath, _memoryPath); } }
+        catch (Exception ex) { ReportAssistantMessage($"Could not clear saved history: {ex.Message}"); }
     }
 
-    private void LoadPersistedHistory()
+    public void ReportAssistantMessage(string text)
     {
-        var settings = _settings();
-        if (!settings.PersistConversationHistory)
-        {
-            return;
-        }
+        IntelligentUiChanged?.Invoke(null);
+        MessageReceived?.Invoke("OpenClicky", text);
+    }
 
-        try
+    public void ReportTaskResult(string request, string answer)
+    {
+        CommitHistory(request, answer);
+        ReportAssistantMessage(answer);
+    }
+
+    public void ReportLocalReply(string request, string answer)
+    {
+        CommitHistory(request, answer, learnFromTurn: false);
+        ReportAssistantMessage(answer);
+    }
+
+    private void CommitHistory(string request, string answer, bool learnFromTurn = true)
+    {
+        lock (_history)
         {
-            var loaded = ConversationHistoryStore.Load();
-            _history.Clear();
-            _history.AddRange(loaded);
-            if (_history.Count > 0)
+            _history.Add((request, answer));
+            if (_history.Count > 10) _history.RemoveAt(0);
+            if (!_settings().PersistConversationHistory) return;
+            try
             {
-                _log($"history_loaded turns={_history.Count}");
+                var committed = ConversationHistoryStore.Append(request, answer, _historyPath);
+                try { if (learnFromTurn) AutomaticMemory.LearnFromTurn(committed, _memoryPath); }
+                catch (Exception ex) { _log($"memory_learn_error={ex.GetType().Name}"); }
+                try { TurnCommitted?.Invoke(committed); }
+                catch (Exception ex) { _log($"turn_committed_handler_error={ex.GetType().Name}"); }
             }
-        }
-        catch (Exception ex)
-        {
-            _log($"history_load_error={ex.Message}");
+            catch (Exception ex) { _log($"history_save_error={ex.GetType().Name}"); }
         }
     }
 
-    private void PersistHistoryIfEnabled()
+    private void SetState(CompanionVoiceState state)
     {
-        var settings = _settings();
-        if (!settings.PersistConversationHistory)
-        {
-            return;
-        }
-
-        try
-        {
-            ConversationHistoryStore.Save(_history);
-        }
-        catch (Exception ex)
-        {
-            _log($"history_save_error={ex.Message}");
-        }
+        _state = state;
+        StateChanged?.Invoke(state);
     }
 
-    private void OnPressed(object? sender, EventArgs e)
+    public void Cancel()
     {
-        _turnCts?.Cancel();
+        _conversationActive = false;
+        CancelTurn();
+    }
+
+    private void CancelTurn()
+    {
+        var wasListening = _state == CompanionVoiceState.Listening;
+        var turn = Interlocked.Exchange(ref _turnCts, null);
+        try { turn?.Cancel(); }
+        catch (ObjectDisposedException) { }
+        if (wasListening) turn?.Dispose();
         _tts.Stop();
-        _state = CompanionVoiceState.Listening;
-        _overlay.ShowListening();
-        try
+        Interlocked.Exchange(ref _liveStt, null)?.Dispose();
+        Interlocked.Exchange(ref _interruptionStt, null)?.Dispose();
+        TranscriptChanged?.Invoke("");
+        if (_mic.IsRecording)
         {
-            _mic.Start();
+            try { _mic.StopToWav(); }
+            catch (Exception ex) { _log($"mic_stop_error={ex.GetType().Name}"); }
         }
-        catch (Exception ex)
-        {
-            _log($"mic_start_error={ex.Message}");
-        }
-
-        _log("ptt_pressed → listening");
+        SetState(CompanionVoiceState.Idle);
+        _overlay.Hide();
     }
 
-    private async void OnReleased(object? sender, EventArgs e)
-    {
-        _state = CompanionVoiceState.Processing;
-        _overlay.ShowProcessing();
-        _log("ptt_released → processing");
+    public void BeginListening() => BeginListening(false);
 
-        byte[] wav = Array.Empty<byte>();
+    private void BeginListening(bool requireEndpoint)
+    {
+        if (_disposed || _state == CompanionVoiceState.Listening) return;
+        CancelTurn();
+        _turnCts = new CancellationTokenSource();
         try
         {
-            wav = _mic.StopToWav();
+            var stt = _sttFactory();
+            if (requireEndpoint && stt is not ILiveSttClient)
+                throw new InvalidOperationException("Download accurate voice in Settings for hands-free conversation");
+            if (stt is ILiveSttClient live)
+            {
+                _liveStt = live;
+                live.TranscriptChanged += text =>
+                {
+                    if (!ReferenceEquals(_liveStt, live) || _state != CompanionVoiceState.Listening) return;
+                    TranscriptChanged?.Invoke(text);
+                    _overlay.ShowTranscript(text);
+                };
+                live.UtteranceEnded += OnUtteranceEnded;
+                live.ListeningFailed += OnListeningFailed;
+                live.StartListening();
+            }
+            else _mic.Start();
+            SetState(CompanionVoiceState.Listening);
+            _overlay.ShowListening();
         }
         catch (Exception ex)
         {
-            _log($"mic_stop_error={ex.Message}");
+            _conversationActive = false;
+            CancelTurn();
+            ReportAssistantMessage($"Could not start your microphone: {ex.Message}. Type your request instead.");
         }
+    }
 
-        _turnCts?.Cancel();
-        _turnCts = new CancellationTokenSource();
-        var token = _turnCts.Token;
-        var settings = _settings();
+    public void StartConversation()
+    {
+        if (_disposed || _conversationActive) return;
+        _conversationActive = true;
+        BeginListening(true);
+    }
 
+    public void StopConversation() => Cancel();
+
+    public void StopConversationAfterCurrentTurn() => _conversationActive = false;
+
+    public void CancelCurrentTurn()
+    {
+        var resume = _conversationActive;
+        CancelTurn();
+        if (resume && !_disposed) BeginListening();
+    }
+
+    public void PauseConversationListening()
+    {
+        if (_conversationActive) CancelTurn();
+    }
+
+    public void ResumeConversation()
+    {
+        if (_conversationActive && _state == CompanionVoiceState.Idle) BeginListening();
+    }
+
+    public async Task EndListeningAsync()
+    {
+        if (_state != CompanionVoiceState.Listening || _turnCts is not { } turn) return;
+        if (Interlocked.Exchange(ref _liveStt, null) is { } live)
+        {
+            SetState(CompanionVoiceState.Processing);
+            try
+            {
+                var text = await live.FinishListeningAsync(turn.Token).ConfigureAwait(false);
+                TranscriptChanged?.Invoke("");
+                await RunTurnAsync(text, [], turn).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                _conversationActive = false;
+                if (!turn.IsCancellationRequested) ReportAssistantMessage($"Voice recognition stopped: {ex.Message}. You can type or use Help with this app.");
+            }
+            finally
+            {
+                live.Dispose();
+                if (ReferenceEquals(Interlocked.CompareExchange(ref _turnCts, null, turn), turn))
+                {
+                    SetState(CompanionVoiceState.Idle);
+                    _overlay.Hide();
+                }
+                turn.Dispose();
+            }
+            // A speech interruption may already have installed the successor turn.
+            if (_conversationActive && !_disposed && _turnCts is null) BeginListening();
+            return;
+        }
+        byte[] wav;
+        try { wav = _mic.StopToWav(); }
+        catch (Exception ex)
+        {
+            Cancel();
+            ReportAssistantMessage($"Could not read your microphone: {ex.Message}");
+            return;
+        }
+        await RunTurnAsync(null, wav, turn).ConfigureAwait(false);
+    }
+
+    public Task SubmitTextAsync(string text, bool remember = true)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (string.IsNullOrWhiteSpace(text)) return Task.CompletedTask;
+        Cancel();
+        var turn = _turnCts = new CancellationTokenSource();
+        return RunTurnAsync(text.Trim(), Array.Empty<byte>(), turn, remember);
+    }
+
+    public Task SubmitLocalTextAsync(string text)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (string.IsNullOrWhiteSpace(text)) return Task.CompletedTask;
+        Cancel();
+        var turn = _turnCts = new CancellationTokenSource();
+        return RunTurnAsync(text.Trim(), [], turn, remember: true, publishRequestBeforeInterception: true);
+    }
+
+    public Task SubmitRegionAsync(string text, (int X, int Y, int Width, int Height) region)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (region.Width < 8 || region.Height < 8) throw new ArgumentOutOfRangeException(nameof(region));
+        Cancel();
+        var turn = _turnCts = new CancellationTokenSource();
+        return RunTurnAsync(text, [], turn, true, region);
+    }
+
+    public Task StartWalkthroughAsync(string goal)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        Cancel();
+        var request = Walkthrough.Begin(goal);
+        var turn = _turnCts = new CancellationTokenSource();
+        return RunTurnAsync("Guide me: " + goal, [], turn, true, walkthrough: request);
+    }
+
+    public Task MoveWalkthroughAsync(WalkthroughMove move)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var request = Walkthrough.Prepare(move);
+        if (request is null) return Task.CompletedTask;
+        CancelTurn();
+        var turn = _turnCts = new CancellationTokenSource();
+        return RunTurnAsync(move + " walkthrough step", [], turn, true, walkthrough: request);
+    }
+
+    public void StopWalkthrough()
+    {
+        Walkthrough.Stop();
+        Cancel();
+        WalkthroughChanged?.Invoke(Walkthrough.View);
+    }
+
+    private void OnPressed(object? sender, EventArgs e) => BeginListening();
+    private async void OnReleased(object? sender, EventArgs e) => await EndListeningAsync();
+    private async void OnUtteranceEnded() => await EndListeningAsync();
+    private void OnListeningFailed(Exception error)
+    {
+        if (_state != CompanionVoiceState.Listening) return;
+        _conversationActive = false;
+        CancelTurn();
+        ReportAssistantMessage($"Voice recognition stopped: {error.Message}. Check the microphone in Settings, then start again.");
+    }
+
+    private void EnsureInterruptionListener(CancellationTokenSource speakingTurn)
+    {
+        if (!_conversationActive || _disposed || _interruptionStt is not null || _canInterruptSpeech?.Invoke() != true) return;
+        ILiveSttClient? live = null;
         try
         {
-            var transcript = settings.DebugTranscriptOverride?.Trim();
-            if (string.IsNullOrEmpty(transcript))
+            live = _interruptionSttFactory() as ILiveSttClient;
+            if (live is null) return;
+            if (Interlocked.CompareExchange(ref _interruptionStt, live, null) is not null)
             {
-                var stt = _sttFactory();
-                if (stt is null)
-                {
-                    _log("stt_unavailable — need OpenRouter key for mic STT, or DebugTranscriptOverride");
-                    _overlay.ShowResponding(
-                        "for microphone transcription, add an openrouter api key in settings, or set a debug transcript. chatgpt sign-in covers talk and agent replies.");
-                    await Task.Delay(2500, token).ConfigureAwait(false);
-                    return;
-                }
-
-                if (wav.Length < 44)
-                {
-                    _log("stt_skipped empty_audio");
-                    _overlay.ShowResponding("i didn't catch any audio. hold the hotkey and speak, then release.");
-                    await Task.Delay(2500, token).ConfigureAwait(false);
-                    return;
-                }
-
-                transcript = (await stt.TranscribeAsync(wav, token).ConfigureAwait(false)).Trim();
+                live.Dispose();
+                return;
             }
-
-            _log($"transcript={transcript}");
-            if (string.IsNullOrWhiteSpace(transcript))
+            live.SpeechStarted += () => AdoptInterruptionListener(live, speakingTurn);
+            live.ListeningFailed += error =>
             {
-                _overlay.ShowResponding("i couldn't understand that. try again?");
-                await Task.Delay(2000, token).ConfigureAwait(false);
+                if (ReferenceEquals(_liveStt, live)) OnListeningFailed(error);
+                else AbandonInterruptionListener(live, error);
+            };
+            live.StartListening();
+            if (!live.SupportsEchoCancelledInterruption)
+            {
+                Interlocked.CompareExchange(ref _interruptionStt, null, live);
+                live.Dispose();
+                _log("voice_interruption_unavailable=no_verified_aec");
+            }
+        }
+        catch (Exception ex)
+        {
+            if (live is not null) Interlocked.CompareExchange(ref _interruptionStt, null, live);
+            try { live?.Dispose(); } catch { }
+            _log($"voice_interruption_unavailable={ex.GetType().Name}");
+        }
+    }
+
+    private void AdoptInterruptionListener(ILiveSttClient live, CancellationTokenSource speakingTurn)
+    {
+        if (!_conversationActive || _disposed || !live.SupportsEchoCancelledInterruption
+            || !ReferenceEquals(_interruptionStt, live)) return;
+        var nextTurn = new CancellationTokenSource();
+        if (!ReferenceEquals(Interlocked.CompareExchange(ref _turnCts, nextTurn, speakingTurn), speakingTurn))
+        {
+            nextTurn.Dispose();
+            return;
+        }
+        Interlocked.CompareExchange(ref _interruptionStt, null, live);
+        _liveStt = live;
+        live.TranscriptChanged += text =>
+        {
+            if (!ReferenceEquals(_liveStt, live) || _state != CompanionVoiceState.Listening) return;
+            TranscriptChanged?.Invoke(text);
+            _overlay.ShowTranscript(text);
+        };
+        live.UtteranceEnded += OnUtteranceEnded;
+        try { speakingTurn.Cancel(); } catch (ObjectDisposedException) { }
+        _tts.Stop();
+        SetState(CompanionVoiceState.Listening);
+        _overlay.ShowListening();
+        _log("voice_interruption=accepted");
+    }
+
+    private void AbandonInterruptionListener(ILiveSttClient live, Exception error)
+    {
+        if (!ReferenceEquals(Interlocked.CompareExchange(ref _interruptionStt, null, live), live)) return;
+        live.Dispose();
+        _log($"voice_interruption_stopped={error.GetType().Name}");
+    }
+
+    private async Task RunTurnAsync(string? transcript, byte[] wav, CancellationTokenSource turn, bool remember = true,
+        (int X, int Y, int Width, int Height)? selectedRegion = null, WalkthroughRequest? walkthrough = null,
+        bool publishRequestBeforeInterception = false)
+    {
+        var token = turn.Token;
+        var entered = false;
+        string? displayedRequest = null;
+        var turnCommitted = false;
+        try
+        {
+            await _turnGate.WaitAsync(token).ConfigureAwait(false);
+            entered = true;
+            token.ThrowIfCancellationRequested();
+            _currentTurnRequiresScreen = transcript is null || selectedRegion is not null || walkthrough is not null
+                || Walkthrough.View.Active || !VisualArtifactReply.IsSelfContainedRequest(transcript);
+            SetState(CompanionVoiceState.Processing);
+            _overlay.ShowProcessing();
+            var settings = _settings();
+            if (transcript is null)
+            {
+                transcript = settings.DebugTranscriptOverride?.Trim();
+                if (string.IsNullOrWhiteSpace(transcript))
+                {
+                    var stt = _sttFactory();
+                    if (stt is null)
+                    {
+                        ReportAssistantMessage("Choose Windows speech or add an OpenRouter key in Settings → Voice. You can also type here.");
+                        return;
+                    }
+                    var transcriptionClock = System.Diagnostics.Stopwatch.StartNew();
+                    transcript = wav.Length <= 44 ? "" : (await stt.TranscribeAsync(wav, token).ConfigureAwait(false)).Trim();
+                    _log($"transcription_ms={transcriptionClock.ElapsedMilliseconds}");
+                }
+            }
+            token.ThrowIfCancellationRequested();
+            _log($"request_chars={transcript.Length}");
+            var requestPublished = publishRequestBeforeInterception && !string.IsNullOrWhiteSpace(transcript);
+            if (requestPublished) { MessageReceived?.Invoke("You", transcript); displayedRequest = transcript; }
+            if (!Walkthrough.View.Active && walkthrough is null && _requestInterceptor is not null
+                && await _requestInterceptor(transcript, token).ConfigureAwait(false)) return;
+            if (walkthrough is null && Walkthrough.View.Active)
+            {
+                var command = transcript.Trim().TrimEnd('.', '!', '?').ToLowerInvariant();
+                if (command == "stop walkthrough") { StopWalkthrough(); return; }
+                WalkthroughMove? move = command switch
+                {
+                    "next step" => WalkthroughMove.Next,
+                    "previous step" or "back a step" => WalkthroughMove.Back,
+                    "recheck step" or "repeat step" => WalkthroughMove.Refresh,
+                    _ => null,
+                };
+                if (move is not null)
+                {
+                    walkthrough = Walkthrough.Prepare(move.Value);
+                    if (walkthrough is null) return;
+                    remember = true;
+                }
+            }
+            var screenFallback = string.IsNullOrWhiteSpace(transcript);
+            if (screenFallback)
+            {
+                ReportAssistantMessage("No words were recognized. I'll offer help from the screen instead.");
+                transcript = AppKnowledge.ScreenHelpRequest;
+                remember = false;
+            }
+            if (!requestPublished)
+            {
+                MessageReceived?.Invoke(screenFallback ? "Screen help" : "You", transcript!);
+                if (!screenFallback) displayedRequest = transcript;
+            }
+            if (walkthrough is null && !Walkthrough.View.Active && (transcript.StartsWith("show me how", StringComparison.OrdinalIgnoreCase)
+                || transcript.StartsWith("guide me", StringComparison.OrdinalIgnoreCase)))
+            {
+                walkthrough = Walkthrough.Begin(transcript);
+                WalkthroughChanged?.Invoke(Walkthrough.View);
+            }
+            if (walkthrough is null && AgentIntent.TryExtract(transcript, out var agentTask))
+            {
+                if (Walkthrough.View.Active)
+                {
+                    ReportAssistantMessage("This walkthrough only guides you. Stop the walkthrough before asking me to perform an action task.");
+                    return;
+                }
+                Walkthrough.Stop();
+                WalkthroughChanged?.Invoke(Walkthrough.View);
+                if (string.IsNullOrWhiteSpace(agentTask)) ReportAssistantMessage("Tell me what you'd like done in Agent mode.");
+                else if (_agentRunner is null) ReportAssistantMessage("Agent mode is unavailable in this build.");
+                else await _agentRunner(agentTask, token).ConfigureAwait(false);
                 return;
             }
 
-            if (AgentIntent.TryExtract(transcript, out var agentTask))
+            var selfContainedVisual = selectedRegion is null && walkthrough is null && !Walkthrough.View.Active
+                && VisualArtifactReply.IsSelfContainedRequest(transcript);
+            _currentTurnRequiresScreen = !selfContainedVisual;
+
+            if (!selfContainedVisual && _foregroundCaptureEligible is not null && !_foregroundCaptureEligible())
             {
-                _log($"agent_intent task={agentTask}");
-                if (string.IsNullOrWhiteSpace(agentTask))
-                {
-                    const string needTask =
-                        "agent mode is ready, but i need a task. try saying openclicky agent, then what you want done.";
-                    _state = CompanionVoiceState.Responding;
-                    _overlay.ShowResponding(needTask);
-                    await _tts.SpeakAsync(needTask, token).ConfigureAwait(false);
-                    return;
-                }
-
-                if (_agentRunner is null)
-                {
-                    var spokenAgent =
-                        $"agent mode heard you, but the agent runner is not wired yet. task was: {agentTask}";
-                    _state = CompanionVoiceState.Responding;
-                    _overlay.ShowResponding(spokenAgent);
-                    await _tts.SpeakAsync(spokenAgent, token).ConfigureAwait(false);
-                    return;
-                }
-
-                _state = CompanionVoiceState.Processing;
-                await _agentRunner(agentTask, token).ConfigureAwait(false);
+                ReportAssistantMessage("Bring the app you want help with to the front, then ask again. No screen was captured or sent.");
                 return;
             }
 
             var talk = _talkFactory();
             if (talk is null)
             {
-                _log("talk_unavailable — missing provider auth");
-                _overlay.ShowResponding(
-                    "add an openrouter api key or continue with chatgpt in settings to enable talk.");
-                await Task.Delay(2500, token).ConfigureAwait(false);
+                ReportAssistantMessage("Continue with ChatGPT in Settings to ask about your screen. The pointing demo works before sign-in.");
                 return;
             }
-
-            // Hide buddy so capture does not include the overlay triangle/bubble.
             _overlay.Hide();
-            var screens = await _capture.CaptureAllMonitorsJpegAsync(token).ConfigureAwait(false);
+            var title = selfContainedVisual ? null : _windowTitle?.Invoke();
+            var bounds = selfContainedVisual ? null : _windowBounds?.Invoke();
+            var handle = selfContainedVisual ? nint.Zero : _windowHandle?.Invoke();
+            if (!selfContainedVisual && AgentDenyList.IsDenied(title, AgentDenyList.ParseExtraFragments(settings.AgentDenyListExtra)))
+            { ReportAssistantMessage("This app is excluded. No screen was captured or sent."); return; }
+            if (walkthrough is not null) WalkthroughWindowTitle = title;
+            var captureClock = System.Diagnostics.Stopwatch.StartNew();
+            var context = selfContainedVisual ? "\nThis is a self-contained visual workspace request. No screen or foreground-window data was inspected.\n"
+                : _windowTitle is null ? "" : AppKnowledge.Context(title, _previousApp);
+            if (!selfContainedVisual) _previousApp = AppKnowledge.Identify(title);
+            IReadOnlyList<ScreenCaptureResult> screens;
+            if (selfContainedVisual) screens = [];
+            else if (selectedRegion is { } region)
+            {
+                var selected = await Task.Run(() => _capture.CaptureRegionJpegAsync(region, token), token).ConfigureAwait(false);
+                if (selected is null) throw new InvalidOperationException("The selected screen area could not be captured.");
+                screens = [selected with { Label = "screen 1 — user-selected area. Only these visible pixels were shared. Use :screen1 for marks." }];
+                context += "\nThe user deliberately selected this region. Explain only this visible area.\n";
+            }
+            else if (bounds is { } window)
+            {
+                var detail = await Task.Run(() => _capture.CaptureRegionJpegAsync(window, token), token).ConfigureAwait(false)
+                    ?? throw new InvalidOperationException("The current app could not be captured. Select the area you want help with.");
+                if (handle != _windowHandle?.Invoke() || title != _windowTitle?.Invoke())
+                { ReportAssistantMessage("The app changed during capture. Ask again for a fresh view."); return; }
+                screens = [detail with { Label = "screen 1 — current app only. Use :screen1 for marks." }];
+            }
+            else { screens = []; context += "\nNo screen image is available. Do not invent visible controls; ask the user to select an area if needed.\n"; }
+            if (!selfContainedVisual && _foregroundCaptureEligible is not null && !_foregroundCaptureEligible())
+            { ReportAssistantMessage("The app changed during capture. Ask again for a fresh view."); return; }
+            context += AppKnowledge.WindowContext(bounds, screens);
+            _log($"screen_capture_ms={captureClock.ElapsedMilliseconds} walkthrough={walkthrough is not null}");
+            if (walkthrough is not null) WalkthroughChanged?.Invoke(Walkthrough.View);
             _overlay.ShowProcessing();
-            var primary = screens.FirstOrDefault(c => c.IsCursorMonitor) ?? screens.FirstOrDefault();
-            if (primary is not null)
+            List<(string, string)> history;
+            var screenHelp = transcript == AppKnowledge.ScreenHelpRequest || transcript.StartsWith(AppKnowledge.WebHelpPrefix, StringComparison.OrdinalIgnoreCase);
+            lock (_history) history = screenHelp || walkthrough is not null ? [] : _history.SelectMany(h => new[] { ("user", h.user), ("assistant", h.assistant) }).ToList();
+            var modelClock = System.Diagnostics.Stopwatch.StartNew();
+            var userContext = _userContext?.Invoke() ?? "";
+            var prompt = (selfContainedVisual ? VisualArtifactReply.CreatorSystemInstructions(userContext, history)
+                    : CompanionPrompts.TalkSystemPrompt + context + userContext)
+                + (Walkthrough.View.Active ? "\nThis is an advisory walkthrough. Explain only; do not claim to click, type, save notes, or change anything.\n" : "")
+                + (selfContainedVisual ? "" : walkthrough is null ? "\n" + VisualArtifactReply.Instructions : "\n\n" + GuidedWalkthrough.ResponseInstructions);
+            if (selfContainedVisual) history = [];
+            var speech = new StreamingReplySpeech();
+            var speechGate = new object();
+            var speechTail = Task.CompletedTask;
+            var firstTextLogged = false;
+            var observationChanged = 0;
+            bool ObservationStillCurrent()
             {
-                _log($"capture_bytes={primary.JpegBytes.Length} magic={(primary.LooksLikeJpeg ? "FFD8" : "????")}");
+                if (selfContainedVisual) return true;
+                if (Volatile.Read(ref observationChanged) != 0) return false;
+                try
+                {
+                    var changed = (_foregroundCaptureEligible is not null && !_foregroundCaptureEligible())
+                        || (_windowTitle is not null && !string.Equals(title, _windowTitle(), StringComparison.Ordinal))
+                        || (_windowBounds is not null && bounds != _windowBounds())
+                        || (_windowHandle is not null && handle != _windowHandle());
+                    if (changed) Interlocked.Exchange(ref observationChanged, 1);
+                }
+                catch (Exception ex) when (ex is not OutOfMemoryException)
+                {
+                    Interlocked.Exchange(ref observationChanged, 1);
+                    _log($"foreground_recheck_error={ex.GetType().Name}");
+                }
+                return Volatile.Read(ref observationChanged) == 0;
             }
-
-            var history = _history
-                .SelectMany(h => new[] { ("user", h.user), ("assistant", h.assistant) })
-                .ToList();
-
-            var raw = await talk.CompleteVisionTalkAsync(
-                CompanionPrompts.TalkSystemPrompt,
-                history,
-                transcript,
-                screens,
-                settings.ResolveVisionModel(),
-                token).ConfigureAwait(false);
-
-            var parsed = PointParser.Parse(raw);
-            var spoken = parsed.SpokenText;
-            _log($"reply={spoken}");
-
-            _history.Add((transcript, spoken));
-            if (_history.Count > 10)
+            void ResponseChanged(string partial)
             {
-                _history.RemoveAt(0);
+                if (token.IsCancellationRequested || !ObservationStillCurrent()) return;
+                var clean = StreamingReplySpeech.Clean(partial);
+                AssistantResponseChanged?.Invoke(clean, false);
+                if (!firstTextLogged && clean.Length > 0)
+                {
+                    firstTextLogged = true;
+                    _log($"screen_model_first_text_ms={modelClock.ElapsedMilliseconds}");
+                }
+                if (!settings.SpeakReplies || speech.TakeCompleted(clean) is not { Length: > 0 } sentence) return;
+                lock (speechGate)
+                {
+                    var previous = speechTail;
+                    speechTail = SpeakAfterAsync(previous, sentence, modelClock, token);
+                }
             }
-
-            PersistHistoryIfEnabled();
-
-            var mapped = CoordinateMapper.ToVirtualScreen(parsed, screens);
+            async Task SpeakAfterAsync(Task previous, string text, System.Diagnostics.Stopwatch clock, CancellationToken ct)
+            {
+                try
+                {
+                    await previous.ConfigureAwait(false);
+                    ct.ThrowIfCancellationRequested();
+                    if (!ObservationStillCurrent()) return;
+                    EnsureInterruptionListener(turn);
+                    _log($"speech_start_ms={clock.ElapsedMilliseconds} chars={text.Length}");
+                    var speechClock = System.Diagnostics.Stopwatch.StartNew();
+                    await _tts.SpeakAsync(text, ct).ConfigureAwait(false);
+                    _log($"speech_ms={speechClock.ElapsedMilliseconds} chars={text.Length}");
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
+                catch (Exception ex) when (ex is not OutOfMemoryException)
+                {
+                    _log($"speech_error={ex.GetType().Name}");
+                }
+            }
+            var raw = talk is IStreamingTalkClient streaming && walkthrough is null
+                ? await streaming.StreamVisionTalkAsync(prompt, history, transcript, screens, settings.ResolveTalkModel(), ResponseChanged, token).ConfigureAwait(false)
+                : await talk.CompleteVisionTalkAsync(prompt, history, walkthrough?.Prompt ?? transcript, screens, settings.ResolveTalkModel(), token).ConfigureAwait(false);
+            _log($"screen_model_ms={modelClock.ElapsedMilliseconds} walkthrough={walkthrough is not null}");
+            token.ThrowIfCancellationRequested();
+            if (!ObservationStillCurrent())
+            {
+                ReportAssistantMessage("The window changed while I was looking. Ask again for a fresh view; I cleared the old marks.");
+                return;
+            }
+            if (walkthrough is not null)
+            {
+                var accepted = Walkthrough.Accept(walkthrough, raw);
+                WalkthroughChanged?.Invoke(Walkthrough.View);
+                if (accepted is null) return;
+                raw = accepted;
+            }
+            var intelligent = IntelligentUiParser.Parse(raw);
+            IntelligentUiChanged?.Invoke(intelligent.Document);
+            var visual = VisualArtifactReply.Parse(intelligent.PlainText);
+            var annotated = ScreenAnnotations.Parse(visual.PlainText);
+            var parsed = PointParser.Parse(annotated.Text);
+            var spoken = string.IsNullOrWhiteSpace(parsed.SpokenText)
+                ? visual.Artifact is not null ? "I prepared the interactive visual." : IntelligentUiParser.SafeFallbackText
+                : parsed.SpokenText;
+            AssistantResponseChanged?.Invoke(spoken, true);
+            MessageReceived?.Invoke("OpenClicky", spoken);
+            token.ThrowIfCancellationRequested();
+            if (remember) { CommitHistory(transcript, spoken); turnCommitted = true; }
+            if (visual.Artifact is { } artifact) VisualArtifactChanged?.Invoke(artifact);
+            var mapped = selfContainedVisual ? null : CoordinateMapper.ToVirtualScreen(parsed, screens);
             if (mapped is { } point)
             {
-                // Stay in Pointing for TTS: set spoken text in the same UI invoke as the
-                // fly-to. A follow-up ShowResponding used to flip Mode=Responding and
-                // re-anchor the buddy to the cursor every paint frame.
-                _state = CompanionVoiceState.Pointing;
+                SetState(CompanionVoiceState.Pointing);
                 _overlay.PointAt(point.virtualX, point.virtualY, parsed.ElementLabel, spoken);
-                _log($"point=({point.virtualX},{point.virtualY}) label={parsed.ElementLabel}");
+                _log($"point=({point.virtualX},{point.virtualY})");
             }
             else
             {
-                _state = CompanionVoiceState.Responding;
-                _overlay.ShowResponding(spoken);
+                SetState(CompanionVoiceState.Responding);
+                if (selfContainedVisual) _overlay.Hide(); else _overlay.ShowResponding(spoken);
             }
-
-            await _tts.SpeakAsync(spoken, token).ConfigureAwait(false);
+            var marks = selfContainedVisual ? [] : ScreenAnnotations.Map(annotated.Marks, screens);
+            if (!selfContainedVisual) _overlay.ShowAnnotations(marks);
+            _log($"annotations={marks.Count}");
+            foreach (var mark in marks) _log($"annotation shape={mark.Shape} coords=({mark.X},{mark.Y},{mark.A},{mark.B})");
+            var visualStarted = System.Diagnostics.Stopwatch.StartNew();
+            if (settings.SpeakReplies)
+            {
+                var remainder = speech.TakeRemainder(spoken);
+                if (remainder.Length > 0)
+                {
+                    lock (speechGate)
+                    {
+                        var previous = speechTail;
+                        speechTail = SpeakAfterAsync(previous, remainder, modelClock, token);
+                    }
+                }
+                await speechTail.ConfigureAwait(false);
+            }
+            else await Task.Delay(marks.Count > 0 && !_conversationActive && walkthrough is null ? 6000 : 1800, token).ConfigureAwait(false);
+            var visualRemaining = TimeSpan.FromSeconds(8) - visualStarted.Elapsed;
+            // Continuous voice resumes after speech instead of waiting out the eight-second mark display.
+            if (!_conversationActive && walkthrough is null && marks.Count > 0 && visualRemaining > TimeSpan.Zero)
+                await Task.Delay(visualRemaining, token).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
-        {
-            _log("turn cancelled");
-        }
+        catch (OperationCanceledException) { _log("turn_cancelled"); }
         catch (Exception ex)
         {
-            _log($"talk_error={ex.GetType().Name}: {ex.Message}");
-            try
+            _log($"turn_error={ex.GetType().Name}");
+            if (!token.IsCancellationRequested)
             {
-                _overlay.ShowResponding("something went wrong talking to the model. check the log in settings.");
-                await _tts.SpeakAsync("something went wrong. check settings.", CancellationToken.None).ConfigureAwait(false);
-            }
-            catch
-            {
-                // ignore secondary failures
+                var failure = $"Couldn't finish this request: {ex.Message}";
+                if (remember && !turnCommitted && !string.IsNullOrWhiteSpace(displayedRequest))
+                    ReportLocalReply(displayedRequest, failure);
+                else
+                    ReportAssistantMessage(failure);
             }
         }
         finally
         {
-            _state = CompanionVoiceState.Idle;
-            _overlay.Hide();
-            _log("idle");
+            if (entered) _currentTurnRequiresScreen = true;
+            if (walkthrough is not null)
+            {
+                Walkthrough.Fail(walkthrough, "Step interrupted or unavailable. Recheck for a fresh view.");
+                WalkthroughChanged?.Invoke(Walkthrough.View);
+            }
+            if (ReferenceEquals(Interlocked.CompareExchange(ref _turnCts, null, turn), turn))
+            {
+                SetState(CompanionVoiceState.Idle);
+                _overlay.Hide();
+            }
+            if (entered) _turnGate.Release();
+            turn.Dispose();
         }
     }
 
     public void Dispose()
     {
+        _disposed = true;
         _hotkey.Pressed -= OnPressed;
         _hotkey.Released -= OnReleased;
-        _turnCts?.Cancel();
-        _turnCts?.Dispose();
-        _tts.Stop();
+        Cancel();
         _hotkey.Dispose();
         _overlay.Dispose();
         _mic.Dispose();

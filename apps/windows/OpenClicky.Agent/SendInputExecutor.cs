@@ -10,6 +10,7 @@ public sealed class SendInputExecutor : IAgentActionExecutor
         bool userConfirmed,
         CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var mutating = request.ToolName is AgentToolNames.Click or AgentToolNames.TypeText
             or AgentToolNames.Hotkey or AgentToolNames.Scroll;
 
@@ -25,7 +26,7 @@ public sealed class SendInputExecutor : IAgentActionExecutor
                 case AgentToolNames.Click:
                     return Task.FromResult(Click(request));
                 case AgentToolNames.TypeText:
-                    return Task.FromResult(TypeText(request));
+                    return Task.FromResult(TypeText(request, cancellationToken));
                 case AgentToolNames.Scroll:
                     return Task.FromResult(Scroll(request));
                 case AgentToolNames.Hotkey:
@@ -59,23 +60,26 @@ public sealed class SendInputExecutor : IAgentActionExecutor
             return new AgentActionResult(false, "click requires integer x,y", false);
         }
 
-        NativeMethods.SetCursorPos(x, y);
+        if (!NativeMethods.SetCursorPos(x, y)) return new AgentActionResult(false, "Could not move to the click target.", false);
         NativeMethods.mouse_event(NativeMethods.MouseeventfLeftdown, 0, 0, 0, UIntPtr.Zero);
         NativeMethods.mouse_event(NativeMethods.MouseeventfLeftup, 0, 0, 0, UIntPtr.Zero);
         return new AgentActionResult(true, $"clicked ({x},{y})", false);
     }
 
-    private static AgentActionResult TypeText(AgentActionRequest request)
+    private static AgentActionResult TypeText(AgentActionRequest request, CancellationToken cancellationToken)
     {
         if (!request.Arguments.TryGetValue("text", out var text) || string.IsNullOrEmpty(text))
         {
             return new AgentActionResult(false, "type_text requires text", false);
         }
 
+        if (text.Length > 12000) return new AgentActionResult(false, "Text exceeds the 12,000 character limit. Split this into smaller steps.", false);
+
         // Unicode typing via KEYEVENTF_UNICODE (batched down+up per char for focus reliability).
         var inputSize = Marshal.SizeOf<NativeMethods.Input>();
-        foreach (var ch in text)
+        foreach (var ch in WindowsInputText(text))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var pair = new NativeMethods.Input[2];
             pair[0] = new NativeMethods.Input
             {
@@ -114,6 +118,15 @@ public sealed class SendInputExecutor : IAgentActionExecutor
         }
 
         return new AgentActionResult(true, $"typed {text.Length} chars", false);
+    }
+
+    internal static IEnumerable<char> WindowsInputText(string text)
+    {
+        for (var index = 0; index < text.Length; index++)
+        {
+            // Windows edit controls expand CR to CRLF; sending both characters creates a blank line.
+            if (text[index] != '\n' || index == 0 || text[index - 1] != '\r') yield return text[index];
+        }
     }
 
     private static AgentActionResult Scroll(AgentActionRequest request)
@@ -159,7 +172,9 @@ public sealed class SendInputExecutor : IAgentActionExecutor
                     modifiers.Add(0x5B);
                     break;
                 default:
+                    if (main is not null) return new AgentActionResult(false, "A hotkey must contain exactly one main key.", false);
                     main = VirtualKeyFromName(part);
+                    if (main is null) return new AgentActionResult(false, "Unsupported key in hotkey.", false);
                     break;
             }
         }

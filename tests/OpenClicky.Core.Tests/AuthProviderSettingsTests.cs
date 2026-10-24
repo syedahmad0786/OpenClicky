@@ -15,11 +15,19 @@ public class AuthProviderSettingsTests
     }
 
     [Fact]
-    public void ResolveVisionModel_UsesOpenRouterByDefault()
+    public void ResolveVisionModel_UsesOpenRouterWhenSelected()
     {
-        var settings = new AppSettings { OpenRouterModel = "openai/gpt-4o" };
+        var settings = new AppSettings { AuthProvider = AuthProvider.OpenRouter, OpenRouterModel = "openai/gpt-4o" };
         Assert.Equal(AuthProvider.OpenRouter, settings.AuthProvider);
         Assert.Equal("openai/gpt-4o", settings.ResolveVisionModel());
+    }
+
+    [Fact]
+    public void NewInstall_UsesChatGptAndRequiresCatalogSelection()
+    {
+        var settings = new AppSettings();
+        Assert.Equal(AuthProvider.ChatGPT, settings.AuthProvider);
+        Assert.Empty(settings.ResolveVisionModel());
     }
 
     [Fact]
@@ -35,6 +43,7 @@ public class AuthProviderSettingsTests
                 ChatGptAccountEmail = "user@example.com",
                 ChatGptHostId = "urn:uuid:11111111-1111-1111-1111-111111111111",
                 ChatGptIssuedClientId = "oaiapp_test",
+                ChatGptQuickModel = "fast-model",
             };
             SettingsStore.Save(settings, path);
             var json = File.ReadAllText(path);
@@ -46,6 +55,7 @@ public class AuthProviderSettingsTests
             Assert.Null(loaded.OpenRouterApiKey);
             Assert.Equal("user@example.com", loaded.ChatGptAccountEmail);
             Assert.Equal("oaiapp_test", loaded.ChatGptIssuedClientId);
+            Assert.Equal("fast-model", loaded.ChatGptQuickModel);
         }
         finally
         {

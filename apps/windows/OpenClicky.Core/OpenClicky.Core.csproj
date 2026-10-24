@@ -6,4 +6,7 @@
     <RootNamespace>OpenClicky.Core</RootNamespace>
     <AssemblyName>OpenClicky.Core</AssemblyName>
   </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.31" />
+  </ItemGroup>
 </Project>
