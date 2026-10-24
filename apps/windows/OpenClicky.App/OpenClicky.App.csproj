@@ -35,6 +35,7 @@
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="OpenClicky.App.SecretStore.Smoke" />
+    <InternalsVisibleTo Include="OpenClicky.Surface.Smoke" />
     <EmbeddedResource Include="..\..\..\assets\openclicky.ico" LogicalName="OpenClicky.App.Assets.openclicky.ico" />
     <EmbeddedResource Include="..\..\..\assets\openclicky.png" LogicalName="OpenClicky.App.Assets.openclicky.png" />
     <Compile Include="..\OpenClicky.Sandbox\SandboxForm.cs" Link="SandboxForm.cs" />

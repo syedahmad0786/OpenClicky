@@ -37,6 +37,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenClicky.App.SecretStore.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenClicky.Input.Tests", "tests\OpenClicky.Input.Tests\OpenClicky.Input.Tests.csproj", "{292C06A6-5D79-4321-B3C1-350903EA0A4A}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "OpenClicky.Surface.Smoke", "apps\windows\OpenClicky.Surface.Smoke\OpenClicky.Surface.Smoke.csproj", "{DFA0B5C4-A1EF-43DF-91D1-2931FA8A8E44}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -215,6 +217,18 @@ Global
 		{292C06A6-5D79-4321-B3C1-350903EA0A4A}.Release|x64.Build.0 = Release|Any CPU
 		{292C06A6-5D79-4321-B3C1-350903EA0A4A}.Release|x86.ActiveCfg = Release|Any CPU
 		{292C06A6-5D79-4321-B3C1-350903EA0A4A}.Release|x86.Build.0 = Release|Any CPU
+		{DFA0B5C4-A1EF-43DF-91D1-2931FA8A8E44}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DFA0B5C4-A1EF-43DF-91D1-2931FA8A8E44}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DFA0B5C4-A1EF-43DF-91D1-2931FA8A8E44}.Debug|x64.ActiveCfg = Debug|x64
+		{DFA0B5C4-A1EF-43DF-91D1-2931FA8A8E44}.Debug|x64.Build.0 = Debug|x64
+		{DFA0B5C4-A1EF-43DF-91D1-2931FA8A8E44}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{DFA0B5C4-A1EF-43DF-91D1-2931FA8A8E44}.Debug|x86.Build.0 = Debug|Any CPU
+		{DFA0B5C4-A1EF-43DF-91D1-2931FA8A8E44}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DFA0B5C4-A1EF-43DF-91D1-2931FA8A8E44}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DFA0B5C4-A1EF-43DF-91D1-2931FA8A8E44}.Release|x64.ActiveCfg = Release|x64
+		{DFA0B5C4-A1EF-43DF-91D1-2931FA8A8E44}.Release|x64.Build.0 = Release|x64
+		{DFA0B5C4-A1EF-43DF-91D1-2931FA8A8E44}.Release|x86.ActiveCfg = Release|Any CPU
+		{DFA0B5C4-A1EF-43DF-91D1-2931FA8A8E44}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -235,5 +249,6 @@ Global
 		{D4F9B2C3-5E6A-7B8C-9D0E-1F2A3B4C5D6E} = {BA6AEA19-0CAC-43D4-B20E-3855459ECCFF}
 		{5CF17EBE-FF22-412E-9542-56C3A466869F} = {BA6AEA19-0CAC-43D4-B20E-3855459ECCFF}
 		{292C06A6-5D79-4321-B3C1-350903EA0A4A} = {D4D4B658-7CD4-4A2A-B4B6-48B82CF62986}
+		{DFA0B5C4-A1EF-43DF-91D1-2931FA8A8E44} = {BA6AEA19-0CAC-43D4-B20E-3855459ECCFF}
 	EndGlobalSection
 EndGlobal
