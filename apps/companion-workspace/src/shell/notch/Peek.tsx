@@ -5,7 +5,7 @@ import { DocumentTab } from "./DocumentTab";
 import { HomeTab } from "./HomeTab";
 import { SettingsPanel } from "../settings/SettingsPanel";
 import { GearIcon } from "./icons";
-import { TabSwitcher } from "./TabSwitcher";
+import { TAB_PANEL_ID, TabSwitcher, tabId } from "./TabSwitcher";
 
 /** The open panel: tab bar on top, the active tab below. */
 interface PeekProps {
@@ -20,7 +20,8 @@ export function Peek({ state, tab, onTab, draft, onDraft, focusComposer, onCompo
         <TabSwitcher tab={tab} onTab={onTab} />
         <IconButton label="Settings" icon={<GearIcon />} active={tab === "settings"} onClick={() => onTab(tab === "settings" ? "home" : "settings")} />
       </header>
-      <div className="notch-peek__tab" key={tab}>
+      <div className="notch-peek__tab" key={tab} id={TAB_PANEL_ID}
+        {...(tab === "home" || tab === "chat" ? { role: "tabpanel", "aria-labelledby": tabId(tab) } : {})}>
         {tab === "home" ? <HomeTab state={state} onOpenSettings={() => onTab("settings")} />
           : tab === "chat" ? <ChatTab state={state} draft={draft} onDraft={onDraft} focusComposer={focusComposer} onComposerFocused={onComposerFocused} />
           : tab === "settings" ? <SettingsPanel state={state} />

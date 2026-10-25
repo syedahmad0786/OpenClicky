@@ -24,8 +24,9 @@ function Dictionary({ words: hostWords }: { words: readonly string[] }) {
   };
   return (
     <Group title="Dictionary">
+      <label className="settings-field__label settings-add__label" htmlFor="settings-dictionary-word">Add a word</label>
       <div className="settings-add">
-        <input className="settings-input" aria-label="Add a word" placeholder="A name or term to get right" maxLength={MAX_WORD_LENGTH} value={draft}
+        <input id="settings-dictionary-word" className="settings-input" placeholder="A name or term to get right" maxLength={MAX_WORD_LENGTH} value={draft}
           onChange={(event) => { setDraft(event.target.value); setNote(""); }}
           onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); add(); } }} />
         <PillButton variant="primary" disabled={full || !draft.trim()} onClick={add}>Add</PillButton>
@@ -35,7 +36,7 @@ function Dictionary({ words: hostWords }: { words: readonly string[] }) {
         <div className="settings-words">
           {words.map((word) => (
             <span key={word} className="settings-word">{word}
-              <button type="button" aria-label={`Remove ${word}`} onClick={() => post(words.filter((w) => w !== word))}><CloseIcon width={12} height={12} /></button>
+              <button type="button" className="oc-hit" aria-label={`Remove ${word}`} onClick={() => post(words.filter((w) => w !== word))}><CloseIcon width={12} height={12} /></button>
             </span>
           ))}
         </div>
@@ -79,6 +80,7 @@ export function DictationPage({ state }: { state: ShellState }) {
               disabled={d.autoDetect} onClick={() => patch("dictation.language", l.code)} />
           ))}
         </div>
+        {q && shown.length === 0 ? <p className="settings-empty settings-empty--inline">{`No language matches “${query.trim()}”.`}</p> : null}
       </Group>
       <Dictionary words={d.dictionary} />
     </Page>

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { postPage } from "../bridge";
 import type { SettingsAction } from "../contract";
 import { PillButton, Row } from "../ui";
@@ -23,16 +23,17 @@ export function useDraft(value: string) {
   return [draft, setDraft] as const;
 }
 
-/** In-page confirm: announced as an alert, focus lands on the safe button; the caller puts focus back on its trigger. */
+/** In-page confirm: announced as an alert, focus lands on the safe button, Esc keeps; the caller puts focus back on its trigger. */
 export function ConfirmRow({ title, keepLabel = "Keep", confirmLabel, onKeep, onConfirm }: {
   title: string; keepLabel?: string; confirmLabel: string; onKeep: () => void; onConfirm: () => void;
 }) {
   const keep = useRef<HTMLButtonElement>(null);
   useEffect(() => keep.current?.focus(), []);
+  const escape = (event: KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); onKeep(); } };
   return (
     <Row title={title} tone="danger" role="alert">
-      <PillButton size="sm" ref={keep} onClick={onKeep}>{keepLabel}</PillButton>
-      <PillButton size="sm" variant="danger" onClick={onConfirm}>{confirmLabel}</PillButton>
+      <PillButton size="sm" ref={keep} onClick={onKeep} onKeyDown={escape}>{keepLabel}</PillButton>
+      <PillButton size="sm" variant="danger" onClick={onConfirm} onKeyDown={escape}>{confirmLabel}</PillButton>
     </Row>
   );
 }

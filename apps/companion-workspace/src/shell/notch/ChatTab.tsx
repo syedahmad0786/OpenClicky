@@ -15,12 +15,20 @@ const REPLAY_MODES: { action: DrawingAction; label: string; name: string }[] = [
 /** A saved drawing in the conversation: its caption, and Replay (in a window, full screen or on a board), Print and Remove. */
 function DrawingRow({ row }: { row: ChatRow }) {
   const [choosing, setChoosing] = useState(false);
+  const replay = useRef<HTMLButtonElement>(null);
   const act = (action: DrawingAction) => postPage({ kind: "drawing.action", id: row.drawingId!, action });
+  // Esc closes the mode choice and puts focus back on Replay.
+  const onKeyDown = (event: KeyboardEvent) => {
+    if (event.key !== "Escape" || !choosing) return;
+    event.preventDefault();
+    setChoosing(false);
+    replay.current?.focus();
+  };
   return (
-    <div className="notch-chat__drawing">
+    <div className="notch-chat__drawing" onKeyDown={onKeyDown}>
       <div className="notch-chat__row" data-role={row.role}>{row.text}</div>
       <div className="notch-chat__drawing-actions">
-        <PillButton size="sm" variant="outline" aria-expanded={choosing} aria-haspopup="true" onClick={() => setChoosing((open) => !open)}>Replay</PillButton>
+        <PillButton size="sm" variant="outline" ref={replay} aria-expanded={choosing} aria-haspopup="true" onClick={() => setChoosing((open) => !open)}>Replay</PillButton>
         <PillButton size="sm" variant="outline" onClick={() => act("print")}>Print</PillButton>
         <PillButton size="sm" variant="outline" title="Remove from chat" onClick={() => act("remove")}>Remove</PillButton>
       </div>

@@ -7,7 +7,8 @@ import type { PaperStock } from "../ui";
 export const STOCK: Record<JobCard["colour"], PaperStock> = { red: "blush", blue: "sky", yellow: "butter", green: "mint" };
 
 type Tone = "accent" | "warn" | "plain";
-const LABEL: Record<JobCard["state"], { text: string; tone: Tone }> = {
+/** The state line on a deck card, also read out when a job changes state. */
+export const JOB_STATE_LABEL: Record<JobCard["state"], { text: string; tone: Tone }> = {
   queued: { text: "Queued", tone: "plain" },
   working: { text: "Working…", tone: "plain" },
   needsYou: { text: "Needs you", tone: "warn" },
@@ -27,11 +28,11 @@ export interface JobCardViewProps {
 
 /** A small tilted paper card for the deck beside the open panel. The whole card is one button (and one region). */
 export function JobCardView({ job, tilt, layer }: JobCardViewProps) {
-  const { text, tone } = LABEL[job.state];
+  const { text, tone } = JOB_STATE_LABEL[job.state];
   const done = job.plan.filter((step) => step.done).length;
   return (
     <button
-      type="button" data-region data-colour={job.colour} className={`oc-paper oc-paper--${STOCK[job.colour]} deck-card`}
+      type="button" data-region data-colour={job.colour} title={job.title} className={`oc-paper oc-paper--${STOCK[job.colour]} deck-card`}
       style={{ "--tilt": `${tilt}deg`, zIndex: layer } as CSSProperties}
       onClick={() => postPage({ kind: "job.open", id: job.id })}
     >

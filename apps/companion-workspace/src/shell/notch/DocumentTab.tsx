@@ -58,7 +58,7 @@ function Csv({ source }: { source: string }) {
               {head.map((name, c) => (
                 <th key={c} scope="col" className={numeric[c] ? "is-numeric" : undefined}>
                   {numeric[c]
-                    ? <button type="button" aria-pressed={selected === c} onClick={() => setSelected(selected === c ? null : c)}>{name}</button>
+                    ? <button type="button" className="oc-hit" aria-pressed={selected === c} onClick={() => setSelected(selected === c ? null : c)}>{name}</button>
                     : name}
                 </th>
               ))}

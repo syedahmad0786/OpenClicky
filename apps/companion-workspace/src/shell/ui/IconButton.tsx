@@ -1,7 +1,7 @@
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import type { ComponentPropsWithRef, ReactNode } from "react";
 import { cx } from "./cx";
 
-export interface IconButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, "aria-label"> {
+export interface IconButtonProps extends Omit<ComponentPropsWithRef<"button">, "aria-label"> {
   /** Accessible name; required because the button has no visible text. */
   label: string;
   icon: ReactNode;

@@ -27,7 +27,7 @@ function RoutineItem({ r, confirming, onConfirm }: { r: Routine; confirming: boo
   const last = when(r.last);
   return (
     <div className="settings-item">
-      <Row title={r.title}
+      <Row title={<span className="oc-ellipsis" title={r.title}>{r.title}</span>}
         description={(
           <>
             <span>{r.schedule}</span>

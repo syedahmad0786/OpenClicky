@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ShellState } from "../contract";
 import { Badge, Group, PillButton, Row } from "../ui";
 import { act } from "./common";
@@ -21,9 +21,18 @@ function Pick({ label, value, options, onChange }: {
   );
 }
 
+/** After Connect the host opens the browser and moves this card to "waiting"; until then the button shows it is busy. */
+const CONNECT_PENDING_MS = 8_000;
+
 function Chooser({ browser }: { browser: Integrations["browser"] }) {
   const [pickedBrowser, setPickedBrowser] = useState<string | null>(null);
   const [pickedProfile, setPickedProfile] = useState<string | null>(null);
+  const [connecting, setConnecting] = useState(false);
+  useEffect(() => {
+    if (!connecting) return;
+    const t = setTimeout(() => setConnecting(false), CONNECT_PENDING_MS); // nothing came back: let the user try again
+    return () => clearTimeout(t);
+  }, [connecting]);
   const known = (id: string | null) => browser.browsers.find((b) => b.id === id);
   const chosen = known(pickedBrowser) ?? known(browser.browserId) ?? browser.browsers[0];
   const profiles = chosen?.profiles ?? [];
@@ -34,13 +43,17 @@ function Chooser({ browser }: { browser: Integrations["browser"] }) {
     <>
       <Row title="Browser">
         <Pick label="Browser" value={chosen?.id ?? ""} options={browser.browsers.map((b) => ({ value: b.id, text: b.name }))}
-          onChange={(id) => { setPickedBrowser(id); setPickedProfile(null); }} />
+          onChange={(id) => { setPickedBrowser(id); setPickedProfile(null); setConnecting(false); }} />
       </Row>
       <Row title="Profile" description="Agents use the sites you're signed in to in this profile, in their own tab group.">
-        <Pick label="Profile" value={profile} options={profiles.map((p) => ({ value: p.dir, text: p.name }))} onChange={setPickedProfile} />
+        <Pick label="Profile" value={profile} options={profiles.map((p) => ({ value: p.dir, text: p.name }))}
+          onChange={(dir) => { setPickedProfile(dir); setConnecting(false); }} />
       </Row>
       <div className="settings-actions">
-        <PillButton variant="primary" disabled={!chosen} onClick={() => chosen && send({ op: "connect", browser: chosen.id, profile })}>Connect</PillButton>
+        <PillButton variant="primary" disabled={!chosen || connecting} aria-busy={connecting || undefined}
+          onClick={() => { if (!chosen) return; setConnecting(true); send({ op: "connect", browser: chosen.id, profile }); }}>
+          {connecting ? "Connecting…" : "Connect"}
+        </PillButton>
       </div>
     </>
   );

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { postPage } from "../bridge";
 import { talkGesture, type JobCard, type ShellState } from "../contract";
 import { STOCK } from "../deck/JobCardView";
-import { Badge, CloseIcon, KeyCaps, PaperCard, PillButton } from "../ui";
+import { Badge, CheckIcon, CloseIcon, KeyCaps, PaperCard, PillButton } from "../ui";
 
 /** Our own copy. 5-11 morning, 12-16 afternoon, 17-21 evening, otherwise neutral. */
 export function greetingFor(hour: number, name: string): string {
@@ -29,7 +29,7 @@ function PlanChecklist({ plan }: { plan: JobCard["plan"] }) {
       <p className="notch-job__plan-count">{done} of {plan.length} steps</p>
       {plan.map((step, i) => (
         <div key={i} role="checkbox" aria-checked={step.done} aria-readonly="true" data-done={step.done} className="notch-job__step">
-          <span className="notch-job__tick" aria-hidden="true">{step.done ? "✓" : ""}</span>
+          <span className="notch-job__tick" aria-hidden="true">{step.done ? <CheckIcon /> : null}</span>
           <span className="notch-job__step-text">{step.text}</span>
         </div>
       ))}
@@ -74,7 +74,7 @@ function FeaturedJob({ job }: { job: JobCard }) {
     <PaperCard stock={STOCK[job.colour]} title={job.title} className="notch-job">
       {job.state === "new" ? <span className="notch-job__tag"><Badge tone="muted">New</Badge></span> : null}
       {dismissible ? (
-        <button type="button" className="notch-job__close" aria-label="Dismiss" onClick={() => postPage({ kind: "job.dismiss", id: job.id })}><CloseIcon /></button>
+        <button type="button" className="notch-job__close oc-hit" aria-label="Dismiss" onClick={() => postPage({ kind: "job.dismiss", id: job.id })}><CloseIcon /></button>
       ) : null}
       {job.summary ? <p className="notch-job__summary">{job.summary}</p> : null}
       {job.stat ? <p className="notch-job__stat"><strong>{job.stat.value}</strong> {job.stat.label}</p> : null}

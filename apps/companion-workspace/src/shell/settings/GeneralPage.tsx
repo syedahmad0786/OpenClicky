@@ -13,9 +13,9 @@ const BEHAVIOUR: { key: GeneralKey; title: string; description: string }[] = [
 function UpdateButton({ update }: { update: ShellState["update"] }) {
   switch (update.state) {
     case "available": return <PillButton variant="primary" onClick={() => postPage({ kind: "update.install" })}>Download v{update.available}</PillButton>;
-    case "downloading": return <PillButton disabled>Downloading {Math.round(update.progress * 100)}%</PillButton>;
+    case "downloading": return <PillButton disabled aria-busy="true">Downloading {Math.round(update.progress * 100)}%</PillButton>;
     case "ready": return <PillButton variant="primary" onClick={() => postPage({ kind: "update.install" })}>Downloaded — open folder</PillButton>;
-    case "checking": return <PillButton disabled>Checking…</PillButton>;
+    case "checking": return <PillButton disabled aria-busy="true">Checking…</PillButton>;
     case "error": return <PillButton onClick={() => postPage({ kind: "update.check" })}>Couldn't check — try again</PillButton>;
     default: return <PillButton onClick={() => postPage({ kind: "update.check" })}>Check for updates</PillButton>;
   }

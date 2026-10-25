@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { MAX_CONNECTOR_ADD_ARG, type Connector } from "../connectorsContract";
-import { Group, PillButton, Segmented } from "../ui";
+import { ChevronIcon, Group, PillButton, Segmented } from "../ui";
 import { act } from "./common";
 
 // Client-side mirror of OpenClicky.Core ConnectorFields / ConnectorRequest (same limits, same copy). The host re-validates everything.
@@ -191,7 +191,7 @@ export function ConnectorEditor({ connectors, toasts, preset, onClose }: { conne
         </>
       )}
       <div className="settings-field">
-        <button type="button" className="settings-disclosure" aria-expanded={advanced} onClick={() => setAdvanced((on) => !on)}>Advanced</button>
+        <button type="button" className="settings-disclosure" aria-expanded={advanced} onClick={() => setAdvanced((on) => !on)}><ChevronIcon />Advanced</button>
         {/* A collapsed Advanced section still blocks Add: say why (switching auth can make typed headers invalid). */}
         {!advanced && (headerError ?? envError) ? <span role="alert" className="settings-field__error">{headerError ?? envError}</span> : null}
       </div>
@@ -220,7 +220,7 @@ export function ConnectorEditor({ connectors, toasts, preset, onClose }: { conne
       {tooLong ? <p role="alert" className="settings-field__error settings-connector-secret-hint">That's too much to send at once. Shorten the headers or variables.</p> : null}
       <div className="settings-actions">
         <PillButton size="sm" variant="outline" onClick={onClose}>Cancel</PillButton>
-        <PillButton size="sm" variant="primary" disabled={!canAdd} onClick={add}>{pending ? "Adding…" : "Add connector"}</PillButton>
+        <PillButton size="sm" variant="primary" disabled={!canAdd} aria-busy={pending ? true : undefined} onClick={add}>{pending ? "Adding…" : "Add connector"}</PillButton>
       </div>
     </Group>
   );

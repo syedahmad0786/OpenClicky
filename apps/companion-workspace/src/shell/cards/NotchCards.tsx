@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { postPage } from "../bridge";
 import type { NotchCard } from "../contract";
-import { CloseIcon, PillButton, type PillVariant } from "../ui";
+import { announce, CloseIcon, PillButton, type PillVariant } from "../ui";
 import "./cards.css";
 
 export const MAX_VISIBLE_CARDS = 3;
@@ -90,7 +90,7 @@ function CardView({ card, onDismiss, active }: { card: NotchCard; onDismiss: (id
           </div>
         ) : null}
       </div>
-      <button type="button" className="notch-card__close" aria-label="Dismiss notification" onClick={() => onDismiss(card.id)}><CloseIcon /></button>
+      <button type="button" className="notch-card__close oc-hit" aria-label="Dismiss notification" onClick={() => onDismiss(card.id)}><CloseIcon /></button>
     </div>
   );
 }
@@ -115,6 +115,14 @@ export function NotchCards({ cards, active = true, onPointerEnter, onPointerLeav
     return kept.length === old.size ? old : new Set(kept);
   }), [ids]);
 
+  // A card that arrives after the page is up is read once through the live region (title, then body).
+  const known = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    const fresh = known.current ? cards.filter((c) => !known.current!.has(c.id)).slice(0, MAX_VISIBLE_CARDS) : [];
+    known.current = new Set(cards.map((c) => c.id));
+    if (fresh.length) announce(fresh.map((c) => (c.body ? `${c.title}. ${c.body}` : c.title)).join(". "));
+  }, [ids]); // eslint-disable-line react-hooks/exhaustive-deps -- the id list is the change
+
   const dismiss = (id: string) => { setGone((old) => new Set(old).add(id)); postPage({ kind: "card.dismiss", cardId: id }); };
   const visible = cards.filter((c) => !gone.has(c.id)).slice(0, MAX_VISIBLE_CARDS);
 
@@ -127,7 +135,7 @@ export function NotchCards({ cards, active = true, onPointerEnter, onPointerLeav
 
   if (empty) return null;
   return (
-    <div className="notch-cards" aria-live="polite"
+    <div className="notch-cards"
       onPointerEnter={() => { hovered.current = true; onPointerEnter?.(); }}
       onPointerLeave={() => { hovered.current = false; onPointerLeave?.(); }}>
       {visible.map((card) => <CardView key={card.id} card={card} onDismiss={dismiss} active={active} />)}

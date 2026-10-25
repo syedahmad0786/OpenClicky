@@ -40,6 +40,7 @@ function LabelPicker({ initial, saveLabel, onCancel, onSave }: { initial: string
   return (
     <>
       <div className="settings-field">
+        <span className="settings-field__label" aria-hidden="true">Account label</span>
         <Segmented label="Account label" options={LABEL_OPTIONS} value={choice} onChange={setChoice} />
         {choice === "other" ? (
           <input className="settings-input" aria-label="Label" placeholder="Label" maxLength={30} value={other} onChange={(e) => setOther(e.target.value)} />
@@ -68,7 +69,7 @@ function ConnectorRow({ c, multiAccount, open, setOpen }: { c: Connector; multiA
   const renaming = open?.kind === "rename" && open.key === c.key;
   return (
     <>
-      <Row title={title}
+      <Row title={<span className="oc-ellipsis" title={title}>{title}</span>}
         description={(
           <>
             <span>{c.host}</span>
@@ -79,7 +80,8 @@ function ConnectorRow({ c, multiAccount, open, setOpen }: { c: Connector; multiA
         )}>
         <Badge tone={status.tone}>{status.text}</Badge>
         {signIn ? <PillButton size="sm" variant="primary" aria-label={`${signInText} ${title}`} onClick={() => act("connector.signIn", c.key)}>{signInText}</PillButton> : null}
-        {c.status === "signingIn" || c.status === "checking" ? null
+        {c.status === "signingIn" ? null
+          : c.status === "checking" ? <PillButton size="sm" disabled aria-busy="true" aria-label={`Testing ${title}`}>Testing…</PillButton>
           : <PillButton size="sm" aria-label={`Test ${title}`} onClick={() => act("connector.test", c.key)}>Test</PillButton>}
         {multiAccount ? <PillButton size="sm" aria-label={`Rename ${title}`} onClick={() => setOpen({ kind: "rename", key: c.key })}>Rename</PillButton> : null}
         <PillButton size="sm" variant="danger" ref={trigger} aria-label={`${vault ? "Disconnect" : "Remove"} ${title}`} onClick={() => setOpen({ kind: "remove", key: c.key })}>
@@ -167,11 +169,16 @@ export function IntegrationsPage({ state }: { state: ShellState }) {
         {editing ? null : <PillButton onClick={() => setEditing({ preset: null })}>Add custom connector</PillButton>}
       </div>
       {editing ? <ConnectorEditor key={editing.preset?.app ?? ""} connectors={connectors} toasts={toasts} preset={editing.preset} onClose={closeEditor} /> : null}
-      {q && groups.length === 0 && available.length === 0 ? <p className="settings-empty">{`Nothing matches “${query.trim()}”.`}</p> : (
+      {q && groups.length === 0 && available.length === 0 ? (
+        <div className="settings-empty">
+          <p>{`Nothing matches “${query.trim()}”.`}</p>
+          <PillButton size="sm" variant="outline" onClick={() => setQuery("")}>Clear search</PillButton>
+        </div>
+      ) : (
         <>
           {q && groups.length === 0 ? null : (
             <Group title="Connected">
-              {groups.length === 0 ? <Row title="Nothing connected yet." /> : groups.map(renderGroup)}
+              {groups.length === 0 ? <Row title="Nothing connected yet." description="Connect an app from the list below, or add a custom connector." /> : groups.map(renderGroup)}
             </Group>
           )}
           {q && available.length === 0 ? null : (

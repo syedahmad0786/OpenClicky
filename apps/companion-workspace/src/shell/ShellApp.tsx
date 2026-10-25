@@ -1,8 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { listenToHost, postPage } from "./bridge";
 import { CaptionsBar } from "./captions/CaptionsBar";
-import type { ShellState } from "./contract";
+import type { JobCard, ShellState } from "./contract";
+import { JOB_STATE_LABEL } from "./deck/JobCardView";
 import { Notch } from "./notch/Notch";
+import { announce, LiveRegion } from "./ui";
 import { useRegions } from "./notch/useRegions";
 
 const MAX_ROW_TEXT = 32_000; // contract limit for a chat row
@@ -12,6 +14,19 @@ function withDelta(state: ShellState, rowId: string, text: string): ShellState {
   if (!state.chat.rows.some((row) => row.id === rowId)) return state;
   const rows = state.chat.rows.map((row) => (row.id === rowId ? { ...row, text: (row.text + text).slice(0, MAX_ROW_TEXT) } : row));
   return { ...state, chat: { rows } };
+}
+
+/** Announces a job whose state changed since the last state (never the jobs already there when the page loads). */
+function useJobAnnouncements(jobs: JobCard[] | undefined) {
+  const seen = useRef<Map<string, JobCard["state"]> | null>(null);
+  useEffect(() => {
+    if (!jobs) return;
+    const before = seen.current;
+    seen.current = new Map(jobs.map((job) => [job.id, job.state]));
+    if (!before) return;
+    const changed = jobs.filter((job) => before.has(job.id) && before.get(job.id) !== job.state);
+    if (changed.length) announce(changed.map((job) => `${job.title}: ${JOB_STATE_LABEL[job.state].text}`).join(". "));
+  }, [jobs]);
 }
 
 export default function ShellApp() {
@@ -27,6 +42,7 @@ export default function ShellApp() {
     postPage({ kind: "bootstrap.request" });
     return stop;
   }, []);
+  useJobAnnouncements(state?.jobs);
   const theme = state?.theme, accent = state?.accent, reduced = state?.reducedMotion;
   useEffect(() => {
     if (theme === undefined) return;
@@ -39,6 +55,7 @@ export default function ShellApp() {
     <>
       {state ? <Notch state={state} /> : null}
       <CaptionsBar />
+      {state ? <LiveRegion /> : null}
     </>
   );
 }

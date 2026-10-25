@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { listenToHost } from "../bridge";
+import { announce } from "../ui";
 import "./captions.css";
 
 export const CLEAR_DELAY_MS = 1_500; // caption.clear → fade starts
@@ -8,10 +9,15 @@ export const FADE_MS = 250;
 export const IDLE_CLEAR_MS = 10_000;
 const KEEP_CHARS = 400; // far more than two lines; older words scroll out above
 
-/** Spoken words, bottom centre, while the host speaks with captions on. Debounced: a word cancels a pending clear. */
+/**
+ * Spoken words, bottom centre, while the host speaks with captions on. Debounced: a word cancels a pending clear.
+ * The bar itself is not a live region (it would read every word); the finished line goes to the shared one.
+ */
 export function CaptionsBar() {
   const [text, setText] = useState("");
   const [fading, setFading] = useState(false);
+  const shown = useRef("");
+  shown.current = text;
 
   useEffect(() => {
     let clearTimer: number | undefined, fadeTimer: number | undefined, idleTimer: number | undefined;
@@ -20,6 +26,7 @@ export function CaptionsBar() {
       if (clearTimer !== undefined || fadeTimer !== undefined) return; // already clearing
       clearTimer = window.setTimeout(() => {
         clearTimer = undefined;
+        announce(shown.current); // the finished line once, not word by word
         setFading(true);
         fadeTimer = window.setTimeout(() => { fadeTimer = undefined; setText(""); setFading(false); }, FADE_MS);
       }, CLEAR_DELAY_MS);
