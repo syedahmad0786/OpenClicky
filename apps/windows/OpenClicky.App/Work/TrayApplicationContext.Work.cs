@@ -34,12 +34,12 @@ internal sealed partial class TrayApplicationContext
     /// <summary>UI thread: the follow-up each job last started with (none: its own request), so Try again asks the same.
     /// ponytail: in memory only; after a restart Try again runs the job's own request.</summary>
     private readonly Dictionary<string, string?> _lastFollowUps = new(StringComparer.Ordinal);
-    /// <summary>A queued job's ask grows with each steer up to this.</summary>
-    private const int MaxQueuedAsk = 8_000;
+    private const string SteerTooLate = "That job has already finished — ask a follow-up instead.";
     /// <summary>UI thread: scheduled runs in flight; the PC stays awake while any is.</summary>
     private int _routineRuns;
 
-    private sealed record QueuedStart(string? FollowUp, string? RoutineId, bool FromTalk, WorkJob Before);
+    /// <param name="Ask">The ask it will start with once steered (its follow-up or request plus each steer); null: not steered.</param>
+    private sealed record QueuedStart(string? FollowUp, string? RoutineId, bool FromTalk, WorkJob Before, string? Ask = null);
 
     /// <summary>A native task or a job run is open (running or paused).</summary>
     private bool TaskOpen => _taskCts is not null || !_jobRuns.IsEmpty;
@@ -197,7 +197,9 @@ internal sealed partial class TrayApplicationContext
             try { _work.RetireNote(run.Job); } // the agent starts a fresh note.md; the last one stays readable
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log("job_note_error=" + ex.GetType().Name); }
             _work.SetJobState(run.Job.Id, WorkJobStates.Running, DateTimeOffset.UtcNow);
-            _lastFollowUps[jobId] = string.IsNullOrWhiteSpace(followUp) ? null : followUp;
+            // Try again replays the user's own follow-up, never a queued steer.
+            var asked = queued is null ? followUp : queued.FollowUp;
+            _lastFollowUps[jobId] = string.IsNullOrWhiteSpace(asked) ? null : asked;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -263,7 +265,7 @@ internal sealed partial class TrayApplicationContext
     /// <summary>UI thread: a queued job's turn.</summary>
     private void StartQueued(string jobId)
     {
-        if (_queuedStarts.Remove(jobId, out var start)) StartJob(jobId, start.FollowUp, start.RoutineId, start.FromTalk, start);
+        if (_queuedStarts.Remove(jobId, out var start)) StartJob(jobId, start.Ask ?? start.FollowUp, start.RoutineId, start.FromTalk, start);
         else ReleaseSlot(jobId); // stopped from its card in the meantime: the slot goes on
     }
 
@@ -380,15 +382,22 @@ internal sealed partial class TrayApplicationContext
     /// The text is the user's own (untrusted) and is never logged.</summary>
     void IShellHost.SteerJob(string id, string text)
     {
-        if (_jobRuns.TryGetValue(id, out var run)) { SteerRun(run, text); return; }
+        if (_jobRuns.TryGetValue(id, out var run)) { _ = SteerFromShellAsync(run, text); return; }
         if (_queuedStarts.TryGetValue(id, out var queued))
         {
-            var ask = string.IsNullOrWhiteSpace(queued.FollowUp) ? text : queued.FollowUp.Trim() + "\n" + text;
-            if (ask.Length > MaxQueuedAsk) { Log("shell: job.steer ignored, the queued ask is full"); return; }
-            _queuedStarts[id] = queued with { FollowUp = ask };
+            // Added to the request (or follow-up) it will start with, so its card's ask reads request + steer.
+            if (JobSteer.Append(queued.Ask ?? queued.FollowUp ?? queued.Before.Prompt, text) is { } ask) _queuedStarts[id] = queued with { Ask = ask };
+            else ClassicMessage("That job's request is already as long as it can be.");
             return;
         }
-        Log("shell: job.steer ignored, that job is not running or queued");
+        ClassicMessage(SteerTooLate); // it ended between the last push and Enter
+    }
+
+    /// <summary>A steer from the job card; the user sees a line when it reached nothing.</summary>
+    private async Task SteerFromShellAsync(JobRun run, string text)
+    {
+        var taken = await SteerRunAsync(run, text).ConfigureAwait(false);
+        if (taken != true) OnUi(() => ClassicMessage(taken == false ? SteerTooLate : "I couldn't pass that on to the job. Try again in a moment."));
     }
 
     /// <summary>A follow-up is a new run of the job (through admission: it may queue).</summary>
@@ -397,15 +406,14 @@ internal sealed partial class TrayApplicationContext
     /// <summary>Try again: a new run asked the same as the last one.</summary>
     void IShellHost.RetryJob(string id) => StartJob(id, _lastFollowUps.GetValueOrDefault(id), routineId: null);
 
-    /// <summary>Any thread: the steer is kept for the run's desktop observations and sent into its running session, if it has one yet.</summary>
-    private void SteerRun(JobRun run, string text)
+    /// <summary>The steer is kept for the run's desktop observations and goes into its session (held until the session exists).
+    /// True: sent or held; false: the run has ended; null: the engine could not be reached. The text is never logged.</summary>
+    private async Task<bool?> SteerRunAsync(JobRun run, string text)
     {
         run.Steer(text);
-        if (run.Server is not { } server) { Log("job_steer_kept_for_observations"); return; }
-        _ = Task.Run(async () =>
-        {
-            try { if (!await server.SendToRunningAsync(text, run.Cts.Token).ConfigureAwait(false)) Log("job_steer_not_sent"); }
-            catch (Exception ex) when (ex is not OutOfMemoryException) { Log("job_steer_error=" + ex.GetType().Name); }
-        });
+        if (run.TryHoldSteer(text)) return true;
+        try { return await run.Server!.SendToRunningAsync(text, run.Cts.Token).ConfigureAwait(false); }
+        catch (Exception ex) when (ex is ObjectDisposedException or OperationCanceledException) { return false; } // stopped or ended meanwhile
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Log("job_steer_error=" + ex.GetType().Name); return null; }
     }
 }

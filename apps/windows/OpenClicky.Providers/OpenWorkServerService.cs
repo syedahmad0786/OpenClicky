@@ -28,6 +28,13 @@ public sealed class OpenWorkServerService : IAsyncDisposable
     private readonly OpenCodeTaskClient _client;
     private readonly SemaphoreSlim _runLock = new(1, 1);
     private string? _activeSessionId;
+    private const string UpdatePrefix = "Update from the user: ";
+    /// <summary>Guards the steer state: updates held until the task prompt is sent, the session they then go to, and whether the run is over.</summary>
+    private readonly object _steerGate = new();
+    private readonly List<string> _heldUpdates = [];
+    private string? _steerSessionId;
+    private bool _runEnded;
+    private int _updatesInFlight, _updatesSent;
     private bool _disposed;
 
     internal OpenWorkServerService(Process process, OpenCodeTaskClient client, string workspaceId, string workspacePath)
@@ -326,6 +333,19 @@ public sealed class OpenWorkServerService : IAsyncDisposable
             _activeSessionId = session.Id;
             progress?.Report(new(OpenCodeTaskUpdateKind.Started, session.Id, "OpenWork task started."));
             await StageAsync("sending the task prompt", () => _client.SendPromptAsync(session.Id, prompt, cancellationToken), cancellationToken).ConfigureAwait(false);
+            // Updates the user sent before the session existed follow the task prompt, in order; later ones go straight in.
+            while (true)
+            {
+                string[] held;
+                lock (_steerGate)
+                {
+                    if (_heldUpdates.Count == 0) { _steerSessionId = session.Id; break; }
+                    held = [.. _heldUpdates];
+                    _heldUpdates.Clear();
+                }
+                foreach (var update in held)
+                    await StageAsync("sending the user's update", () => _client.SendPromptAsync(session.Id, UpdatePrefix + update, cancellationToken), cancellationToken).ConfigureAwait(false);
+            }
             string? lastText = null;
             var seenTools = new HashSet<string>();
             DateTimeOffset? idleWithoutTerminalSince = null;
@@ -336,6 +356,8 @@ public sealed class OpenWorkServerService : IAsyncDisposable
                 var pending = await StageAsync("checking engine permissions", () => _client.GetPendingPermissionsAsync(cancellationToken), cancellationToken).ConfigureAwait(false);
                 if (pending.Any(item => item.SessionId == session.Id))
                     throw new InvalidOperationException("OpenWork requested an unexpected engine permission; the task was stopped.");
+                int sentBefore;
+                lock (_steerGate) sentBefore = _updatesSent;
                 var snapshot = await StageAsync("reading task progress", () => _client.GetMessagesAsync(session.Id, cancellationToken), cancellationToken).ConfigureAwait(false);
                 var error = OpenCodeWorkspaceService.GetAssistantError(snapshot.Messages);
                 if (error is not null) throw new InvalidOperationException(error);
@@ -347,7 +369,7 @@ public sealed class OpenWorkServerService : IAsyncDisposable
                     lastText = visible.Text;
                     progress?.Report(new(OpenCodeTaskUpdateKind.Message, session.Id, visible.Text, visible));
                 }
-                if (snapshot.Status.Type == "idle" && OpenCodeWorkspaceService.HasTerminalAssistantMessage(snapshot.Messages))
+                if (snapshot.Status.Type == "idle" && OpenCodeWorkspaceService.HasTerminalAssistantMessage(snapshot.Messages) && EndUnlessUpdated(sentBefore))
                 {
                     progress?.Report(new(OpenCodeTaskUpdateKind.Completed, session.Id, "OpenWork task finished."));
                     return new(session.Id, snapshot.Messages);
@@ -377,6 +399,7 @@ public sealed class OpenWorkServerService : IAsyncDisposable
         }
         finally
         {
+            lock (_steerGate) { _runEnded = true; _steerSessionId = null; _heldUpdates.Clear(); }
             _activeSessionId = null;
             _runLock.Release();
         }
@@ -393,12 +416,34 @@ public sealed class OpenWorkServerService : IAsyncDisposable
         CancellationToken cancellationToken = default) => RunAsync(title, prompt, progress, cancellationToken);
 
     /// <summary>The user's words, sent into the running task's session as a user message ("Update from the user: ..."), which the
-    /// engine takes up at its next step. False when no task session is open (not started yet, finished, or this server is gone).</summary>
+    /// engine takes up at its next step. Before the task prompt is sent they are held and sent right after it. False once the run
+    /// has ended or this server is gone: nothing was sent.</summary>
     public async Task<bool> SendToRunningAsync(string text, CancellationToken ct)
     {
-        if (_disposed || Volatile.Read(ref _activeSessionId) is not { } id) return false;
-        await _client.SendPromptAsync(id, "Update from the user: " + text, ct).ConfigureAwait(false);
+        string id;
+        lock (_steerGate)
+        {
+            if (_disposed || _runEnded) return false;
+            if (_steerSessionId is null) { _heldUpdates.Add(text); return true; }
+            id = _steerSessionId;
+            _updatesInFlight++;
+        }
+        try { await _client.SendPromptAsync(id, UpdatePrefix + text, ct).ConfigureAwait(false); }
+        catch { lock (_steerGate) _updatesInFlight--; throw; }
+        lock (_steerGate) { _updatesInFlight--; _updatesSent++; }
         return true;
+    }
+
+    /// <summary>The run may end on a finished answer only if no update was being sent or arrived after that snapshot was read
+    /// (the snapshot may predate it); then later updates are refused instead of lost.</summary>
+    private bool EndUnlessUpdated(int sentBefore)
+    {
+        lock (_steerGate)
+        {
+            if (_updatesInFlight > 0 || _updatesSent != sentBefore) return false;
+            _runEnded = true;
+            return true;
+        }
     }
 
     public async Task AbortAsync(CancellationToken cancellationToken = default)

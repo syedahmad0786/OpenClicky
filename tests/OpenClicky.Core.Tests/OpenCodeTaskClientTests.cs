@@ -315,7 +315,7 @@ public class OpenCodeTaskClientTests
                 var part = Assert.Single(body.RootElement.GetProperty("parts").EnumerateArray());
                 Assert.Equal("text", part.GetProperty("type").GetString());
                 lock (prompts) prompts.Add((path, part.GetProperty("text").GetString()!));
-                (prompts.Count == 1 ? started : steered).TrySetResult();
+                (prompts.Count < 3 ? started : steered).TrySetResult();
                 return new HttpResponseMessage(HttpStatusCode.NoContent);
             }
             if (path == "/permission") return Json("[]");
@@ -327,7 +327,7 @@ public class OpenCodeTaskClientTests
         var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("ping.exe", "-n 60 127.0.0.1") { CreateNoWindow = true, UseShellExecute = false })!;
         await using var service = new OpenWorkServerService(process, new OpenCodeTaskClient("http://127.0.0.1:4096/", null, null, http), "ws", Path.GetTempPath());
 
-        Assert.False(await service.SendToRunningAsync("too early", CancellationToken.None)); // no session yet: nothing is sent
+        Assert.True(await service.SendToRunningAsync("early", CancellationToken.None)); // no session yet: held for the task
         using var stop = new CancellationTokenSource();
         var run = service.RunAsync("t", "the task", cancellationToken: stop.Token);
         await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
@@ -337,7 +337,8 @@ public class OpenCodeTaskClientTests
         stop.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
 
-        Assert.Equal([("/session/ses_run/prompt_async", "the task"), ("/session/ses_run/prompt_async", "Update from the user: use the March figures")], prompts);
+        Assert.Equal([("/session/ses_run/prompt_async", "the task"), ("/session/ses_run/prompt_async", "Update from the user: early"),
+            ("/session/ses_run/prompt_async", "Update from the user: use the March figures")], prompts);
         Assert.False(await service.SendToRunningAsync("after the run", CancellationToken.None));
     }
 

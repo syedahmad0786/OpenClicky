@@ -16,6 +16,7 @@ internal sealed class JobRun(WorkJob job, string ask, string? routineId, AgentAc
     private volatile bool _waitingForScreen;
     private string? _steering;
     private OpenWorkServerService? _server;
+    private readonly List<string> _heldSteers = []; // also the lock for _server's hand-over
     private int _steeringRevision;
 
     public WorkJob Job { get; } = job;
@@ -42,8 +43,31 @@ internal sealed class JobRun(WorkJob job, string ask, string? routineId, AgentAc
     public string? Steering => Volatile.Read(ref _steering);
     public int SteeringRevision => Volatile.Read(ref _steeringRevision);
 
-    /// <summary>The run's OpenWork server once it has started; a steer goes into its running session. Set on the run's thread.</summary>
-    public OpenWorkServerService? Server { get => Volatile.Read(ref _server); set => Volatile.Write(ref _server, value); }
+    /// <summary>The run's OpenWork server once it has started; a steer goes into its running session.</summary>
+    public OpenWorkServerService? Server => Volatile.Read(ref _server);
+
+    /// <summary>Before the server is up a steer waits here; true when it was held.</summary>
+    public bool TryHoldSteer(string text)
+    {
+        lock (_heldSteers)
+        {
+            if (_server is not null) return false;
+            _heldSteers.Add(text);
+            return true;
+        }
+    }
+
+    /// <summary>The run's thread, once the server is up: later steers go to it; returns the ones held until now, in order.</summary>
+    public IReadOnlyList<string> AttachServer(OpenWorkServerService server)
+    {
+        lock (_heldSteers)
+        {
+            Volatile.Write(ref _server, server);
+            var held = _heldSteers.ToArray();
+            _heldSteers.Clear();
+            return held;
+        }
+    }
 
     public void Steer(string instruction)
     {

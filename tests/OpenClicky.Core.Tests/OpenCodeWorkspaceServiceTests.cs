@@ -186,6 +186,22 @@ public class OpenCodeWorkspaceServiceTests
     }
 
     [Fact]
+    public void TerminalAssistantEvidence_IgnoresAnAnswerOlderThanTheUsersLatestMessage()
+    {
+        // A steer posted as the engine finished: the finished answer predates it, so the run is not over yet.
+        var messages = new[]
+        {
+            new OpenCodeMessageSummary("msg_user", "user", "Do the task", null, null),
+            new OpenCodeMessageSummary("msg_ai", "assistant", "Done", "stop", null),
+            new OpenCodeMessageSummary("msg_steer", "user", "Update from the user: use March", null, null),
+        };
+
+        Assert.False(OpenCodeWorkspaceService.HasTerminalAssistantMessage(messages));
+        Assert.True(OpenCodeWorkspaceService.HasTerminalAssistantMessage(
+            [.. messages, new OpenCodeMessageSummary("msg_ai2", "assistant", "Done with March", "stop", null)]));
+    }
+
+    [Fact]
     public void AssistantError_IsTerminalFailureEvidence()
     {
         var messages = new[]

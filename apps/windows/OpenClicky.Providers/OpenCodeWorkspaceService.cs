@@ -385,8 +385,9 @@ public sealed class OpenCodeWorkspaceService : IAsyncDisposable
 
     internal static bool HasTerminalAssistantMessage(IReadOnlyList<OpenCodeMessageSummary> messages)
     {
-        var message = messages.LastOrDefault(message => message.Role == "assistant");
-        return message is not null
+        // A user message newer than the answer (a steer posted as the engine finished) is still to be answered.
+        var message = messages.LastOrDefault(message => message.Role is "assistant" or "user");
+        return message is { Role: "assistant" }
             && !string.IsNullOrWhiteSpace(message.Text)
             && message.FinishReason is "stop" or "length" or "content-filter" or "unknown"
             && message.Error is null;
