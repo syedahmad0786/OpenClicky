@@ -275,7 +275,7 @@ Order:
 3. **microphone**
    - Badge: "Permission 1 of 2"
    - Title: "Let me hear you"
-   - Body: "I only listen while you hold the talk keys or dictate. Windows decides whether desktop apps may use the microphone, and you choose there."
+   - Body: "I only listen after you press the talk keys, start a conversation or dictate. Windows decides whether desktop apps may use the microphone, and you choose there."
    - Status line, from the reach item with id `microphone`:
      - allowed: "Windows lets OpenClicky use the microphone."
      - denied: "Windows is blocking desktop apps from the microphone. Turn on \u201cLet desktop apps access your microphone\u201d, then check again."
@@ -311,7 +311,7 @@ Order:
    - Privacy: "Your words and screenshots go to your model provider."
 7. **drawDemo**
    - Title: "I can draw on your screen"
-   - Body: "When it helps, I sketch right over your apps: circles, arrows and notes that never change the app underneath. This sample runs on this PC and sends nothing."
+   - Body: "When it helps, I sketch right over your apps: circles, arrows and notes that never change the app underneath. This sample runs on this PC; nothing from your screen is sent."
    - Button: **Show me** (`onboarding drawDemo`), disabled while busy.
    - When `stepDone`: "✓ Press Esc to wipe it."
 8. **circleToAsk**
@@ -334,7 +334,7 @@ Order:
 11. **dictation**
     - Title: "Dictate into any app"
     - Body: "Click into a text box in another app, such as Notepad. {dictateVerb} {dictate}, speak, then let go: your words appear at the cursor. {handsFreeVerb} {handsFree} to keep dictating hands-free."
-    - Privacy: "Your voice becomes text on this PC. With Tidy up with AI on, the words and the text around the cursor go to your model provider."
+    - Privacy: "Your voice becomes text on this PC. With Tidy up with AI on, the words, the app name and the text around the cursor go to your model provider."
     - When `settings.microphone.whisper !== "ready"`: note "Dictation needs the local voice. Download it in Settings → Microphone." with the button **Open Microphone settings**.
     - When `stepDone`: "✓ Nicely done."
 12. **finale**
@@ -342,7 +342,7 @@ Order:
     - Body: "Hover the bar at the top of your screen for Home, Chat and Settings. You can take this tour again from Settings → General."
     - Button: **Show me Home** (`onboarding finish`) instead of Continue/Skip; Back stays.
 
-**General page:** add a group titled "Welcome tour" with a row titled "Replay the welcome tour", description "Walk through talking, drawing, dictation and the practice run again.", and the button **Start tour** (posts `onboarding start`).
+**General page:** add a group titled "Welcome tour" with a row titled "Replay the welcome tour", description "Walk through talking, drawing, dictation and the practice run again.", and the button **Start tour** (posts `onboarding start`, then `notch.open false`: the tour card is hidden while the notch is open on Settings).
 
 - [ ] **Step 1: Write the failing tests** (`Onboarding.test.tsx`; mock the host as `notch-extras.test.tsx` does):
   - `contract lists match the shared onboarding fixture` (`onboardingSteps`, `onboardingActions`);

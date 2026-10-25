@@ -89,7 +89,7 @@ export function stepView(state: ShellState, tour: Tour): StepView {
       return {
         badge: "Permission 1 of 2",
         title: "Let me hear you",
-        body: "I only listen while you hold the talk keys or dictate. Windows decides whether desktop apps may use the microphone, and you choose there.",
+        body: "I only listen after you press the talk keys, start a conversation or dictate. Windows decides whether desktop apps may use the microphone, and you choose there.",
         extra: (
           <>
             <p role="status" className="onboarding__status">{MIC_ACCESS[s.agents.reach.find((r) => r.id === "microphone")?.state ?? "unknown"]}</p>
@@ -137,7 +137,7 @@ export function stepView(state: ShellState, tour: Tour): StepView {
     case "drawDemo":
       return {
         title: "I can draw on your screen",
-        body: "When it helps, I sketch right over your apps: circles, arrows and notes that never change the app underneath. This sample runs on this PC and sends nothing.",
+        body: "When it helps, I sketch right over your apps: circles, arrows and notes that never change the app underneath. This sample runs on this PC; nothing from your screen is sent.",
         extra: (
           <>
             <div className="onboarding__actions">
@@ -194,7 +194,7 @@ export function stepView(state: ShellState, tour: Tour): StepView {
         body: <>Click into a text box in another app, such as Notepad. {verb("dictate")} {keys("dictate")}, speak, then let go: your words appear at the cursor. {verb("handsFree")} {keys("handsFree")} to keep dictating hands-free.</>,
         extra: (
           <>
-            <Privacy>Your voice becomes text on this PC. With Tidy up with AI on, the words and the text around the cursor go to your model provider.</Privacy>
+            <Privacy>Your voice becomes text on this PC. With Tidy up with AI on, the words, the app name and the text around the cursor go to your model provider.</Privacy>
             {s.microphone.whisper !== "ready" ? (
               <Note text="Dictation needs the local voice. Download it in Settings → Microphone.">
                 <PillButton size="sm" onClick={() => openSettings("microphone")}>Open Microphone settings</PillButton>

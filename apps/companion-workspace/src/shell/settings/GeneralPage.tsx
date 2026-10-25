@@ -42,7 +42,8 @@ export function GeneralPage({ state }: { state: ShellState }) {
       </Group>
       <Group title="Welcome tour">
         <Row title="Replay the welcome tour" description="Walk through talking, drawing, dictation and the practice run again.">
-          <PillButton onClick={() => postPage({ kind: "onboarding", action: "start" })}>Start tour</PillButton>
+          {/* Close Settings too: the tour card is hidden while the Settings panel is open. */}
+          <PillButton onClick={() => { postPage({ kind: "onboarding", action: "start" }); postPage({ kind: "notch.open", open: false }); }}>Start tour</PillButton>
         </Row>
       </Group>
       <Group title="Help">

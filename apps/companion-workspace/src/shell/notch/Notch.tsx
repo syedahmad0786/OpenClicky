@@ -114,7 +114,8 @@ export function Notch({ state }: { state: ShellState }) {
         </div>
         {phase === "open" && tab === "home" ? <JobDeck jobs={state.jobs} featuredId={state.featured?.id ?? null} /> : null}
       </div>
-      <Onboarding state={state} />
+      {/* Under the 920x720 Settings panel the card would be off-screen or lose its region on a laptop; it returns when Settings closes. */}
+      {expanded && tab === "settings" ? null : <Onboarding state={state} />}
       <NotchCards cards={state.cards} active={phase !== "closing"} onPointerEnter={onCardsEnter} onPointerLeave={onCardsLeave} />
     </div>
   );

@@ -107,6 +107,7 @@ it("microphone card shows the denied copy and opens the microphone page", () => 
   });
   const { rerender } = render(<Onboarding state={withMic("denied")} />);
   expect(screen.getByText("Permission 1 of 2")).toBeInTheDocument();
+  expect(screen.getByText("I only listen after you press the talk keys, start a conversation or dictate. Windows decides whether desktop apps may use the microphone, and you choose there.")).toBeInTheDocument();
   expect(screen.getByText("Windows is blocking desktop apps from the microphone. Turn on “Let desktop apps access your microphone”, then check again.")).toBeInTheDocument();
   expect(screen.getByText(/^Dictation always turns speech into text on this PC\./)).toBeInTheDocument();
   fireEvent.click(button("Open microphone settings"));
@@ -177,6 +178,7 @@ it("voice hello shows the talk keys and the account note without a provider", ()
 it("draw demo starts on click and tells how to wipe it when done", () => {
   const host = mockHost();
   const { rerender } = render(<Onboarding state={tour("drawDemo")} />);
+  expect(screen.getByText(/This sample runs on this PC; nothing from your screen is sent\.$/)).toBeInTheDocument();
   fireEvent.click(button("Show me"));
   expect(host.tour()).toEqual(["drawDemo"]);
   expect(screen.queryByText("Press Esc to wipe it.")).toBeNull();
@@ -211,6 +213,7 @@ it("text mode and dictation name their own shortcuts and gestures", () => {
   expect(container.querySelector(".onboarding__body")).toHaveTextContent("Double-tap CtrlAltT and a text box opens up here.");
   rerender(<Onboarding state={tour("dictation")} />);
   expect(container.querySelector(".onboarding__body")).toHaveTextContent("Hold CtrlAltD, speak, then let go: your words appear at the cursor. Double-tap CtrlAltH to keep dictating hands-free.");
+  expect(screen.getByText("Your voice becomes text on this PC. With Tidy up with AI on, the words, the app name and the text around the cursor go to your model provider.")).toBeInTheDocument();
   expect(screen.getByText("Dictation needs the local voice. Download it in Settings → Microphone.")).toBeInTheDocument();
   fireEvent.click(button("Open Microphone settings"));
   expect(host.all()).toEqual([{ kind: "notch.tab", tab: "settings" }, { kind: "settings.section", section: "microphone" }, { kind: "notch.open", open: true }]);
@@ -233,4 +236,14 @@ it("the tour card is a reported region inside the notch shell", () => {
   expect(container.querySelector(".notch-shell > .onboarding[data-region]")).not.toBeNull();
   rerender(<Notch state={fixture} />);
   expect(container.querySelector(".onboarding")).toBeNull();
+});
+
+it("the tour card hides while the notch is open on Settings and is back on Home", () => {
+  mockHost();
+  const at = (tab: "settings" | "home") => tour("micCheck", {}, (s) => { s.notch = { ...s.notch, open: true, tab }; });
+  const { container, rerender } = render(<Notch state={at("settings")} />);
+  expect(container.querySelector(".notch--settings")).not.toBeNull();
+  expect(container.querySelector(".onboarding")).toBeNull();
+  rerender(<Notch state={at("home")} />);
+  expect(container.querySelector(".onboarding[data-region]")).not.toBeNull();
 });
