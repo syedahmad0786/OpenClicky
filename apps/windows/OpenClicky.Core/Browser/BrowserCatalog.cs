@@ -102,9 +102,10 @@ public static class BrowserCatalog
         try
         {
             using var doc = JsonDocument.Parse(localStateJson);
-            if (!doc.RootElement.TryGetProperty("profile", out var profile) ||
-                !profile.TryGetProperty("info_cache", out var cache) ||
-                cache.ValueKind != JsonValueKind.Object)
+            // Valid JSON need not be an object: TryGetProperty throws on any other kind.
+            if (doc.RootElement.ValueKind != JsonValueKind.Object ||
+                !doc.RootElement.TryGetProperty("profile", out var profile) || profile.ValueKind != JsonValueKind.Object ||
+                !profile.TryGetProperty("info_cache", out var cache) || cache.ValueKind != JsonValueKind.Object)
                 return fallback;
             var list = new List<BrowserProfile>();
             foreach (var p in cache.EnumerateObject())

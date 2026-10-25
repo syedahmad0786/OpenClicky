@@ -75,6 +75,12 @@ public sealed class BrowserCatalogTests
     [InlineData("")]
     [InlineData("{not json")]
     [InlineData("{}")]
+    [InlineData("[]")]
+    [InlineData("null")]
+    [InlineData("5")]
+    [InlineData("""{"profile":5}""")]
+    [InlineData("""{"profile":[]}""")]
+    [InlineData("""{"profile":{"info_cache":[]}}""")]
     public void BrokenLocalStateGivesDefault(string? json) =>
         Assert.Equal([new BrowserProfile("Default", "Default")], BrowserCatalog.ParseProfiles(json));
 

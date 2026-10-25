@@ -70,6 +70,20 @@ public sealed class BrowserNativeHostRegistrarTests : IDisposable
     }
 
     [Fact]
+    public void InstallExtensionWithoutSourceManifestThrowsAndLeavesTarget()
+    {
+        var src = Path.Combine(_dir, "src");
+        var dst = Path.Combine(_dir, "dst");
+        Directory.CreateDirectory(src);
+        Directory.CreateDirectory(dst);
+        File.WriteAllText(Path.Combine(src, "a.js"), "new");
+        File.WriteAllText(Path.Combine(dst, "loaded.js"), "keep");
+        Assert.Throws<FileNotFoundException>(() => BrowserNativeHostRegistrar.InstallExtension(src, dst));
+        Assert.Equal(["loaded.js"], Directory.GetFiles(dst).Select(Path.GetFileName));
+        Assert.Equal("keep", File.ReadAllText(Path.Combine(dst, "loaded.js")));
+    }
+
+    [Fact]
     public void InstallExtensionCopiesOnlyExtensionFiles()
     {
         var src = Path.Combine(_dir, "src");

@@ -56,6 +56,9 @@ public static class BrowserNativeHostRegistrar
     /// <summary>Copies manifest.json, *.js, *.mjs, *.html and icons\* (never test\ or README); removes stale files of those kinds.</summary>
     public static string InstallExtension(string sourceFolder, string targetFolder)
     {
+        // Fail before touching the target: stale-file removal below would otherwise wipe a loaded extension folder.
+        var manifest = Path.Combine(sourceFolder, "manifest.json");
+        if (!File.Exists(manifest)) throw new FileNotFoundException("Extension source has no manifest.json.", manifest);
         Directory.CreateDirectory(targetFolder);
         var code = new[] { ".js", ".mjs", ".html" };
         // Filter by exact extension: Windows wildcard matching lets "*.mjs" also match ".mjsx".
@@ -66,23 +69,22 @@ public static class BrowserNativeHostRegistrar
         {
             Directory.CreateDirectory(destDir);
             var name = Path.GetFileName(src);
-            wanted.Add(Path.Combine(destDir, name));
+            wanted.Add(Path.GetFullPath(Path.Combine(destDir, name)));
             File.Copy(src, Path.Combine(destDir, name), true);
         }
 
-        var manifest = Path.Combine(sourceFolder, "manifest.json");
-        if (File.Exists(manifest)) Copy(manifest, targetFolder);
+        Copy(manifest, targetFolder);
         foreach (var f in Files(sourceFolder)) Copy(f, targetFolder);
         var icons = Path.Combine(sourceFolder, "icons");
         if (Directory.Exists(icons))
             foreach (var f in Directory.GetFiles(icons)) Copy(f, Path.Combine(targetFolder, "icons"));
 
         foreach (var f in Files(targetFolder))
-            if (!wanted.Contains(f)) File.Delete(f);
+            if (!wanted.Contains(Path.GetFullPath(f))) File.Delete(f);
         var targetIcons = Path.Combine(targetFolder, "icons");
         if (Directory.Exists(targetIcons))
             foreach (var f in Directory.GetFiles(targetIcons))
-                if (!wanted.Contains(f)) File.Delete(f);
+                if (!wanted.Contains(Path.GetFullPath(f))) File.Delete(f);
         return targetFolder;
     }
 }
