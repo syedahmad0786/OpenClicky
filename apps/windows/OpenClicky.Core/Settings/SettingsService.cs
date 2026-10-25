@@ -178,9 +178,9 @@ public static class SettingsActionArgs
         routine with { IsPaused = false, NextRunAt = RoutineSchedule.NextAfter(routine, now, zone), ConsecutiveFailures = 0 };
 
     /// <summary>Routines whose job still exists, titled by that job. Paused routines show no next run and say their last outcome.
-    /// <paramref name="waitingForNetwork"/>: routine ids the last scheduler tick could not start for want of the network.</summary>
+    /// <paramref name="waiting"/>: routines the last scheduler tick could not start (the network or sign-in), by id, with the line to show.</summary>
     public static IReadOnlyList<RoutineView> RoutineViews(IReadOnlyList<Routine> routines, IReadOnlyList<WorkJob> jobs,
-        IReadOnlySet<string>? waitingForNetwork = null)
+        IReadOnlyDictionary<string, string>? waiting = null)
     {
         var byId = jobs.ToDictionary(j => j.Id, StringComparer.Ordinal);
         return routines.Where(r => byId.ContainsKey(r.JobId)).Select(r =>
@@ -188,13 +188,13 @@ public static class SettingsActionArgs
             var job = byId[r.JobId];
             var status = r.IsPaused ? RoutineStatus.Paused
                 : job.Status == WorkJobStates.Running ? RoutineStatus.Running
-                : waitingForNetwork?.Contains(r.Id) == true ? RoutineStatus.Waiting
+                : waiting?.ContainsKey(r.Id) == true ? RoutineStatus.Waiting
                 : r.ConsecutiveFailures > 0 ? RoutineStatus.Failed
                 : RoutineStatus.Scheduled;
             var note = status switch
             {
                 RoutineStatus.Paused when !string.IsNullOrWhiteSpace(r.LastOutcome) => r.LastOutcome.Trim(),
-                RoutineStatus.Waiting => Work.RoutineScheduler.WaitingLine,
+                RoutineStatus.Waiting => waiting![r.Id],
                 _ => null,
             };
             return new RoutineView(r.Id, string.IsNullOrWhiteSpace(job.Title) ? "Job" : job.Title.Trim(), RoutineSchedule.Describe(r),

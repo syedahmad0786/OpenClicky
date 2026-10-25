@@ -115,7 +115,7 @@ public class WorkStoreTests
         Assert.True(RoutineSchedule.IsDue(routine, finished));
 
         // A missed run runs once; the next slot counts from its finish, so missed days never burst.
-        var ok = RoutineSchedule.AfterRun(routine, true, "done", finished, Utc);
+        var ok = RoutineSchedule.AfterRun(routine, RoutineRunEnd.Succeeded, "done", finished, Utc);
         Assert.Equal(new DateTimeOffset(2026, 10, 25, 9, 0, 0, TimeSpan.Zero), ok.NextRunAt);
         Assert.Equal(0, ok.ConsecutiveFailures);
         Assert.Equal("done", ok.LastOutcome);
@@ -129,14 +129,27 @@ public class WorkStoreTests
     {
         var finished = new DateTimeOffset(2026, 10, 24, 12, 0, 0, TimeSpan.Zero);
         var routine = Routine(RoutineCadence.Daily, minute: 9 * 60) with { NextRunAt = finished.AddHours(-3) };
-        var once = RoutineSchedule.AfterRun(routine, false, "error", finished, Utc);
+        var once = RoutineSchedule.AfterRun(routine, RoutineRunEnd.Failed, "error", finished, Utc);
         Assert.Equal(finished.AddSeconds(300), once.NextRunAt);
         Assert.Equal(1, once.ConsecutiveFailures);
         Assert.False(once.IsPaused);
-        var twice = RoutineSchedule.AfterRun(once, false, "error", finished.AddSeconds(400), Utc);
+        var twice = RoutineSchedule.AfterRun(once, RoutineRunEnd.Failed, "error", finished.AddSeconds(400), Utc);
         Assert.Equal(finished.AddSeconds(700), twice.NextRunAt); // always 300 s after that run, never growing
         Assert.Equal(2, twice.ConsecutiveFailures);
         Assert.False(twice.IsPaused);
+    }
+
+    [Fact]
+    public void AfterRun_UserStopAdvancesWithoutTouchingFailures()
+    {
+        var finished = new DateTimeOffset(2026, 10, 24, 12, 0, 0, TimeSpan.Zero);
+        var routine = Routine(RoutineCadence.Daily, minute: 9 * 60) with { NextRunAt = finished.AddHours(-3), ConsecutiveFailures = 2 };
+        var stopped = RoutineSchedule.AfterRun(routine, RoutineRunEnd.Stopped, "Stopped by you.", finished, Utc);
+        Assert.Equal(new DateTimeOffset(2026, 10, 25, 9, 0, 0, TimeSpan.Zero), stopped.NextRunAt); // the next slot, not a retry
+        Assert.Equal(2, stopped.ConsecutiveFailures); // neither counted nor reset
+        Assert.False(stopped.IsPaused);
+        Assert.Equal("Stopped by you.", stopped.LastOutcome);
+        Assert.Equal(finished, stopped.LastRunAt);
     }
 
     [Fact]
@@ -144,7 +157,7 @@ public class WorkStoreTests
     {
         var finished = new DateTimeOffset(2026, 10, 24, 12, 0, 0, TimeSpan.Zero);
         var failed = Routine(RoutineCadence.Daily, minute: 9 * 60) with { NextRunAt = finished };
-        for (var i = 0; i < 3; i++) failed = RoutineSchedule.AfterRun(failed, false, "error", finished, Utc);
+        for (var i = 0; i < 3; i++) failed = RoutineSchedule.AfterRun(failed, RoutineRunEnd.Failed, "error", finished, Utc);
         Assert.True(failed.IsPaused);
         Assert.Equal(3, failed.ConsecutiveFailures);
         Assert.Equal("Paused after 3 failed runs", failed.LastOutcome);

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using OpenClicky.Core.Settings;
 using OpenClicky.Core.Shell;
+using OpenClicky.Core.Work;
 
 namespace OpenClicky.Core.Tests;
 
@@ -267,7 +268,10 @@ public class SettingsServiceTests
             Daily(failures: 1) with { Id = "r6" },
             Daily() with { Id = "r7", JobId = "j2" },
         ];
-        var views = SettingsActionArgs.RoutineViews(routines, [job, running], waitingForNetwork: new HashSet<string> { "r6", "r7", "r2" });
+        var views = SettingsActionArgs.RoutineViews(routines, [job, running], waiting: new Dictionary<string, string>
+        {
+            ["r6"] = RoutineScheduler.WaitingLine, ["r7"] = RoutineScheduler.SignInLine, ["r2"] = RoutineScheduler.WaitingLine,
+        });
         Assert.Equal(["r1", "r2", "r3", "r4", "r6", "r7"], views.Select(v => v.Id));
         Assert.Equal("Morning brief", views[0].Title);
         Assert.Equal("Every day at 09:00", views[0].Schedule);
@@ -279,6 +283,9 @@ public class SettingsServiceTests
         Assert.Null(views[1].Next); // a paused routine has no next run
         Assert.Equal("Paused after 3 failed runs", views[1].Note);
         Assert.Equal("Waiting for the internet", views[4].Note);
+        var signIn = SettingsActionArgs.RoutineViews([Daily()], [job], new Dictionary<string, string> { ["r1"] = RoutineScheduler.SignInLine });
+        Assert.Equal(RoutineStatus.Waiting, signIn[0].Status);
+        Assert.Equal("Sign in to ChatGPT to run routines", signIn[0].Note);
         Assert.Null(views[0].Note);
         Assert.Null(views[2].Note);
         Assert.Null(views[3].Note);

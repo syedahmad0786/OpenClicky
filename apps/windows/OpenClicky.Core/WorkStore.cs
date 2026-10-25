@@ -576,11 +576,13 @@ public static class RoutineSchedule
     public static bool IsDue(Routine routine, DateTimeOffset now) => !routine.IsPaused && routine.NextRunAt <= now;
 
     /// <summary>A missed run (app closed or PC asleep) runs once on return; the next time is counted from its finish, so missed runs never pile up.
-    /// A failure retries <see cref="RoutineScheduler.RetryAfter"/> later; the third in a row pauses the routine.</summary>
-    public static Routine AfterRun(Routine routine, bool succeeded, string outcome, DateTimeOffset finishedAt, TimeZoneInfo zone)
+    /// A failure retries <see cref="RoutineScheduler.RetryAfter"/> later; the third in a row pauses the routine. A user stop moves to the next
+    /// slot and leaves the failure count as it was.</summary>
+    public static Routine AfterRun(Routine routine, RoutineRunEnd end, string outcome, DateTimeOffset finishedAt, TimeZoneInfo zone)
     {
-        if (succeeded)
-            return routine with { NextRunAt = NextAfter(routine, finishedAt, zone), LastRunAt = finishedAt, LastOutcome = outcome, ConsecutiveFailures = 0 };
+        if (end != RoutineRunEnd.Failed)
+            return routine with { NextRunAt = NextAfter(routine, finishedAt, zone), LastRunAt = finishedAt, LastOutcome = outcome,
+                ConsecutiveFailures = end == RoutineRunEnd.Succeeded ? 0 : routine.ConsecutiveFailures };
         var failures = routine.ConsecutiveFailures + 1;
         if (failures >= RoutineScheduler.PauseAfterFailures)
             return routine with { IsPaused = true, NextRunAt = NextAfter(routine, finishedAt, zone), LastRunAt = finishedAt,

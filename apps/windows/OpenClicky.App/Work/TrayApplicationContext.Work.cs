@@ -23,10 +23,16 @@ internal sealed partial class TrayApplicationContext
     private bool _routineTicking;
     /// <summary>UI thread: no routine starts before this, set for three minutes after the PC wakes.</summary>
     private DateTimeOffset? _routineHoldUntil;
-    /// <summary>UI thread: routines the last tick could not start for want of the network (shown as Waiting). In memory only.</summary>
-    private IReadOnlySet<string> _routinesWaiting = new HashSet<string>();
-    /// <summary>UI thread: held while an unpaused routine exists and the PC is on mains power.</summary>
+    /// <summary>UI thread: when the last routine tick ran; a long gap since means the PC slept (<see cref="RoutineScheduler.HoldAfterGap"/>).</summary>
+    private DateTimeOffset? _lastRoutineTick;
+    /// <summary>UI thread: routines the last tick could not start (the network or sign-in), by id, with the line their row shows. In memory only.</summary>
+    private IReadOnlyDictionary<string, string> _routinesWaiting = new Dictionary<string, string>();
+    /// <summary>UI thread: the user has been told routines wait for sign-in; told again only after they stopped waiting.</summary>
+    private bool _routinesSignInNoted;
+    /// <summary>UI thread: see <see cref="RoutineScheduler.KeepAwake"/>.</summary>
     private readonly PowerKeepAwake _keepAwake = new();
+    /// <summary>UI thread: Windows refused the power request; logged once until the wanted state changes.</summary>
+    private bool _keepAwakeRefused;
     /// <summary>Running job runs by job id. Added on admission, removed when the run ends (on the run's thread).</summary>
     private readonly ConcurrentDictionary<string, JobRun> _jobRuns = new(StringComparer.Ordinal);
     /// <summary>Which jobs hold one of the five slots and which wait. The authority on starting a job; <see cref="_jobRuns"/> follows it.</summary>
@@ -232,6 +238,7 @@ internal sealed partial class TrayApplicationContext
             ReleaseSlot(run.Job.Id);
             return false;
         }
+        if (routineId is not null) UpdateKeepAwake();
         _home.RefreshWork();
         RequestShellPush();
         AnnounceJob(JobEvent.Started, run.Job.Title, run.Job.Id, scheduled: routineId is not null);
@@ -354,6 +361,8 @@ internal sealed partial class TrayApplicationContext
         try
         {
             var now = DateTimeOffset.UtcNow;
+            _routineHoldUntil = RoutineScheduler.HoldAfterGap(_lastRoutineTick, now, _routineHoldUntil);
+            _lastRoutineTick = now;
             StopStaleRoutineRuns(now);
             IReadOnlyList<Routine> routines;
             try { routines = _work.Routines(); }
@@ -361,13 +370,17 @@ internal sealed partial class TrayApplicationContext
             UpdateKeepAwake(routines);
             // Routines take the same slots as the user's jobs; a job already running or waiting is left alone.
             var active = routines.Select(r => r.JobId).Where(_admission.Contains).ToHashSet(StringComparer.Ordinal);
+            var signedIn = _settings.AuthProvider == AuthProvider.ChatGPT && ProviderFactory.IsChatGptSignedIn(_secrets);
             var decision = RoutineScheduler.Decide(routines,
-                new(now, System.Net.NetworkInformation.NetworkInterface.GetIsNetworkAvailable(), _routineHoldUntil, active));
-            _routinesWaiting = decision.WaitingForNetwork.Select(r => r.Id).ToHashSet(StringComparer.Ordinal);
+                new(now, System.Net.NetworkInformation.NetworkInterface.GetIsNetworkAvailable(), _routineHoldUntil, active, signedIn));
+            _routinesWaiting = RoutineScheduler.WaitingNotes(decision);
+            // Not signed in: the routines wait (no failure counted) and the user hears it once, not once per routine or tick.
+            if (decision.WaitingForSignIn.Count > 0 && !_routinesSignInNoted) ClassicMessage(RoutineScheduler.SignInLine + ".");
+            _routinesSignInNoted = decision.WaitingForSignIn.Count > 0;
             foreach (var due in decision.Start)
             {
                 if (StartJob(due.JobId, null, due.Id)) continue;
-                try { _work.SaveRoutine(RoutineSchedule.AfterRun(due, false, "Could not start; see Chat.", DateTimeOffset.UtcNow, TimeZoneInfo.Local)); }
+                try { _work.SaveRoutine(RoutineSchedule.AfterRun(due, RoutineRunEnd.Failed, "Could not start; see Chat.", DateTimeOffset.UtcNow, TimeZoneInfo.Local)); }
                 catch (Exception ex) when (ex is not OutOfMemoryException) { Log("routine_save_error=" + ex.GetType().Name); }
             }
         }
@@ -387,13 +400,18 @@ internal sealed partial class TrayApplicationContext
         }
     }
 
-    /// <summary>UI thread: the power request is held only while an unpaused routine exists and the PC is on mains power.</summary>
-    private void UpdateKeepAwake(IReadOnlyList<Routine>? routines = null)
+    /// <summary>UI thread: holds or clears the power request (<see cref="RoutineScheduler.KeepAwake"/>). <paramref name="ending"/>: a run being
+    /// recorded as finished, which no longer counts even if it has not left <see cref="_jobRuns"/> yet.</summary>
+    private void UpdateKeepAwake(IReadOnlyList<Routine>? routines = null, JobRun? ending = null)
     {
         try { routines ??= _work.Routines(); }
-        catch (Exception ex) when (ex is not OutOfMemoryException) { Log("routine_read_error=" + ex.GetType().Name); return; }
-        var on = routines.Any(r => !r.IsPaused) && SystemInformation.PowerStatus.PowerLineStatus == PowerLineStatus.Online;
-        if (on != _keepAwake.IsOn && !_keepAwake.Set(on)) Log("keep_awake_refused");
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Log("routine_read_error=" + ex.GetType().Name); routines = []; }
+        var running = _jobRuns.Values.Any(r => r.RoutineId is not null && !ReferenceEquals(r, ending));
+        var on = RoutineScheduler.KeepAwake(routines, SystemInformation.PowerStatus.PowerLineStatus == PowerLineStatus.Online, running);
+        if (on == _keepAwake.IsOn) { if (!on) _keepAwakeRefused = false; return; }
+        if (_keepAwake.Set(on)) { _keepAwakeRefused = false; return; }
+        if (!_keepAwakeRefused) Log("keep_awake_refused");
+        _keepAwakeRefused = true;
     }
 
     /// <summary>Records a finished run. <paramref name="text"/> is the reply without its result block; <paramref name="result"/> is stored
@@ -417,7 +435,7 @@ internal sealed partial class TrayApplicationContext
             SaveHowTos(work.Job.Id, status == AgentProgressStates.Completed ? result?.Learned : null);
             _work.AppendRunLog(work.Job, work.Ask, status, text);
             if (work.RoutineId is { } routineId && _work.Routines(work.Job.Id).FirstOrDefault(r => r.Id == routineId) is { } routine)
-                _work.SaveRoutine(RoutineSchedule.AfterRun(routine, status == AgentProgressStates.Completed, summary[..Math.Min(summary.Length, 200)],
+                _work.SaveRoutine(RoutineSchedule.AfterRun(routine, RoutineScheduler.RunEnd(status, work.TimedOut), summary[..Math.Min(summary.Length, 200)],
                     DateTimeOffset.UtcNow, TimeZoneInfo.Local));
         }
         catch (Exception ex) when (ex is not OutOfMemoryException) { Log("job_record_error=" + ex.GetType().Name); }
@@ -425,6 +443,7 @@ internal sealed partial class TrayApplicationContext
         var shownTitle = work.FromTalk && result?.Title is { } named ? named : work.Job.Title;
         OnUi(() =>
         {
+            if (work.RoutineId is not null) UpdateKeepAwake(ending: work);
             _home.RefreshWork();
             _jobOutputs.Remove(work.Job.Id);
             RequestShellPush();

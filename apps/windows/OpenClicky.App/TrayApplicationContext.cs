@@ -871,6 +871,13 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             snapTarget: SnapControl);
             await agent.RunAsync(task + MemoryContext(), _settings.ResolveVisionModel(), token).ConfigureAwait(false);
         }
+        catch (OperationCanceledException) when (work is { TimedOut: true })
+        {
+            // A routine run cancelled for taking too long: a failure, not the user's stop.
+            driveEnd = DriveEnd.Failed;
+            RecordProgress(id, new(0, "failed", RoutineScheduler.StaleOutcome));
+            if (!jobRecorded) { FinishJob(work, AgentProgressStates.Failed, RoutineScheduler.StaleOutcome); jobRecorded = true; }
+        }
         catch (OperationCanceledException)
         {
             driveEnd = DriveEnd.Stopped;
