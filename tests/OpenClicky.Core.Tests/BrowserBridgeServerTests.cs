@@ -222,6 +222,23 @@ public sealed class BrowserBridgeServerTests
     }
 
     [Fact]
+    public async Task UnregisterTellsEveryProfile()
+    {
+        var pipe = NewPipe();
+        await using var rig = new ServerRig(pipe);
+        await using var a = new FakeChrome(pipe);
+        await a.HelloAsync("profile-a");
+        await a.ReadyAsync();
+        await using var b = new FakeChrome(pipe);
+        await b.HelloAsync("profile-b");
+        await b.ReadyAsync();
+
+        await rig.Server.NotifyUnregisteredAsync().WaitAsync(T);
+        Assert.Equal("unregistered", (await a.NextTypeAsync("unregistered")).GetProperty("type").GetString());
+        Assert.Equal("unregistered", (await b.NextTypeAsync("unregistered")).GetProperty("type").GetString());
+    }
+
+    [Fact]
     public async Task WrongProofIsDropped()
     {
         var pipe = NewPipe();
@@ -333,6 +350,7 @@ public sealed class BrowserBridgeServerTests
         public Task HelloAsync(string profile) => SendAsync(new { type = "hello", protocol = 2, profileId = profile, brand = "Chrome" });
         public Task<JsonElement> ReadyAsync() => NextAsync(m => Type(m) == "ready");
         public Task<JsonElement> CommandAsync(string op) => NextAsync(m => Type(m) == "command" && m.GetProperty("op").GetString() == op);
+        public Task<JsonElement> NextTypeAsync(string type) => NextAsync(m => Type(m) == type);
 
         private async Task<JsonElement> NextAsync(Func<JsonElement, bool> match)
         {

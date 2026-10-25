@@ -139,6 +139,15 @@ public sealed class BrowserBridgeServer : IBrowserBridge, IAsyncDisposable
         }
     }
 
+    /// <summary>Disconnect: tells every connected profile its registration is gone, so the popup asks to finish setup
+    /// and the extension hands its tabs over. Call before disposing; app exit doesn't send it.</summary>
+    public async Task NotifyUnregisteredAsync()
+    {
+        Connection[] open;
+        lock (_sync) open = _connections.ToArray();
+        foreach (var connection in open) await TryWriteAsync(connection, new { type = "unregistered" }).ConfigureAwait(false);
+    }
+
     public IDisposable TrackTask(string task)
     {
         lock (_sync) _running[task] = _running.GetValueOrDefault(task) + 1;

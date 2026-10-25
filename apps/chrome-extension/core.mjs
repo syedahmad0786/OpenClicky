@@ -58,6 +58,16 @@ function withTimeout(promise, ms) {
   return Promise.race([promise, late]).finally(() => clearTimeout(timer));
 }
 
+/**
+ * What the service worker does with a host message other than a command: the popup state, whether every job's tabs go
+ * back to the user (the app quit, or Disconnect removed the registration), and whether to drop the port.
+ */
+export function hostEvent(message) {
+  if (message?.type === "unregistered") return { link: "setup", handOver: true, disconnect: true };
+  if (message?.type !== "ready") return null;
+  return { link: !message.app ? "offline" : message.selected ? "connected" : "profile", handOver: !message.app, disconnect: false };
+}
+
 export function createBridge({ debuggee, tabs, downloads, refStore, limits = {} }) {
   const L = { ...DEFAULT_LIMITS, ...DEFAULT_TIMEOUTS, ...limits };
   const sessions = new Map(); // tabId -> PageSession

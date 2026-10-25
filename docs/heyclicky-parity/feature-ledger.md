@@ -121,8 +121,8 @@ RE depth: **S** = static evidence is enough · **L** = needs a live view-only lo
 6. Press Stop in the popup mid-job: the job stops and its tabs stay open.
 7. Let a job finish: its unkept tabs close, a tab you were looking at stays, and any tab of yours it used goes back where it was.
 8. Connect a second profile: the popup there says another profile is connected; switching in the card moves work to it.
-9. Disconnect in the card: the popup says to finish setup; remove the extension yourself.
-10. With OpenClicky closed, click Open OpenClicky in the popup: the app starts.
+9. Disconnect in the card mid-job: the popup says to finish setup at once, Chrome's debugging bar goes away and the job's tabs stay open; remove the extension yourself.
+10. Quit OpenClicky mid-job: Chrome's debugging bar goes away and the tabs stay. Then, with OpenClicky closed, click Open OpenClicky in the popup: the app starts.
 
 ## 6. OpenClicky extras kept (Extra)
 

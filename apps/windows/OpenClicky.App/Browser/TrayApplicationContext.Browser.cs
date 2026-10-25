@@ -161,8 +161,14 @@ internal sealed partial class TrayApplicationContext
             if (BrowserNativeHostRegistrar.IsRegistered(Registry.CurrentUser, vendorKey, BrowserManifestPath))
                 BrowserNativeHostRegistrar.Unregister(Registry.CurrentUser, vendorKey);
         SaveBrowserConnection(c => c with { Registered = false });
-        // Drop live connections too: the supervisor sees nothing registered and keeps the pipe closed until the next Connect.
-        if (_browserBridge is { } bridge) _ = Task.Run(async () => { try { await bridge.DisposeAsync().ConfigureAwait(false); } catch (Exception ex) when (ex is not OutOfMemoryException) { } });
+        // Tell the extension (it shows setup and hands its tabs over), then drop live connections: the supervisor sees
+        // nothing registered and keeps the pipe closed until the next Connect.
+        if (_browserBridge is { } bridge)
+            _ = Task.Run(async () =>
+            {
+                try { await bridge.NotifyUnregisteredAsync().ConfigureAwait(false); }
+                finally { try { await bridge.DisposeAsync().ConfigureAwait(false); } catch (Exception ex) when (ex is not OutOfMemoryException) { } }
+            });
         _shell?.AddToast("The browser is disconnected. You can remove the OpenClicky extension from your browser's extensions page.");
     }
 

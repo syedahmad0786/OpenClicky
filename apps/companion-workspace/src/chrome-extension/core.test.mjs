@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { createBridge, UNTRUSTED } from "../../../chrome-extension/core.mjs";
+import { createBridge, hostEvent, UNTRUSTED } from "../../../chrome-extension/core.mjs";
 import { TabManager } from "../../../chrome-extension/tabs.mjs";
 import { fakeChrome } from "./fake-chrome.mjs";
 
@@ -139,6 +139,15 @@ describe("createBridge", () => {
     const { run, debuggee } = setup();
     expect(await run("wait_for", { tabId: 11, gone: "Loading" })).toEqual({ ok: false, error: "gone is true or false." });
     expect(debuggee.calls).toHaveLength(0);
+  });
+
+  it("host messages set the popup state and hand tabs over when the app or its registration is gone", () => {
+    expect(hostEvent({ type: "ready", app: true, selected: true })).toEqual({ link: "connected", handOver: false, disconnect: false });
+    expect(hostEvent({ type: "ready", app: true, selected: false })).toEqual({ link: "profile", handOver: false, disconnect: false });
+    expect(hostEvent({ type: "ready", app: false, selected: false })).toEqual({ link: "offline", handOver: true, disconnect: false });
+    expect(hostEvent({ type: "unregistered" })).toEqual({ link: "setup", handOver: true, disconnect: true });
+    expect(hostEvent({ type: "command", op: "tabs" })).toBe(null);
+    expect(hostEvent(null)).toBe(null);
   });
 
   it("deny fragments are matched verbatim, without trimming", async () => {

@@ -1,6 +1,6 @@
 // Wires the dispatcher to Chrome: the native host port to OpenClicky, chrome.debugger, tab groups, the popup.
 // Production uses chrome.debugger only, never --remote-debugging-port.
-import { createBridge } from "./core.mjs";
+import { createBridge, hostEvent } from "./core.mjs";
 import { TabManager } from "./tabs.mjs";
 
 const HOST = "com.openclicky.chrome_bridge";
@@ -69,8 +69,17 @@ function brand() {
 }
 
 async function onMessage(message) {
-  if (message?.type === "ready") {
-    link = !message.app ? "offline" : message.selected ? "connected" : "profile";
+  const event = hostEvent(message);
+  if (event) {
+    link = event.link;
+    // The app quit or the user disconnected: every job's tabs go back to the user and Chrome's debugging bar goes away.
+    if (event.handOver) bridge.handOverAll();
+    if (event.disconnect) {
+      // Stay in setup: no reconnect until the next alarm, which fails while the host key is gone.
+      const old = port;
+      port = null;
+      try { old?.disconnect(); } catch { /* already closed */ }
+    }
   } else if (message?.type === "command") {
     await restored;
     const r = await bridge.execute(message);
