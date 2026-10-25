@@ -40,6 +40,11 @@ export function GeneralPage({ state }: { state: ShellState }) {
           <PillButton onClick={() => postPage({ kind: "link.open", target: "whatsNew" })}>What's new</PillButton>
         </Row>
       </Group>
+      <Group title="Welcome tour">
+        <Row title="Replay the welcome tour" description="Walk through talking, drawing, dictation and the practice run again.">
+          <PillButton onClick={() => postPage({ kind: "onboarding", action: "start" })}>Start tour</PillButton>
+        </Row>
+      </Group>
       <Group title="Help">
         <Row title="Report a bug" description="Tell us what went wrong."><PillButton onClick={() => postPage({ kind: "link.open", target: "bug" })}>Report a bug</PillButton></Row>
         <Row title="Request a feature" description="Tell us what you would like next."><PillButton onClick={() => postPage({ kind: "link.open", target: "feature" })}>Request a feature</PillButton></Row>

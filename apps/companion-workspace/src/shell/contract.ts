@@ -28,6 +28,11 @@ export const settingsActions = [
   "resetAgentFolder", "openPrivacySetting", "routine.run", "routine.pause", "routine.resume", "routine.delete",
   "connector.add", "connector.test", "connector.remove", "chrome.setup", "recordHotkey", "resetHotkeys", "openLogs",
 ] as const;
+// Mirror of apps/windows/OpenClicky.Core/Shell/OnboardingContract.cs; tests/fixtures/onboarding.v1.json lists both.
+export const onboardingSteps = [
+  "welcome", "colour", "microphone", "screen", "micCheck", "voiceHello", "drawDemo", "circleToAsk", "driveDemo", "textMode", "dictation", "finale",
+] as const;
+export const onboardingActions = ["start", "next", "back", "skip", "finish", "recheck", "openScreenSettings", "drawDemo", "driveDemo"] as const;
 /** settings.patch key: dotted camelCase path, at most 60 chars (the host allow-list decides which keys exist). */
 export const settingsPatchKeySchema = z.string().max(60).regex(/^[a-z]+(\.[a-zA-Z]+)+$/);
 
@@ -187,6 +192,14 @@ export const shellStateSchema = z.object({
   }).strict(),
   document: documentViewSchema.nullable(),
   settings: settingsViewSchema,
+  /** Omitted when no tour runs. */
+  onboarding: z.object({
+    step: z.enum(onboardingSteps),
+    index: z.number().int().min(0).max(11),
+    count: z.literal(12),
+    stepDone: z.boolean(),
+    busy: z.boolean(),
+  }).strict().optional(),
 }).strict();
 
 export type ShellState = z.infer<typeof shellStateSchema>;
@@ -200,6 +213,8 @@ export type SettingsSection = (typeof settingsSections)[number];
 export type SettingsAction = (typeof settingsActions)[number];
 export type NotchTab = (typeof notchTabs)[number];
 export type GeneralKey = (typeof generalKeys)[number];
+export type OnboardingStep = (typeof onboardingSteps)[number];
+export type OnboardingAction = (typeof onboardingActions)[number];
 
 export const hostMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("session.bootstrap"), token: z.string().min(32).max(256) }).strict(),
@@ -235,7 +250,8 @@ export type PageMessage =
   | { kind: "settings.section"; section: SettingsSection }
   | { kind: "settings.patch"; key: string; value: unknown }
   | { kind: "settings.action"; action: SettingsAction; arg?: string }
-  | { kind: "app.quit" };
+  | { kind: "app.quit" }
+  | { kind: "onboarding"; action: OnboardingAction };
 
 /** "Hold" or "Double-tap", for hints that name the talk shortcut. */
 export const talkGesture = (state: ShellState) => (state.settings.shortcuts.talk.trigger === "doubleTap" ? "Double-tap" : "Hold");

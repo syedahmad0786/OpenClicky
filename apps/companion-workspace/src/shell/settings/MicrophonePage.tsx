@@ -8,7 +8,7 @@ const BARS = 16;
 const HOLD_MS = 1_000;
 
 /** Latest `mic.level` from the host; drops to 0 after a second without an update. */
-function useMicLevel() {
+export function useMicLevel() {
   const [level, setLevel] = useState(0);
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined;
