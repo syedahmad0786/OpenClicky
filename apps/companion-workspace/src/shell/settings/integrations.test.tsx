@@ -123,7 +123,7 @@ it("AddAnotherAccount", () => {
 
   // Cancel posts nothing.
   fireEvent.click(screen.getByRole("button", { name: "Add another Notion account" }));
-  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  fireEvent.click(within(section("Connected")).getByRole("button", { name: "Cancel" })); // the browser card has a Cancel too
   expect(posts()).toHaveLength(2);
 
   rerender(<SettingsPanel state={make(notion(5))} />);
@@ -354,7 +354,7 @@ it("Typed secrets are dropped when the editor closes", () => {
   openEditor();
   openAdvanced();
   type("Extra headers", "X-Key: secret");
-  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  fireEvent.click(within(section("New connector")).getByRole("button", { name: "Cancel" }));
   openEditor();
   openAdvanced();
   expect(screen.getByRole("textbox", { name: "Extra headers" })).toHaveValue("");
