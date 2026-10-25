@@ -19,8 +19,8 @@ public static class CalendarEvents
     private static readonly string[] Writes = ["create", "update", "delete", "insert", "move", "quick", "patch", "remove", "send", "respond", "rsvp", "import"];
 
     /// <summary>
-    /// The tool to list events with, or null. Its name must say "event" and a read verb and no write verb.
-    /// Tools whose required arguments can all be filled come first, then read-only ones, then the shorter name.
+    /// The tool to list events with, or null. The connector must mark it read-only, and its name must say "event" and a
+    /// read verb and no write verb. Tools whose required arguments can all be filled come first, then the shorter name.
     /// </summary>
     // ponytail: name heuristics; F's calendar connector replaces this adapter.
     public static CalendarToolInfo? ChooseTool(IEnumerable<CalendarToolInfo> tools)
@@ -30,7 +30,7 @@ public static class CalendarEvents
         var bestFillable = false;
         foreach (var tool in tools)
         {
-            if (tool?.Name is not { } name) continue;
+            if (tool?.Name is not { } name || !tool.ReadOnly) continue;
             var n = name.ToLowerInvariant();
             if (!n.Contains("event", StringComparison.Ordinal) || !Reads.Any(n.Contains) || Writes.Any(n.Contains)) continue;
             var fillable = BuildArguments(tool.InputSchemaJson, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch) is not null;
@@ -40,7 +40,7 @@ public static class CalendarEvents
         return best;
     }
 
-    private static (int, int, int) Rank(CalendarToolInfo t, bool fillable) => (fillable ? 0 : 1, t.ReadOnly ? 0 : 1, t.Name.Length);
+    private static (int, int) Rank(CalendarToolInfo t, bool fillable) => (fillable ? 0 : 1, t.Name.Length);
 
     /// <summary>
     /// Arguments for the tool's schema: window bounds (UTC, second precision), a 50-result limit, the primary

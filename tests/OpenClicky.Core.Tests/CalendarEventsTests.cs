@@ -12,20 +12,29 @@ public class CalendarEventsTests
     [Fact]
     public void ChoosesReadToolAndPrefersReadOnly()
     {
+        // list_events is shorter but not marked read-only, so it is not chosen.
         var chosen = CalendarEvents.ChooseTool([Tool("create_event"), Tool("list_events"), Tool("GOOGLECALENDAR_FIND_EVENT", readOnly: true)]);
         Assert.Equal("GOOGLECALENDAR_FIND_EVENT", chosen?.Name);
         Assert.Null(CalendarEvents.ChooseTool([Tool("create_event"), Tool("delete_event")]));
-        Assert.Equal("list_events", CalendarEvents.ChooseTool([Tool("search_events"), Tool("list_events")])?.Name);
+        Assert.Equal("list_events", CalendarEvents.ChooseTool([Tool("search_events", true), Tool("list_events", true)])?.Name);
         // A shorter tool that needs an id OpenClicky cannot supply loses to one it can fill.
         Assert.Equal("list_events", CalendarEvents.ChooseTool(
             [Tool("get_event", true, """{"properties":{"eventId":{}},"required":["eventId"]}"""), Tool("list_events", true)])?.Name);
     }
 
     [Fact]
+    public void RequiresReadOnlyHint()
+    {
+        Assert.Null(CalendarEvents.ChooseTool([Tool("list_events"), Tool("search_events")]));
+        Assert.Equal("search_events", CalendarEvents.ChooseTool([Tool("list_events"), Tool("search_events", true)])?.Name);
+        Assert.Null(CalendarEvents.ChooseTool([Tool("create_event", true)])); // the hint does not make a write name readable
+    }
+
+    [Fact]
     public void NeverPicksMutatingTool()
     {
-        Assert.Null(CalendarEvents.ChooseTool([Tool("update_event_list"), Tool("quick_add_event"), Tool("events_import")]));
-        Assert.Null(CalendarEvents.ChooseTool([Tool("list_calendars", true), Tool("respond_to_event"), Tool("move_event_get")]));
+        Assert.Null(CalendarEvents.ChooseTool([Tool("update_event_list", true), Tool("quick_add_event", true), Tool("events_import", true)]));
+        Assert.Null(CalendarEvents.ChooseTool([Tool("list_calendars", true), Tool("respond_to_event", true), Tool("move_event_get", true)]));
         Assert.Null(CalendarEvents.ChooseTool(null!));
         Assert.Null(CalendarEvents.ChooseTool([null!, new CalendarToolInfo(null!, true, "{}")]));
     }

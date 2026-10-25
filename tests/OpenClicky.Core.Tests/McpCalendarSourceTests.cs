@@ -53,7 +53,12 @@ public class McpCalendarSourceTests
         Assert.DoesNotContain("example.test", e.Message);
         Assert.DoesNotContain("token", e.Message);
 
-        var unfillable = new FakeCalendarMcp(GoogleShape, tools: [Tool("search_events", """{"properties":{"query":{}},"required":["query"]}""")]);
+        var noHint = new FakeCalendarMcp(GoogleShape, tools: [Tool("create_event"), Tool("list_events")]);
+        e = await Assert.ThrowsAsync<InvalidDataException>(() => new McpCalendarSource("cal", "Calendar", Secret, noHint).EventsAsync(From, To, CancellationToken.None));
+        Assert.Equal("no read-only calendar tool", e.Message);
+        Assert.Empty(noHint.CalledTools);
+
+        var unfillable = new FakeCalendarMcp(GoogleShape, tools: [Tool("search_events", """{"properties":{"query":{}},"required":["query"]}""", readOnly: true)]);
         await Assert.ThrowsAsync<InvalidDataException>(() => new McpCalendarSource("cal", "Calendar", Secret, unfillable).EventsAsync(From, To, CancellationToken.None));
         Assert.Empty(unfillable.CalledTools);
     }
@@ -72,7 +77,7 @@ public class McpCalendarSourceTests
         [
             Tool("create_event", """{"properties":{"summary":{}},"required":["summary"]}"""),
             Tool("get_event", """{"properties":{"eventId":{}},"required":["eventId"]}""", readOnly: true),
-            Tool("list_events"),
+            Tool("list_events", readOnly: true),
         ];
         public string? LastAuthorization, LastArguments;
         public List<string> CalledTools { get; } = [];
