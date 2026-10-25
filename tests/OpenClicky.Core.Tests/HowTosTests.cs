@@ -76,6 +76,54 @@ public class HowTosTests
     }
 
     [Fact]
+    public void CorruptFileIsKeptAsBad_AndStoreStartsEmpty()
+    {
+        var path = TempFile();
+        File.WriteAllText(path, "{ not json [");
+        var store = new HowToStore(path);
+        Assert.Empty(store.All);
+        Assert.False(File.Exists(path));
+        Assert.Equal("{ not json [", File.ReadAllText(path + ".bad"));
+        store.Add("fresh", "1", T0);
+        store.Save();
+        Assert.Equal("{ not json [", File.ReadAllText(path + ".bad"));
+        Assert.Single(new HowToStore(path).All);
+    }
+
+    [Fact]
+    public void ReadIoErrorLeavesTheFileUntouched_UntilALaterReadSucceeds()
+    {
+        var path = TempFile();
+        var first = new HowToStore(path);
+        first.Add("old lesson", "1", T0);
+        first.Save();
+        var original = File.ReadAllText(path);
+
+        HowToStore store;
+        using (new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) // another process holds it: the read fails
+        {
+            store = new HowToStore(path);
+            Assert.Empty(store.All);
+            store.Add("new lesson", "2", T0.AddMinutes(1));
+            store.Save(); // still unreadable: must not replace the good file
+        }
+        Assert.Equal(original, File.ReadAllText(path));
+
+        store.Save(); // readable now: the old lessons are merged in, then written
+        Assert.Equal(["new lesson", "old lesson"], new HowToStore(path).All.Select(h => h.Text).Order());
+    }
+
+    [Fact]
+    public void NullEntriesAndBlankTextInTheFileAreSkipped()
+    {
+        var path = TempFile();
+        File.WriteAllText(path, "[null, {\"Text\":null,\"JobId\":\"1\"}, {\"Text\":\"  \"}, {\"Text\":\"kept\",\"JobId\":null,\"LearnedAt\":\"2026-10-25T09:00:00+00:00\"}]");
+        var store = new HowToStore(path);
+        Assert.Equal(["kept"], store.All.Select(h => h.Text));
+        Assert.Equal("", store.All[0].JobId);
+    }
+
+    [Fact]
     public void ConcurrentAddsAndSavesAreSafe()
     {
         var path = TempFile();

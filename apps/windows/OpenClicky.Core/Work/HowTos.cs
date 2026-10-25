@@ -23,15 +23,31 @@ public sealed class HowToStore
     public HowToStore(string path)
     {
         _path = path;
-        try
+        _unreadable = !TryLoad();
+    }
+
+    /// <summary>True when the file could not be read (locked, no access) or set aside: <see cref="Save"/> must not replace it.</summary>
+    private bool _unreadable;
+
+    /// <summary>Reads the file into memory (lessons already held win over the file's). A missing file is fine; a corrupt one is kept as
+    /// <c>.bad</c> and the store starts empty; any other read failure returns false and leaves the file alone.</summary>
+    private bool TryLoad()
+    {
+        string text;
+        try { text = File.ReadAllText(_path); }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException) { return true; }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
+        List<HowTo?>? loaded;
+        try { loaded = JsonSerializer.Deserialize<List<HowTo?>>(text); }
+        catch (Exception ex) when (ex is JsonException or NotSupportedException)
         {
-            var loaded = JsonSerializer.Deserialize<List<HowTo>>(File.ReadAllText(_path));
-            if (loaded is not null) foreach (var h in loaded) AddCore(h.Text, h.JobId, h.LearnedAt);
+            try { File.Move(_path, _path + ".bad", overwrite: true); return true; } // keep the bytes before anything overwrites them
+            catch (Exception move) when (move is IOException or UnauthorizedAccessException) { return false; }
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or NotSupportedException)
-        {
-            _items = []; // missing, locked or corrupt: start empty
-        }
+        foreach (var h in loaded ?? [])
+            if (h?.Text is { } t && !_items.Any(i => string.Equals(i.Text, Clean(t), StringComparison.OrdinalIgnoreCase)))
+                AddCore(t, h.JobId, h.LearnedAt);
+        return true;
     }
 
     public IReadOnlyList<HowTo> All { get { lock (_gate) return [.. _items]; } }
@@ -52,6 +68,8 @@ public sealed class HowToStore
     {
         lock (_gate)
         {
+            if (_unreadable) _unreadable = !TryLoad(); // a later successful read merges the file in and clears the flag
+            if (_unreadable) return; // never replace a file we could not read
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(_path))!);
             var temp = _path + "." + Environment.ProcessId + ".tmp";
             File.WriteAllText(temp, JsonSerializer.Serialize(_items));
