@@ -160,8 +160,7 @@ internal sealed partial class TrayApplicationContext
                 AnswerDriveConsent(false);
                 return false;
             case (CompanionCards.DrivingId, CompanionCards.StopAction):
-                CancelTask();
-                OpenControl.Resume();
+                CancelTask(); // the run on the screen (the pill's own) and any native task
                 return false;
             // The card stays up while the last phrase is delivered; ending dictation removes it.
             case (DictationCards.ActivityId, DictationCards.StopAction):

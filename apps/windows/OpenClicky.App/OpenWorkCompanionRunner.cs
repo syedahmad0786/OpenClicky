@@ -11,7 +11,8 @@ internal static class OpenWorkCompanionRunner
     public static async Task<OpenCodeTaskResult> RunAsync(string task, AppSettings settings, ISecretStore secrets,
         IDesktopToolHost host, AgentAccessMode access, Action<AgentProgress> progress,
         CancellationToken token, string? runtimeDirectory = null, string? workspaceDirectory = null, ChromeBridgeSession? browser = null,
-        JobOutputTools? jobFiles = null, IReadOnlyList<RemoteMcpConnector>? connectors = null, Action<OpenCodeToolCall>? toolUsed = null)
+        JobOutputTools? jobFiles = null, IReadOnlyList<RemoteMcpConnector>? connectors = null, Action<OpenCodeToolCall>? toolUsed = null,
+        DesktopLease? lease = null, string? leaseHolder = null, Action<bool>? waitingForScreen = null)
     {
         if (settings.AuthProvider != AuthProvider.ChatGPT || !ProviderFactory.IsChatGptSignedIn(secrets))
             throw new InvalidOperationException("Continue with ChatGPT in Settings before running a task.");
@@ -28,7 +29,7 @@ internal static class OpenWorkCompanionRunner
         var oauth = new ChatGptOAuthService();
         await using var inference = await ChatGptInferenceBridge.StartAsync(ct => oauth.GetAccessTokenAsync(settings, secrets, ct), cancellationToken: token);
         var session = new DesktopToolSession(host, access, AgentDenyList.ParseExtraFragments(settings.AgentDenyListExtra),
-            token, browser, destination => progress(new(0, "observing", destination)), jobFiles, connectors);
+            token, browser, destination => progress(new(0, "observing", destination)), jobFiles, connectors, lease, leaseHolder, waitingForScreen);
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         var port = ((IPEndPoint)listener.LocalEndpoint).Port;

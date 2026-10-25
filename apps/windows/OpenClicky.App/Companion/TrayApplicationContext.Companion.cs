@@ -38,7 +38,7 @@ internal sealed partial class TrayApplicationContext
         _overlay.DetachedClicked += ToggleConversation;
         _overlay.ButtonClicked += OnDrawingButtonClicked;
         // An agent task that is running (not paused) or driving injects input: it must not detach the companion or have a click swallowed.
-        _overlay.DetachSuppressed = () => (TaskOpen || _drive is { Phase: DrivePhase.Driving }) && !OpenControl.IsPaused;
+        _overlay.DetachSuppressed = () => RunMayAct;
         // The invisible topmost click targets over drawn buttons come down while a confirm dialog is open, so they cannot take a click meant for Yes/No.
         _overlay.DrawingButtonsSuppressed = () => _confirm.IsDialogOpen;
         _talk.StateChanged += state => OnUi(() => { if (state == CompanionVoiceState.Listening && _micWatch is null) WatchMicLevels(); });
@@ -189,7 +189,7 @@ internal sealed partial class TrayApplicationContext
     /// </summary>
     private async void OnDrawingButtonClicked(string label, string prompt)
     {
-        if (_dictationActive || _confirm.IsDialogOpen || (TaskOpen && !OpenControl.IsPaused)) return;
+        if (_dictationActive || _confirm.IsDialogOpen || RunMayAct) return;
         PrepareSubmission();
         try { await _talk.SubmitTextAsync(OpenClicky.Core.Drawing.DrawingButtons.Request(label, prompt), displayAs: label); }
         catch (Exception ex) { Log($"drawing_button_failed={ex.GetType().Name}"); }

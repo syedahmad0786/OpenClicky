@@ -1,6 +1,7 @@
 using System.Text.Json;
 using OpenClicky.Core;
 using OpenClicky.Core.Agent;
+using OpenClicky.Core.Work;
 
 namespace OpenClicky.Providers;
 
@@ -51,11 +52,21 @@ public sealed class DesktopToolSession
     private readonly CancellationToken _taskToken;
     private readonly Action<string>? _onDestinationObserved;
     private readonly Dictionary<string, string> _installedAppNames = new(StringComparer.OrdinalIgnoreCase);
+    private readonly DesktopLease? _lease;
+    private readonly string _leaseHolder;
+    private readonly Action<bool>? _waitingForScreen;
 
+    /// <param name="lease">When set, every desktop tool call (all of <see cref="ToolNames"/> but search_memory) holds it as
+    /// <paramref name="leaseHolder"/>; <paramref name="waitingForScreen"/> hears true while the call waits for it, then false.</param>
     public DesktopToolSession(IDesktopToolHost host, AgentAccessMode access, IEnumerable<string>? denyListExtra = null,
         CancellationToken taskToken = default, ChromeBridgeSession? browser = null, Action<string>? onDestinationObserved = null,
-        JobOutputTools? jobFiles = null, IReadOnlyList<RemoteMcpConnector>? connectors = null)
+        JobOutputTools? jobFiles = null, IReadOnlyList<RemoteMcpConnector>? connectors = null,
+        DesktopLease? lease = null, string? leaseHolder = null, Action<bool>? waitingForScreen = null)
     {
+        if (lease is not null && string.IsNullOrEmpty(leaseHolder)) throw new ArgumentException("A lease needs its holder.", nameof(leaseHolder));
+        _lease = lease;
+        _leaseHolder = leaseHolder ?? "";
+        _waitingForScreen = waitingForScreen;
         JobFiles = jobFiles;
         Connectors = connectors ?? [];
         _host = host;
@@ -94,9 +105,22 @@ public sealed class DesktopToolSession
                     : JobFiles.Call(tool, ReadStringArguments(arguments), _access);
             if (ConnectorToolNames.Contains(tool, StringComparer.Ordinal))
                 return await CallConnectorAsync(tool, arguments, token).ConfigureAwait(false);
+            using var screen = tool == "search_memory" || !ToolNames.Contains(tool, StringComparer.Ordinal) ? null
+                : await LeaseScreenAsync(token).ConfigureAwait(false);
             return await CallCoreAsync(tool, arguments, token).ConfigureAwait(false);
         }
         finally { _calls.Release(); }
+    }
+
+    /// <summary>Holds the desktop lease for one desktop tool call (consent, confirm, input and the observation after it).</summary>
+    private async Task<IDisposable?> LeaseScreenAsync(CancellationToken token)
+    {
+        if (_lease is null) return null;
+        var pending = _lease.AcquireAsync(_leaseHolder, token);
+        if (pending.IsCompleted) return await pending.ConfigureAwait(false);
+        _waitingForScreen?.Invoke(true);
+        try { return await pending.ConfigureAwait(false); }
+        finally { _waitingForScreen?.Invoke(false); }
     }
 
     private async Task<DesktopToolResult> CallConnectorAsync(string tool, JsonElement arguments, CancellationToken token)

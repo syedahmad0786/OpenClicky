@@ -98,10 +98,12 @@ internal sealed partial class TrayApplicationContext
         {
             case "voice.readReplies": _tts.Enabled = _settings.SpeakReplies; break;
             case "access.rememberHistory": ResetShellChat(); break;
-            case "access.mode": _home.RefreshAccess(); break;
-            // As the classic OnSettingsApplied: a new provider or proxy must not serve the task or turn in flight.
+            // As the classic OnSettingsApplied: a narrower mode stops the runs that started wider (none ever widens).
+            case "access.mode": CancelRunsWiderThan(_settings.AgentAccess); _home.RefreshAccess(); break;
+            // A new provider or proxy must not serve any run or turn in flight.
             case "account.provider" or "advanced.useLocalProxy" or "advanced.proxyUrl":
-                CancelTask();
+                EngineSettingsChanged();
+                CancelAllRuns();
                 CancelTalk();
                 RefreshConnection();
                 break;
@@ -115,7 +117,7 @@ internal sealed partial class TrayApplicationContext
     /// <summary>The classic window pauses a running task when it comes forward (input must not reach the wrong window); say so, since the notch gave no hint.</summary>
     private void ShowClassicFromNotch()
     {
-        var wasRunning = TaskOpen && !OpenControl.IsPaused;
+        var wasRunning = ForegroundRuns().Any(run => !run.Control.IsPaused);
         ShowClassic();
         if (wasRunning) _shell?.AddToast("Your task is paused while the classic window is open. Resume it from Tasks.");
     }

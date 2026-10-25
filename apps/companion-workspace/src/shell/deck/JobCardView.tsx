@@ -44,7 +44,7 @@ export function JobCardView({ job, tilt, layer }: JobCardViewProps) {
           <span style={{ width: `${Math.round((done / job.plan.length) * 100)}%` }} />
         </span>
       ) : null}
-      {job.state === "working" && job.liveLine ? <span className="deck-card__live">{job.liveLine}</span> : null}
+      {(job.state === "working" || job.state === "queued") && job.liveLine ? <span className="deck-card__live">{job.liveLine}</span> : null}
     </button>
   );
 }

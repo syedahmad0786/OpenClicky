@@ -12,8 +12,9 @@ internal sealed class WinFormsAgentConfirm : IAgentConfirm
 {
     private readonly SynchronizationContext _ui;
     private readonly Func<(IntPtr window, IntPtr focus)?>? _testTarget;
-    private volatile bool _isDialogOpen;
-    public bool IsDialogOpen => _isDialogOpen;
+    /// <summary>Dialogs up now: concurrent jobs can stack one confirm over another, and closing the top one leaves the rest open.</summary>
+    private int _openDialogs;
+    public bool IsDialogOpen => Volatile.Read(ref _openDialogs) > 0;
 
     public WinFormsAgentConfirm(SynchronizationContext uiContext, Func<(IntPtr window, IntPtr focus)?>? testTarget = null)
     {
@@ -54,7 +55,7 @@ internal sealed class WinFormsAgentConfirm : IAgentConfirm
             var test = _testTarget?.Invoke();
             var prior = test?.window ?? ForegroundFocusRestorer.Capture();
             var focus = test?.focus ?? ForegroundFocusRestorer.CaptureFocus(prior);
-            _isDialogOpen = true;
+            Interlocked.Increment(ref _openDialogs);
             try
             {
                 using var dialog = new AgentConfirmDialog(summary, wording, question);
@@ -70,7 +71,7 @@ internal sealed class WinFormsAgentConfirm : IAgentConfirm
                 else if (result == DialogResult.Yes && !restored)
                     tcs.TrySetException(new InvalidOperationException("I couldn't restore the target app and field. Select the app you want to use, then try again."));
                 else tcs.TrySetResult(result == DialogResult.Yes);
-                _isDialogOpen = false;
+                Interlocked.Decrement(ref _openDialogs);
             }
             catch (Exception ex)
             {
@@ -83,7 +84,7 @@ internal sealed class WinFormsAgentConfirm : IAgentConfirm
                     // best-effort restore on failure path
                 }
 
-                _isDialogOpen = false;
+                Interlocked.Decrement(ref _openDialogs);
                 tcs.TrySetException(ex);
             }
         }

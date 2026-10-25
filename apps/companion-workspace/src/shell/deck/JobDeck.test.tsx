@@ -75,3 +75,10 @@ it("labels each state in our own words", () => {
   ]} />);
   for (const text of ["Working…", "Reading file", "Needs you", "Didn’t finish", "Stopped", "Ready to view"]) expect(screen.getByText(text)).toBeInTheDocument();
 });
+
+it("shows a queued job's waiting line", () => {
+  mockHost();
+  render(<JobDeck featuredId={null} jobs={[job(1, { state: "queued", liveLine: "Waiting for a free slot" }), job(2, { state: "done", liveLine: "Stale line" })]} />);
+  expect(screen.getByText("Waiting for a free slot")).toBeInTheDocument();
+  expect(screen.queryByText("Stale line")).toBeNull();
+});

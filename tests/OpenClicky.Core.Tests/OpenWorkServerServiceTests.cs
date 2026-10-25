@@ -439,6 +439,44 @@ public sealed class OpenWorkServerServiceTests
         Assert.Equal(["b"], OpenWorkServerService.NewToolCalls(messages, seen).Select(t => t.CallId));
     }
 
+    [Fact]
+    public async Task TwoServicesRunConcurrentlyWithoutSharingTheLock()
+    {
+        // Each service is its own server (here a stand-in process) and its own lock: B's run starts while A's is still in flight.
+        var arrived = new[] { new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously), new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously) };
+        OpenWorkServerService Service(int i)
+        {
+            var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("ping.exe", "-n 60 127.0.0.1") { CreateNoWindow = true, UseShellExecute = false })!;
+            var http = new HttpClient(new Handler(async (request, token) =>
+            {
+                Assert.Equal("/workspace/ws_" + i + "/opencode/session", request.RequestUri!.AbsolutePath);
+                arrived[i].TrySetResult();
+                await Task.Delay(Timeout.Infinite, token);
+                throw new InvalidOperationException("unreachable");
+            }));
+            return new OpenWorkServerService(process, OpenCodeTaskClient.ForOpenWorkWorkspace("http://127.0.0.1:1/", "ws_" + i, "token", http), "ws_" + i, Path.GetTempPath());
+        }
+        await using var a = Service(0);
+        await using var b = Service(1);
+        using var stop = new CancellationTokenSource();
+
+        var runA = a.RunAsync("a", "first", cancellationToken: stop.Token);
+        var runB = b.RunAsync("b", "second", cancellationToken: stop.Token);
+        await Task.WhenAll(arrived.Select(t => t.Task)).WaitAsync(TimeSpan.FromSeconds(10));
+
+        stop.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => runA);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => runB);
+    }
+
+    [Fact]
+    public void ServersJoinTheAppJobObject()
+    {
+        using var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("ping.exe", "-n 30 127.0.0.1") { CreateNoWindow = true, UseShellExecute = false })!;
+        try { Assert.True(AppChildProcesses.Adopt(process)); } // false if the kill-on-close limit could not be set
+        finally { process.Kill(); }
+    }
+
     private sealed class Handler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token) => send(request, token);

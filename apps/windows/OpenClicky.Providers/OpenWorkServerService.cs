@@ -10,7 +10,9 @@ using System.Text.Json.Nodes;
 
 namespace OpenClicky.Providers;
 
-/// <summary>Owns one private OpenWork server, which in turn owns the workspace's OpenCode engine.</summary>
+/// <summary>Owns one private OpenWork server, which in turn owns the workspace's OpenCode engine. Each instance is its own node
+/// process on its own loopback port (asked of Windows, port 0) with its own state folder and run lock, so concurrent jobs each start
+/// their own. The server joins the app's Job Object, so it and the engine it starts die with the app.</summary>
 public sealed class OpenWorkServerService : IAsyncDisposable
 {
     internal const string BundledEngineVersion = "1.18.30";
@@ -28,7 +30,7 @@ public sealed class OpenWorkServerService : IAsyncDisposable
     private string? _activeSessionId;
     private bool _disposed;
 
-    private OpenWorkServerService(Process process, OpenCodeTaskClient client, string workspaceId, string workspacePath)
+    internal OpenWorkServerService(Process process, OpenCodeTaskClient client, string workspaceId, string workspacePath)
     {
         _process = process;
         _client = client;
@@ -83,6 +85,7 @@ public sealed class OpenWorkServerService : IAsyncDisposable
         try
         {
             if (!process.Start()) throw new InvalidOperationException("The app-owned OpenWork server could not be started.");
+            AppChildProcesses.Adopt(process); // at once: the engine it starts later inherits the job
             _ = process.StandardOutput.BaseStream.CopyToAsync(Stream.Null);
             _ = process.StandardError.BaseStream.CopyToAsync(Stream.Null);
             // A cold OpenCode engine reload can legitimately exceed 30 seconds on Windows.

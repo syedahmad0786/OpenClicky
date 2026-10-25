@@ -47,7 +47,7 @@ function FeaturedJob({ job }: { job: JobCard }) {
       {job.summary ? <p className="notch-job__summary">{job.summary}</p> : null}
       {job.stat ? <p className="notch-job__stat"><strong>{job.stat.value}</strong> {job.stat.label}</p> : null}
       {job.plan.length ? <PlanChecklist plan={job.plan} /> : null}
-      {job.state === "working" && job.liveLine ? <p className="notch-job__live">{job.liveLine}</p> : null}
+      {(job.state === "working" || job.state === "queued") && job.liveLine ? <p className="notch-job__live">{job.liveLine}</p> : null}
       {job.bullets.length ? <ul className="notch-job__bullets">{job.bullets.slice(0, 4).map((b, i) => <li key={i}>{b}</li>)}</ul> : null}
       {job.next.slice(0, 3).map((step, i) => <p key={i} className="notch-job__next">{step}</p>)}
       {job.files.length ? (

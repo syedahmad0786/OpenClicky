@@ -1,4 +1,5 @@
 using OpenClicky.Core;
+using OpenClicky.Core.CompanionCursor;
 using OpenClicky.Core.Work;
 
 namespace OpenClicky.App;
@@ -7,9 +8,11 @@ namespace OpenClicky.App;
 /// One run of a saved job on the OpenWork runtime, holding everything that run needs apart from the native task's single slot.
 /// Created on the UI thread; <see cref="Live"/> and the steering are written from other threads, so they go through Volatile/Interlocked.
 /// </summary>
-internal sealed class JobRun(WorkJob job, string ask, string? routineId, AgentAccessMode access, IReadOnlyList<string> outputs)
+/// <param name="fromTalk">Started from a Talk request: its result's title replaces the placeholder title.</param>
+internal sealed class JobRun(WorkJob job, string ask, string? routineId, AgentAccessMode access, IReadOnlyList<string> outputs, bool fromTalk = false)
 {
     private JobLiveState _live = JobLiveState.Empty;
+    private volatile bool _waitingForScreen;
     private string? _steering;
     private int _steeringRevision;
 
@@ -24,6 +27,9 @@ internal sealed class JobRun(WorkJob job, string ask, string? routineId, AgentAc
     /// The job card reads the folder itself (<c>JobFiles</c>), so files the run writes show once the card is reopened.</summary>
     public IReadOnlyList<string> Outputs { get; } = outputs;
     public DateTimeOffset StartedAt { get; } = DateTimeOffset.UtcNow;
+    public bool FromTalk { get; } = fromTalk;
+    /// <summary>A desktop tool call is waiting for another run to give the screen back (the card says so).</summary>
+    public bool WaitingForScreen { get => _waitingForScreen; set => _waitingForScreen = value; }
     /// <summary>The run's row in Tasks.</summary>
     public string TaskId { get; } = Guid.NewGuid().ToString("N");
 
@@ -45,4 +51,19 @@ internal sealed class JobRun(WorkJob job, string ask, string? routineId, AgentAc
 
     /// <summary>The bounded line shown in Tasks.</summary>
     public string Display => $"{Job.Title}: {Ask}"[..Math.Min(Job.Title.Length + 2 + Ask.Length, 4000)];
+}
+
+/// <summary>
+/// An open run as the screen sees it: a job run or the native task, registered for the run's whole life under its desktop lease
+/// holder name. Esc, the drive cards, take-back and the settings guard act through this; its access snapshot never widens.
+/// </summary>
+internal sealed record RunHandle(string Holder, CancellationTokenSource Cts, AgentTaskControl Control, string TaskId,
+    AgentAccessMode Access, DriveSession Drive, JobRun? Job)
+{
+    /// <summary>Cancels the run and lets a paused run see it; a no-op once the run has ended.</summary>
+    public void Stop()
+    {
+        try { Cts.Cancel(); } catch (ObjectDisposedException) { }
+        Control.Resume();
+    }
 }

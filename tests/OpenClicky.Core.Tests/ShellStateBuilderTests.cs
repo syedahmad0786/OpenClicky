@@ -202,6 +202,8 @@ public class ShellStateBuilderTests
         var running = ShellStateBuilder.Build(Inputs([new ShellJobInput(job, [], ["Clicking"], "Clicking", Plan: live)])).Jobs.Single();
         Assert.Equal(live, running.Plan);
         Assert.Equal("Clicking", running.LiveLine);
+        Assert.Equal("Waiting for a free slot", ShellStateBuilder.Build(Inputs([new ShellJobInput(job with { Status = "queued" }, [], [], Work.JobAdmission.WaitingLine)])).Jobs.Single().LiveLine);
+        Assert.Null(ShellStateBuilder.Build(Inputs([new ShellJobInput(job with { Status = "completed" }, [], [], "Clicking")])).Jobs.Single().LiveLine);
 
         var finished = ShellStateBuilder.Build(Inputs([new ShellJobInput(job with { Status = "completed" }, [], [], Plan: live)])).Jobs.Single();
         Assert.Equal([new PlanStep("Old step", true)], finished.Plan);

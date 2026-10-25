@@ -157,7 +157,8 @@ internal sealed partial class TrayApplicationContext : IShellHost
             var steps = live.Steps.Count > 0 ? live.Steps.TakeLast(ShellStateBuilder.MaxBullets).ToList()
                 : _taskRuns.LastOrDefault(r => r.JobId == job.Id)?.Events
                     .Select(e => e.Message).Where(m => !string.IsNullOrWhiteSpace(m)).TakeLast(ShellStateBuilder.MaxBullets).ToList() ?? [];
-            return new ShellJobInput(job, JobFiles(job), steps, live.LiveLine ?? steps.LastOrDefault(), routines.Any(r => r.JobId == job.Id && RoutineSchedule.IsDue(r, now)), live.Plan);
+            return new ShellJobInput(job, JobFiles(job), steps, JobLiveLine(job, run, live.LiveLine ?? steps.LastOrDefault()),
+                routines.Any(r => r.JobId == job.Id && RoutineSchedule.IsDue(r, now)), live.Plan);
         }).ToList(), []);
         // History is cached only once it loaded; a failed load is retried on the next push.
         var chat = _shellTurns ?? ShellSource<IReadOnlyList<ConversationTurn>>("history", () =>

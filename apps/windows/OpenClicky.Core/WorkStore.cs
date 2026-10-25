@@ -200,6 +200,18 @@ public sealed class WorkStore
         }
     }
 
+    /// <summary>Renames a job (a Talk job takes the title its result gave); a blank title changes nothing, a long one is cut.</summary>
+    public void RenameJob(string jobId, string title)
+    {
+        title = title.Trim();
+        if (title.Length == 0) return;
+        lock (_sync)
+        {
+            using var connection = Open();
+            Execute(connection, "UPDATE jobs SET title=$title WHERE id=$id", ("$title", title[..Math.Min(title.Length, MaxTitleLength)]), ("$id", jobId));
+        }
+    }
+
     public void SetJobResult(string jobId, string resultJson)
     {
         ArgumentNullException.ThrowIfNull(resultJson);
@@ -411,7 +423,7 @@ public sealed class WorkStore
     private void EnsureDefaultCompanion(SqliteConnection connection)
     {
         if (Exists(connection, "companions", "slug", DefaultCompanionSlug)) return;
-        var companion = new Companion(DefaultCompanionSlug, "OpenClicky", "Your main Windows companion.", DateTimeOffset.UtcNow);
+        var companion = new Companion(DefaultCompanionSlug, "OpenClicky", "General helper", DateTimeOffset.UtcNow);
         Insert(connection, companion);
         SeedFolder(companion);
     }

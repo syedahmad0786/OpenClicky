@@ -9,13 +9,36 @@ public class WorkStoreTests
     private static readonly TimeZoneInfo Utc = TimeZoneInfo.Utc;
 
     [Fact]
+    public void RenameJob_TakesTheTrimmedTitleAndKeepsTheOldOneWhenBlank()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "openclicky-work-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var store = new WorkStore(Path.Combine(root, "openclicky.db"), Path.Combine(root, "companions"));
+            var talk = store.CreateJob(WorkStore.DefaultCompanionSlug, "Find the cheapest flight", "Find the cheapest flight");
+            store.RenameJob(talk.Id, "  Flight options  ");
+            Assert.Equal("Flight options", store.GetJob(talk.Id).Title);
+            store.RenameJob(talk.Id, " ");
+            Assert.Equal("Flight options", store.GetJob(talk.Id).Title);
+            store.RenameJob(talk.Id, new string('x', 300));
+            Assert.Equal(WorkStore.MaxTitleLength, store.GetJob(talk.Id).Title.Length);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void CompanionsJobsAndRoutines_PersistWithFolders()
     {
         var root = Path.Combine(Path.GetTempPath(), "openclicky-work-" + Guid.NewGuid().ToString("N"));
         try
         {
             var store = new WorkStore(Path.Combine(root, "openclicky.db"), Path.Combine(root, "companions"));
-            Assert.Equal(WorkStore.DefaultCompanionSlug, Assert.Single(store.Companions()).Slug);
+            var main = Assert.Single(store.Companions());
+            Assert.Equal((WorkStore.DefaultCompanionSlug, "OpenClicky", "General helper"), (main.Slug, main.Name, main.Role));
 
             var writer = store.CreateCompanion("Research Writer", "Writes sourced briefs.");
             var twin = store.CreateCompanion("Research Writer", "");
