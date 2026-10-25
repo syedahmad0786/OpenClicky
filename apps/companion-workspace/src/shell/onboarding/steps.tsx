@@ -11,7 +11,12 @@ export type Tour = NonNullable<ShellState["onboarding"]>;
 export interface StepView { badge?: string; title: string; body: ReactNode; extra?: ReactNode }
 
 export const tourAction = (action: OnboardingAction) => postPage({ kind: "onboarding", action });
-const openSettings = (section: SettingsSection) => { postPage({ kind: "notch.tab", tab: "settings" }); postPage({ kind: "settings.section", section }); };
+/** The pointer is on the tour card, so the notch is collapsed: open it too (Settings is exempt from the idle close). */
+const openSettings = (section: SettingsSection) => {
+  postPage({ kind: "notch.tab", tab: "settings" });
+  postPage({ kind: "settings.section", section });
+  postPage({ kind: "notch.open", open: true });
+};
 const gesture = (trigger: "hold" | "doubleTap") => (trigger === "doubleTap" ? "Double-tap" : "Hold");
 
 const BARS = 16;

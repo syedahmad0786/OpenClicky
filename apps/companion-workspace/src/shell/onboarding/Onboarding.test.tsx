@@ -146,6 +146,7 @@ it("mic check ticks after a loud enough level", () => {
     { kind: "settings.action", action: "testMic" },
     { kind: "notch.tab", tab: "settings" },
     { kind: "settings.section", section: "microphone" },
+    { kind: "notch.open", open: true },
   ]);
 });
 
@@ -165,7 +166,7 @@ it("voice hello shows the talk keys and the account note without a provider", ()
   expect(screen.getByText("Connect ChatGPT or add an OpenRouter key first, so I can answer.")).toBeInTheDocument();
   expect(screen.getByText("Your words and screenshots go to your model provider.")).toBeInTheDocument();
   fireEvent.click(button("Open Account settings"));
-  expect(host.all()).toEqual([{ kind: "notch.tab", tab: "settings" }, { kind: "settings.section", section: "account" }]);
+  expect(host.all()).toEqual([{ kind: "notch.tab", tab: "settings" }, { kind: "settings.section", section: "account" }, { kind: "notch.open", open: true }]);
 
   rerender(<Onboarding state={tour("voiceHello", { stepDone: true }, (s) => { s.settings.shortcuts.talk.trigger = "doubleTap"; })} />);
   expect(container.querySelector(".onboarding__body")).toHaveTextContent(/^Double-tap CtrlAlt,/);
@@ -205,12 +206,14 @@ it("drive demo lists the three steps and ticks them when done", () => {
 });
 
 it("text mode and dictation name their own shortcuts and gestures", () => {
-  mockHost();
+  const host = mockHost();
   const { container, rerender } = render(<Onboarding state={tour("textMode")} />);
   expect(container.querySelector(".onboarding__body")).toHaveTextContent("Double-tap CtrlAltT and a text box opens up here.");
   rerender(<Onboarding state={tour("dictation")} />);
   expect(container.querySelector(".onboarding__body")).toHaveTextContent("Hold CtrlAltD, speak, then let go: your words appear at the cursor. Double-tap CtrlAltH to keep dictating hands-free.");
   expect(screen.getByText("Dictation needs the local voice. Download it in Settings → Microphone.")).toBeInTheDocument();
+  fireEvent.click(button("Open Microphone settings"));
+  expect(host.all()).toEqual([{ kind: "notch.tab", tab: "settings" }, { kind: "settings.section", section: "microphone" }, { kind: "notch.open", open: true }]);
   rerender(<Onboarding state={tour("dictation", { stepDone: true }, (s) => { s.settings.microphone.whisper = "ready"; })} />);
   expect(screen.queryByRole("button", { name: "Open Microphone settings" })).toBeNull();
   expect(screen.getByText("Nicely done.")).toBeInTheDocument();
