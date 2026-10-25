@@ -53,7 +53,7 @@ internal static class OpenWorkGateCheck
                     if (ForegroundWindowInfo.GetHandle() != targetHandle)
                         throw new InvalidOperationException("Live gate is scoped to its disposable fixture. Bring that window forward.");
                     return Task.CompletedTask;
-                }, () => "", Report, () => { }, []);
+                }, () => "", Report, () => OverlayHoldGate.None, []);
                 try
                 {
                     var result = await OpenWorkCompanionRunner.RunAsync(

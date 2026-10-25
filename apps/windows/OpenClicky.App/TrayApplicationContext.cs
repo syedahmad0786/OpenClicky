@@ -856,7 +856,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             if (!await initialization.ConfigureAwait(false)) return;
             var host = new WindowsDesktopToolHost(_capture, confirm, ExecuteMappedAsync,
                 _taskControl.WaitAsync, () => _taskSteering, p => RecordProgress(id, p),
-                _overlay.Hide, AgentDenyList.ParseExtraFragments(_settings.AgentDenyListExtra));
+                ((IOverlayController)_overlay).HideForCapture, AgentDenyList.ParseExtraFragments(_settings.AgentDenyListExtra));
             if (access == AgentAccessMode.Auto)
             {
                 RecordProgress(id, new(0, "planning", "Preparing a task plan for your approval"));

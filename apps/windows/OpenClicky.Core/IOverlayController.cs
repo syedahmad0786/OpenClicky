@@ -34,6 +34,20 @@ public interface IOverlayController : IDisposable
     /// </summary>
     void Hide();
 
+    /// <summary>
+    /// Until the returned scope is disposed, nothing shows the overlay again (a ShowIdle from a pause or the end of a talk turn is
+    /// deferred to the release). Take it before <see cref="Hide"/> around an agent's capture; overlays that never defer return a no-op.
+    /// </summary>
+    IDisposable HoldHidden() => OverlayHoldGate.None;
+
+    /// <summary>Holds the overlay hidden, then hides it: the scope covers the settle delay and the capture.</summary>
+    IDisposable HideForCapture()
+    {
+        var hold = HoldHidden();
+        Hide();
+        return hold;
+    }
+
     /// <summary>Time for the desktop compositor to drop hidden overlay windows from what a capture sees.</summary>
     const int HideSettleMilliseconds = 120;
 

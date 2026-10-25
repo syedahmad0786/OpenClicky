@@ -17,7 +17,7 @@ internal sealed class WindowsDesktopToolHost : IDesktopToolHost
     private readonly Func<CancellationToken, Task> _beforeTool;
     private readonly Func<string> _steering;
     private readonly Action<AgentProgress> _progress;
-    private readonly Action _hideOverlay;
+    private readonly Func<IDisposable> _hideForCapture;
     private readonly IReadOnlyList<string> _excluded;
     private readonly UiaSnapshotService _uia = new();
     private string? _fingerprint;
@@ -27,10 +27,10 @@ internal sealed class WindowsDesktopToolHost : IDesktopToolHost
     public WindowsDesktopToolHost(IScreenCaptureService capture, IAgentConfirm confirm,
         Func<ActionRequest, bool, CancellationToken, Task<ActionResult>> execute,
         Func<CancellationToken, Task> beforeTool, Func<string> steering, Action<AgentProgress> progress,
-        Action hideOverlay, IReadOnlyList<string> excluded)
+        Func<IDisposable> hideForCapture, IReadOnlyList<string> excluded)
     {
         _capture = capture; _confirm = confirm; _execute = execute; _beforeTool = beforeTool;
-        _steering = steering; _progress = progress; _hideOverlay = hideOverlay; _excluded = excluded;
+        _steering = steering; _progress = progress; _hideForCapture = hideForCapture; _excluded = excluded;
     }
 
     public async Task<DesktopToolContext> GetCurrentContextAsync(CancellationToken token)
@@ -44,7 +44,7 @@ internal sealed class WindowsDesktopToolHost : IDesktopToolHost
     {
         _progress(new(_step, "observing", includeScreens ? "Inspecting the current app" : "Reading current app controls", includeScreens ? "observe_screen" : "uia"));
         await _beforeTool(token).ConfigureAwait(false);
-        _hideOverlay(); // synchronous: the companion and any drawing are hidden when it returns
+        using var hidden = _hideForCapture(); // synchronous: the companion and any drawing are hidden, and stay so, until this returns
         if (includeScreens) await Task.Delay(IOverlayController.HideSettleMilliseconds, token).ConfigureAwait(false);
         var state = ReadContext();
         IReadOnlyList<ScreenCaptureResult> screens = [];

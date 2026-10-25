@@ -150,6 +150,8 @@ public sealed class BuddyOverlayController : IOverlayController
 
     // Dock into the notch, and shake to detach.
     private readonly ShakeDetector _shake = new();
+    /// <summary>Open while an agent captures: a ShowIdle / Show* from a pause or a talk turn waits for the release (see <see cref="HoldHidden"/>).</summary>
+    private readonly OverlayHoldGate _holds;
     private readonly DetachState _detach = new();
     private Pt? _notchPoint;
     private readonly DockMachine _dock = new();
@@ -174,6 +176,7 @@ public sealed class BuddyOverlayController : IOverlayController
             _buttonCatchers[i].Clicked += () => OnButtonClicked(index);
         }
         _accent = ParseAccent(_style.AccentHex);
+        _holds = new OverlayHoldGate(() => Post(Show));
         _timer.Tick += (_, _) => Frame();
         _buttonTimer.Tick += (_, _) => SyncButtons();
         // A spotlight reaching its end of life needs frames to fade out, even if the loop had stopped.
@@ -441,6 +444,8 @@ public sealed class BuddyOverlayController : IOverlayController
         }
     }
 
+    public IDisposable HoldHidden() => _holds.Hold();
+
     /// <summary>Synchronous: every overlay window is hidden when this returns (it runs before captures).</summary>
     public void Hide()
     {
@@ -519,6 +524,7 @@ public sealed class BuddyOverlayController : IOverlayController
     /// <summary>Ends any <see cref="Hide"/> and renders a frame now, so visibility changes before the call returns.</summary>
     private void Show()
     {
+        if (!_holds.Allow()) return; // a capture is in flight: the release shows it
         _hidden = false;
         _drawingDirty = true;
         _drawing.Invalidate();

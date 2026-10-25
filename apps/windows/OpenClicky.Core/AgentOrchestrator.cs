@@ -94,23 +94,29 @@ public sealed class AgentOrchestrator
             }
             Progress(step, "planning", "Looking at the current screen");
             // Hide the companion (and any drawing) so it does not pollute the vision / UIA capture; let DWM drop it first.
-            _overlay.Hide();
-            await Task.Delay(IOverlayController.HideSettleMilliseconds, cancellationToken).ConfigureAwait(false);
-            var capturedWindow = _foregroundWindow?.Invoke();
-            var capturedRevision = _revision?.Invoke();
-            var capturedBounds = _foregroundBounds?.Invoke();
+            // The hold keeps a pause or a talk turn's ShowIdle from putting the companion back before the pixels are taken.
+            nint? capturedWindow;
+            long? capturedRevision;
+            (int X, int Y, int Width, int Height)? capturedBounds;
             IReadOnlyList<ScreenCaptureResult> screens;
-            if (_foregroundBounds is not null)
+            using (_overlay.HideForCapture())
             {
-                if (capturedBounds is not { Width: > 0, Height: > 0 } region)
-                    throw new InvalidOperationException("The foreground window has no visible area.");
-                var screen = await Task.Run(() => _capture.CaptureRegionJpegAsync(region, cancellationToken), cancellationToken).ConfigureAwait(false)
-                    ?? throw new InvalidOperationException("The current window could not be captured.");
-                screens = [screen];
-            }
-            else
-            {
-                screens = await Task.Run(() => _capture.CaptureAllMonitorsJpegAsync(cancellationToken), cancellationToken).ConfigureAwait(false);
+                await Task.Delay(IOverlayController.HideSettleMilliseconds, cancellationToken).ConfigureAwait(false);
+                capturedWindow = _foregroundWindow?.Invoke();
+                capturedRevision = _revision?.Invoke();
+                capturedBounds = _foregroundBounds?.Invoke();
+                if (_foregroundBounds is not null)
+                {
+                    if (capturedBounds is not { Width: > 0, Height: > 0 } region)
+                        throw new InvalidOperationException("The foreground window has no visible area.");
+                    var screen = await Task.Run(() => _capture.CaptureRegionJpegAsync(region, cancellationToken), cancellationToken).ConfigureAwait(false)
+                        ?? throw new InvalidOperationException("The current window could not be captured.");
+                    screens = [screen];
+                }
+                else
+                {
+                    screens = await Task.Run(() => _capture.CaptureAllMonitorsJpegAsync(cancellationToken), cancellationToken).ConfigureAwait(false);
+                }
             }
             _overlay.ShowProcessing();
             var afterCaptureTitle = _foregroundTitle?.Invoke();
