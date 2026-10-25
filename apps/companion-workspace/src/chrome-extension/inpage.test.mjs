@@ -1,8 +1,25 @@
 import { describe, expect, it } from "vitest";
 import { JSDOM } from "jsdom";
-import { extractMain, guardMain, fieldKind, activeField, dismissCover } from "../../../chrome-extension/inpage.mjs";
+import { extractMain, guardMain, fieldKind, activeField, dismissCover, pageMatches } from "../../../chrome-extension/inpage.mjs";
 
 describe("inpage", () => {
+  it("wait_for gone: true waits until the text or url is absent", () => {
+    document.body.innerHTML = "<p>Loading results</p>";
+    // jsdom has no innerText; the page check only needs the visible text.
+    Object.defineProperty(document.body, "innerText", { configurable: true, get() { return this.textContent; } });
+    try {
+      expect(pageMatches({ text: "Loading" })).toBe(true);
+      expect(pageMatches({ text: "Loading", gone: true })).toBe(false);
+      expect(pageMatches({ text: "Done", gone: true })).toBe(true);
+      expect(pageMatches({ text: "Done", gone: false })).toBe(false);
+      expect(pageMatches({ url: location.href, gone: true })).toBe(false);
+      expect(pageMatches({ url: "/no-such-page", gone: true })).toBe(true);
+      expect(pageMatches({ text: "Done", url: location.href, gone: true })).toBe(false); // both must be gone
+    } finally {
+      delete document.body.innerText;
+    }
+  });
+
   it("extract skips field values and passwords", () => {
     document.body.innerHTML = `
       <h2>Account</h2>

@@ -135,6 +135,12 @@ describe("createBridge", () => {
       .toEqual({ ok: false, error: "This site is on the blocked list. Nothing was read or changed." });
   });
 
+  it("wait_for gone must be true or false", async () => {
+    const { run, debuggee } = setup();
+    expect(await run("wait_for", { tabId: 11, gone: "Loading" })).toEqual({ ok: false, error: "gone is true or false." });
+    expect(debuggee.calls).toHaveLength(0);
+  });
+
   it("deny fragments are matched verbatim, without trimming", async () => {
     const { f, run } = setup();
     f.add(13, 1, { title: "Your purchases", url: "https://shop.test/orders" });

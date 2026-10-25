@@ -117,6 +117,16 @@ public sealed class BrowserOpsTests
     }
 
     [Fact]
+    public void WaitForGoneIsABoolean()
+    {
+        Assert.Null(BrowserOps.Validate("wait_for", Args(new { text = "Loading", gone = true })));
+        Assert.Null(BrowserOps.Validate("wait_for", Args(new { url = "/checkout", gone = false })));
+        Assert.Null(BrowserOps.Validate("batch", Args(new { rationale = "Wait", steps = new object[] { new { op = "wait_for", text = "Saving", gone = true } } })));
+        Assert.Equal("gone is true or false.", BrowserOps.Validate("wait_for", Args(new { gone = "Loading" })));
+        Assert.Equal("Say what to wait for: text or url.", BrowserOps.Validate("wait_for", Args(new { gone = true })));
+    }
+
+    [Fact]
     public void ActionsNeedRationale()
     {
         Assert.NotNull(BrowserOps.Validate("click", Args(new { @ref = "e1" })));

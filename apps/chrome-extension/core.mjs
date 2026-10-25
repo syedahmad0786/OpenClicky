@@ -83,6 +83,7 @@ export function createBridge({ debuggee, tabs, downloads, refStore, limits = {} 
     if (op === "wait_for" && a.timeout !== undefined && !(Number.isFinite(a.timeout) && a.timeout >= 0 && a.timeout <= 20)) {
       return "wait_for waits at most 20 seconds.";
     }
+    if (op === "wait_for" && a.gone !== undefined && typeof a.gone !== "boolean") return "gone is true or false.";
     if (op === "batch") {
       if (!Array.isArray(a.steps) || a.steps.length < 1 || a.steps.length > L.maxSteps) return `A batch has 1 to ${L.maxSteps} steps.`;
       for (const [i, step] of a.steps.entries()) {

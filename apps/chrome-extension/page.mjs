@@ -300,7 +300,7 @@ export class PageSession {
 
   async waitFor({ text, url, gone, timeout } = {}) {
     this._noDialog();
-    if (!text && !url && !gone) throw new Error("Say what to wait for: text, url or gone.");
+    if (!text && !url) throw new Error("Say what to wait for: text or url.");
     const seconds = Math.min(20, Math.max(0, Number(timeout ?? 10) || 0));
     const end = Date.now() + seconds * 1000;
     for (;;) {

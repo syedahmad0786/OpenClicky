@@ -22,6 +22,14 @@ const quad = { quads: [[10, 20, 30, 20, 30, 40, 10, 40]] };
 const passwordNode = { node: { nodeName: "INPUT", attributes: ["id", "p", "type", "Password"] } };
 
 describe("PageSession", () => {
+  it("wait_for gone needs text or url and passes the flag", async () => {
+    const f = fake({ "Runtime.evaluate": { result: { value: true } } });
+    const s = new PageSession(f.send);
+    await expect(s.waitFor({ gone: true })).rejects.toThrow("Say what to wait for: text or url.");
+    expect((await s.waitFor({ text: "Loading", gone: true })).text).toBe("The page is ready.");
+    expect(f.of("Runtime.evaluate")[0].params.expression).toContain('{"text":"Loading","gone":true}');
+  });
+
   it("prepare enables domains and focus emulation", async () => {
     const f = fake({ "Page.getFrameTree": { frameTree: { frame: { id: "M" } } } });
     await new PageSession(f.send).prepare();

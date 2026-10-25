@@ -390,6 +390,12 @@ async function main() {
       assert((await page.eval("document.getElementById('ucount').textContent")) === "1", "the button was not clicked after dismissing");
     });
 
+    await check("wait_for gone: true finishes once the text is absent and waits while it is there", async () => {
+      const done = await session.waitFor({ text: "We use cookies on this page.", gone: true, timeout: 5 }); // the banner was closed
+      assert(done.text === "The page is ready.", done.text);
+      await rejects(session.waitFor({ text: "Second page", gone: true, timeout: 1 }), "Still waiting after 1 s.");
+    });
+
     await check("extract has the table CSV and no field values", async () => {
       const text = (await session.extract()).text;
       assert(text.includes("Item,Qty") && text.includes("Apples,3") && text.includes("Pears,5"), `table CSV missing: ${text.slice(0, 200)}`);

@@ -69,6 +69,10 @@ public static class BrowserOps
                 return "Scroll up or down.";
             case "wait_for" when Has(a, "timeout") && !(Num(a, "timeout") is >= 0 and <= 20):
                 return "wait_for waits at most 20 seconds.";
+            case "wait_for" when Has(a, "gone") && a.GetProperty("gone").ValueKind is not (JsonValueKind.True or JsonValueKind.False):
+                return "gone is true or false.";
+            case "wait_for" when Bool(a, "gone") && Str(a, "text") is not { Length: > 0 } && Str(a, "url") is not { Length: > 0 }:
+                return "Say what to wait for: text or url.";
             case "javascript" when Str(a, "code") is not { Length: > 0 and <= 20_000 } code || string.IsNullOrWhiteSpace(code):
                 return "Give the script to run, at most 20,000 characters.";
             case "click_at" or "hover_at" when !Points(a, "x", "y"):

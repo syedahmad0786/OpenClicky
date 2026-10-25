@@ -297,11 +297,11 @@ export function activeField() {
   return a.isContentEditable ? "editable" : "none";
 }
 
-/** wait_for check: text present, gone text absent, URL contains a fragment. */
+/** wait_for check: the text is on the page and the URL contains the fragment; with gone: true, neither is there any more. */
 export function pageMatches(want) {
   const body = document.body ? document.body.innerText : "";
-  if (want.text && !body.includes(want.text)) return false;
-  if (want.gone && body.includes(want.gone)) return false;
-  if (want.url && !location.href.includes(want.url)) return false;
-  return true;
+  const seen = [];
+  if (want.text) seen.push(body.includes(want.text));
+  if (want.url) seen.push(location.href.includes(want.url));
+  return want.gone === true ? !seen.includes(true) : !seen.includes(false);
 }
