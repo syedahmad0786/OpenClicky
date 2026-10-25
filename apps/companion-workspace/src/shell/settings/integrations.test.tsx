@@ -210,7 +210,7 @@ it("EditorRemoteBrowser", () => {
   type("Extra headers", "X-Team: design\nX-Env: prod");
   fireEvent.click(screen.getByRole("button", { name: "Add connector" }));
   expect(posts()).toEqual([sent("connector.add", { name: "Design", kind: "remote", url: "https://mcp.example.com/mcp", auth: "browser", clientId: "abc123", headers: "X-Team: design\nX-Env: prod" })]);
-  expect(screen.getByRole("button", { name: "Adding…" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Adding…" })).toHaveAttribute("aria-disabled", "true");
 });
 
 it("Editor hints follow the authentication; client ID is only for browser sign-in", () => {

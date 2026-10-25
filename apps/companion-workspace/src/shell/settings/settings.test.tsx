@@ -60,7 +60,7 @@ it("General toggles post general.set and the update row follows the update state
   fireEvent.click(screen.getByRole("button", { name: "Check for updates" }));
   expect(posts("update.check")).toHaveLength(1);
   rerender(<SettingsPanel state={withUpdate({ state: "downloading", progress: 0.42 })} />);
-  expect(screen.getByRole("button", { name: "Downloading 42%" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Downloading 42%" })).toHaveAttribute("aria-disabled", "true");
   rerender(<SettingsPanel state={withUpdate({ state: "ready" })} />);
   fireEvent.click(screen.getByRole("button", { name: "Downloaded — open folder" }));
   expect(posts("update.install")).toHaveLength(2);
@@ -74,18 +74,18 @@ it("General toggles post general.set and the update row follows the update state
   expect(posts("link.open").map((m) => m.target)).toEqual(["whatsNew", "bug", "feature"]);
 });
 
-it("General: the update button is disabled and labelled while checking and while downloading", () => {
+it("General: the update button is busy (aria-disabled, still focusable) and labelled while checking and while downloading", () => {
   const posts = host();
   const withUpdate = (u: Partial<ShellState["update"]>) => make("general", (s) => { s.update = { ...s.update, ...u }; });
   const { rerender } = render(<SettingsPanel state={withUpdate({ state: "checking", available: null })} />);
   const checking = screen.getByRole("button", { name: "Checking…" });
-  expect(checking).toBeDisabled();
+  expect(checking).toHaveAttribute("aria-disabled", "true");
   fireEvent.click(checking);
   rerender(<SettingsPanel state={withUpdate({ state: "downloading", available: "1.5.0", progress: 0 })} />);
-  expect(screen.getByRole("button", { name: "Downloading 0%" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Downloading 0%" })).toHaveAttribute("aria-disabled", "true");
   rerender(<SettingsPanel state={withUpdate({ state: "downloading", available: "1.5.0", progress: 0.999 })} />);
   const downloading = screen.getByRole("button", { name: "Downloading 100%" });
-  expect(downloading).toBeDisabled();
+  expect(downloading).toHaveAttribute("aria-disabled", "true");
   fireEvent.click(downloading);
   expect(posts("update.check")).toEqual([]);
   expect(posts("update.install")).toEqual([]);

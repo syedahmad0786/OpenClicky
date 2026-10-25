@@ -66,6 +66,8 @@
   --key-bg: #121216;
   --key-border: rgb(255 255 255 / 0.12);
   --accent-text: var(--accent-light);
+  --toggle-on: var(--accent-lighter);
+  --toggle-on-knob: #16161a;
   color-scheme: dark;
 }
 
@@ -88,6 +90,8 @@
   --key-bg: #ececf1;
   --key-border: rgb(0 0 0 / 0.14);
   --accent-text: var(--accent-ink);
+  --toggle-on: var(--accent-deep);
+  --toggle-on-knob: #ffffff;
   --success: #0f7034;
   --success-bg: rgb(34 160 90 / 0.14);
   --warn: #7a4f00;
@@ -115,6 +119,8 @@
     --key-bg: #ececf1;
     --key-border: rgb(0 0 0 / 0.14);
     --accent-text: var(--accent-ink);
+    --toggle-on: var(--accent-deep);
+    --toggle-on-knob: #ffffff;
     --success: #0f7034;
     --success-bg: rgb(34 160 90 / 0.14);
     --warn: #7a4f00;
@@ -179,7 +185,7 @@ button.oc-pill:disabled, .oc-toggle:disabled, .oc-tile:disabled, .oc-chip:disabl
 }
 .oc-pill svg { flex: none; width: var(--icon-md); height: var(--icon-md); }
 .oc-pill:active:not(:disabled) { transform: scale(0.97); }
-.oc-pill[aria-busy="true"] { cursor: progress; }
+.oc-pill[aria-disabled="true"] { opacity: 0.45; pointer-events: none; } /* busy: focusable, but looks and acts disabled */
 .oc-pill--sm { min-height: 28px; padding: 0 var(--space-3); font-size: 12px; }
 .oc-pill--primary {
   color: var(--on-accent);
@@ -241,8 +247,8 @@ button.oc-pill:disabled, .oc-toggle:disabled, .oc-tile:disabled, .oc-chip:disabl
   background: var(--knob-off); box-shadow: 0 1px 3px rgb(0 0 0 / 0.4);
   transition: transform var(--dur) var(--ease), background-color var(--dur);
 }
-.oc-toggle.is-on { background: var(--accent-lighter); }
-.oc-toggle.is-on .oc-toggle__knob { transform: translateX(20px); background: #16161a; box-shadow: none; }
+.oc-toggle.is-on { background: var(--toggle-on); }
+.oc-toggle.is-on .oc-toggle__knob { transform: translateX(20px); background: var(--toggle-on-knob); box-shadow: none; }
 
 /* Segmented */
 .oc-segmented { display: inline-flex; gap: 2px; padding: 3px; background: var(--field); border-radius: 999px; }

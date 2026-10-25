@@ -16,7 +16,13 @@ function withDelta(state: ShellState, rowId: string, text: string): ShellState {
   return { ...state, chat: { rows } };
 }
 
-/** Announces a job whose state changed since the last state (never the jobs already there when the page loads). */
+/**
+ * The host already sends a card (read by NotchCards) when a job finishes, fails or needs you (Core JobAnnouncer), so
+ * only the other changes are announced here: a job that starts working or is stopped. Never the jobs already there
+ * when the page loads.
+ */
+const ANNOUNCED: ReadonlySet<JobCard["state"]> = new Set(["working", "stopped"]);
+
 function useJobAnnouncements(jobs: JobCard[] | undefined) {
   const seen = useRef<Map<string, JobCard["state"]> | null>(null);
   useEffect(() => {
@@ -24,7 +30,7 @@ function useJobAnnouncements(jobs: JobCard[] | undefined) {
     const before = seen.current;
     seen.current = new Map(jobs.map((job) => [job.id, job.state]));
     if (!before) return;
-    const changed = jobs.filter((job) => before.has(job.id) && before.get(job.id) !== job.state);
+    const changed = jobs.filter((job) => ANNOUNCED.has(job.state) && before.has(job.id) && before.get(job.id) !== job.state);
     if (changed.length) announce(changed.map((job) => `${job.title}: ${JOB_STATE_LABEL[job.state].text}`).join(". "));
   }, [jobs]);
 }

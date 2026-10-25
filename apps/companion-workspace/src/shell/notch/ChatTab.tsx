@@ -6,6 +6,13 @@ import { MicIcon } from "./icons";
 
 const MAX_TEXT = 8_000; // host limit for text.submit
 
+/**
+ * The host's streaming reply row (ShellController.StreamAssistant): chat.delta appends to it, and when the reply is
+ * complete the host removes it and pushes the finished reply as an ordinary row. While it is there the log is
+ * aria-busy, so a screen reader reads the finished reply once instead of every chunk.
+ */
+export const isStreamingRow = (row: ChatRow) => row.role === "assistant" && row.id.startsWith("live-stream-");
+
 const REPLAY_MODES: { action: DrawingAction; label: string; name: string }[] = [
   { action: "replayWindow", label: "Window", name: "Replay in a window" },
   { action: "replayFullScreen", label: "Full screen", name: "Replay full screen" },
@@ -83,7 +90,8 @@ export function ChatTab({ state, draft, onDraft, focusComposer, onComposerFocuse
 
   return (
     <>
-      <div className="notch-body notch-chat__list" ref={list} role="log" aria-live="polite" aria-label="Conversation">
+      <div className="notch-body notch-chat__list" ref={list} role="log" aria-live="polite" aria-label="Conversation"
+        aria-busy={rows.some(isStreamingRow) || undefined}>
         {rows.length === 0 ? (
           <div className="notch-chat__empty">
             <strong>No messages yet</strong>

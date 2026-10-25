@@ -90,7 +90,7 @@ it("Integrations: the add form needs a name and an https (or local http) URL, th
   ]);
   // The form stays open with its values until the host reports the connector (or a toast says why not).
   expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue(" Linear ");
-  expect(screen.getByRole("button", { name: "Adding…" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "Adding…" })).toHaveAttribute("aria-disabled", "true");
 });
 
 const withToast = (id: string) => make("integrations", (s) => { s.cards.push({ id, kind: "toast", title: "Use the connector's https:// MCP address", actions: [] }); });
@@ -138,7 +138,7 @@ it("Integrations: a toast that was already showing does not unlock the form, a c
     fireEvent.change(f.name, { target: { value: "Linear" } });
     fireEvent.change(f.url, { target: { value: "https://mcp.linear.app/mcp" } });
     fireEvent.click(f.add);
-    expect(screen.getByRole("button", { name: "Adding…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Adding…" })).toHaveAttribute("aria-disabled", "true");
     act(() => { vi.advanceTimersByTime(8_100); });
     expect(screen.getByRole("button", { name: "Add connector" })).toBeEnabled();
     expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue("Linear");

@@ -28,11 +28,14 @@ function Chooser({ browser }: { browser: Integrations["browser"] }) {
   const [pickedBrowser, setPickedBrowser] = useState<string | null>(null);
   const [pickedProfile, setPickedProfile] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
+  const [noAnswer, setNoAnswer] = useState(false);
   useEffect(() => {
     if (!connecting) return;
-    const t = setTimeout(() => setConnecting(false), CONNECT_PENDING_MS); // nothing came back: let the user try again
+    // Nothing came back (the card would have moved on to "waiting"): say so and let the user try again.
+    const t = setTimeout(() => { setConnecting(false); setNoAnswer(true); }, CONNECT_PENDING_MS);
     return () => clearTimeout(t);
   }, [connecting]);
+  const pick = () => { setConnecting(false); setNoAnswer(false); };
   const known = (id: string | null) => browser.browsers.find((b) => b.id === id);
   const chosen = known(pickedBrowser) ?? known(browser.browserId) ?? browser.browsers[0];
   const profiles = chosen?.profiles ?? [];
@@ -43,15 +46,16 @@ function Chooser({ browser }: { browser: Integrations["browser"] }) {
     <>
       <Row title="Browser">
         <Pick label="Browser" value={chosen?.id ?? ""} options={browser.browsers.map((b) => ({ value: b.id, text: b.name }))}
-          onChange={(id) => { setPickedBrowser(id); setPickedProfile(null); setConnecting(false); }} />
+          onChange={(id) => { setPickedBrowser(id); setPickedProfile(null); pick(); }} />
       </Row>
       <Row title="Profile" description="Agents use the sites you're signed in to in this profile, in their own tab group.">
         <Pick label="Profile" value={profile} options={profiles.map((p) => ({ value: p.dir, text: p.name }))}
-          onChange={(dir) => { setPickedProfile(dir); setConnecting(false); }} />
+          onChange={(dir) => { setPickedProfile(dir); pick(); }} />
       </Row>
       <div className="settings-actions">
-        <PillButton variant="primary" disabled={!chosen || connecting} aria-busy={connecting || undefined}
-          onClick={() => { if (!chosen) return; setConnecting(true); send({ op: "connect", browser: chosen.id, profile }); }}>
+        {noAnswer ? <span role="alert" className="settings-field__error settings-actions__error">Didn't hear back from the browser. Try again.</span> : null}
+        <PillButton variant="primary" disabled={!chosen} busy={connecting}
+          onClick={() => { if (!chosen) return; setNoAnswer(false); setConnecting(true); send({ op: "connect", browser: chosen.id, profile }); }}>
           {connecting ? "Connecting…" : "Connect"}
         </PillButton>
       </div>

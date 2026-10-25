@@ -25,7 +25,7 @@ export function TabSwitcher({ tab, onTab }: { tab: NotchTab; onTab: (tab: "home"
   return (
     <div role="tablist" aria-label="Notch tabs" className="oc-segmented notch-tabs">
       {TABS.map(({ id, label, Icon }, i) => (
-        <IconButton key={id} id={tabId(id)} label={label} icon={<Icon />} active={tab === id} role="tab" aria-selected={tab === id}
+        <IconButton key={id} id={tabId(id)} className="oc-hit" label={label} icon={<Icon />} active={tab === id} role="tab" aria-selected={tab === id}
           aria-pressed={undefined} aria-controls={tab === id ? TAB_PANEL_ID : undefined} tabIndex={i === Math.max(current, 0) ? 0 : -1}
           ref={(el: HTMLButtonElement | null) => { refs.current[i] = el; }} onClick={() => onTab(id)} onKeyDown={onKeyDown(i)} />
       ))}

@@ -72,6 +72,7 @@
 .settings-toolbar { display: flex; align-items: center; gap: var(--space-3); margin-top: var(--space-4); }
 .settings-toolbar__search { flex: 1; min-width: 0; }
 .settings-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); padding: 0 var(--space-4) var(--space-3); }
+.settings-actions__error { align-self: center; margin-right: auto; }
 .settings-field + .settings-actions { padding-top: var(--space-3); border-top: 1px solid var(--hairline); }
 .settings-line { display: block; }
 .settings-path { display: block; font-family: var(--font-mono, ui-monospace, monospace); white-space: nowrap; }

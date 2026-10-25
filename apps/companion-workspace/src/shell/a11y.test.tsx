@@ -68,44 +68,107 @@ it("RadioList is a named radiogroup of native radios (arrow keys come from the b
   expect(radios.map((r) => (r as HTMLInputElement).name)).toEqual(["x", "x"]); // one name: the browser's arrow-key group
 });
 
-it("one polite live region reads a job's new state and a new card once, not the ones present at load", () => {
+type Job = ShellState["jobs"][number];
+type Card = ShellState["cards"][number];
+const withJob = (id: string, state: Job["state"]) => fixture.jobs.map((j) => (j.id === id ? { ...j, state } : j));
+
+it("one polite live region: a carded job change is read once, with the card text; other job changes and new cards are read together", async () => {
   const host = mockHost();
   render(<ShellApp />);
-  host.send({ kind: "shell.state", state: fixture });
+  // announce() flushes in a microtask, so these sends await it.
+  const send = (state: ShellState) => act(async () => { host.send({ kind: "shell.state", state }); });
+  await send(fixture);
   const region = screen.getByRole("status");
   expect(region).toHaveAttribute("aria-live", "polite");
-  expect(region).toHaveTextContent(/^$/);
+  expect(region).toHaveTextContent(/^$/); // nothing that was already there at load
 
-  host.send({ kind: "shell.state", state: { ...fixture, jobs: fixture.jobs.map((j) => (j.id === "job-queued" ? { ...j, state: "needsYou" } : j)) } });
-  expect(region).toHaveTextContent("Tidy the downloads folder: Needs you");
+  // The host cards needsYou itself (JobAnnouncer): the job line is not read as well, and the card text is not lost.
+  const turn = { id: "card-turn", kind: "needsYou", title: "Your turn: Tidy the downloads folder", body: "Pick a folder.", actions: [] } as Card;
+  await send({ ...fixture, jobs: withJob("job-queued", "needsYou"), cards: [turn, ...fixture.cards.slice(0, 11)] }); // the contract caps cards at 12
+  expect(region).toHaveTextContent(/^Your turn: Tidy the downloads folder\. Pick a folder\.$/);
 
-  const card = { id: "card-new", kind: "toast", title: "Copied", actions: [] } as ShellState["cards"][number];
-  host.send({ kind: "shell.state", state: { ...fixture, jobs: fixture.jobs.map((j) => (j.id === "job-queued" ? { ...j, state: "needsYou" } : j)), cards: [card, ...fixture.cards.slice(0, 11)] } }); // the contract caps cards at 12
-  expect(region).toHaveTextContent(/^Copied$/);
+  // A state the host does not card is read from the job, in the same message as a card that arrives with it.
+  const copied = { id: "card-copied", kind: "toast", title: "Copied", actions: [] } as Card;
+  await send({ ...fixture, jobs: withJob("job-queued", "working"), cards: [copied, turn, ...fixture.cards.slice(0, 10)] });
+  expect(region).toHaveTextContent(/^Copied\. Tidy the downloads folder: Working…$/);
   expect(document.querySelectorAll("[aria-live]")).toHaveLength(1); // the card stack is not a second region
 });
 
-it("a connector being tested shows a busy, disabled Testing… button instead of Test", () => {
-  mockHost();
-  render(<SettingsPanel state={open("settings", (s) => { s.notch.section = "integrations"; s.settings.integrations.connectors[0].status = "checking"; })} />);
-  const busy = screen.getByRole("button", { name: "Testing Notion · Work" });
-  expect(busy).toBeDisabled();
-  expect(busy).toHaveAttribute("aria-busy", "true");
-  expect(busy).toHaveTextContent("Testing…");
+it("captions are not announced: the user is already hearing those words", async () => {
+  const host = mockHost();
+  render(<ShellApp />);
+  await act(async () => { host.send({ kind: "shell.state", state: fixture }); });
+  vi.useFakeTimers();
+  host.send({ kind: "caption.word", text: "Hello" });
+  host.send({ kind: "caption.clear" });
+  await act(async () => { vi.advanceTimersByTime(5_000); });
+  expect(screen.getByRole("status")).toHaveTextContent(/^$/);
 });
 
-it("Connect in the browser card stays busy until the host answers or the user changes the choice", () => {
+it("with the chat tab open, the conversation log is busy while a reply streams and settles when the finished row replaces it", async () => {
+  const host = mockHost();
+  render(<ShellApp />);
+  const chat = (rows: ShellState["chat"]["rows"]) => open("chat", (s) => { s.chat = { rows }; });
+  const at = "2026-10-24T09:31:00Z";
+  await act(async () => { host.send({ kind: "shell.state", state: chat([{ id: "row-1", role: "user", text: "Hi", at }]) }); });
+  const log = screen.getByRole("log", { name: "Conversation" });
+  expect(log).not.toHaveAttribute("aria-busy");
+
+  await act(async () => { host.send({ kind: "shell.state", state: chat([{ id: "row-1", role: "user", text: "Hi", at }, { id: "live-stream-ab12", role: "assistant", text: "Hel", at }]) }); });
+  host.send({ kind: "chat.delta", rowId: "live-stream-ab12", text: "lo there" });
+  expect(log).toHaveTextContent("Hello there");
+  expect(log).toHaveAttribute("aria-busy", "true");
+
+  await act(async () => { host.send({ kind: "shell.state", state: chat([{ id: "row-1", role: "user", text: "Hi", at }, { id: "row-2", role: "assistant", text: "Hello there!", at }]) }); });
+  expect(log).not.toHaveAttribute("aria-busy");
+  expect(document.querySelectorAll('[aria-live]:not([role="log"])')).toHaveLength(1); // still one status region beside the log
+});
+
+it("a connector being tested shows a busy Testing… button that keeps keyboard focus", () => {
+  const host = mockHost();
+  const state = (status: "connected" | "checking") => open("settings", (s) => { s.notch.section = "integrations"; s.settings.integrations.connectors[0].status = status; });
+  const { rerender } = render(<SettingsPanel state={state("connected")} />);
+  const test = screen.getByRole("button", { name: "Test Notion · Work" });
+  test.focus();
+  fireEvent.click(test);
+  rerender(<SettingsPanel state={state("checking")} />);
+  const busy = screen.getByRole("button", { name: "Testing Notion · Work" });
+  expect(busy).toBe(test); // the same element, so focus stays on it
+  expect(busy).toHaveFocus();
+  expect(busy).not.toBeDisabled();
+  expect(busy).toHaveAttribute("aria-disabled", "true");
+  expect(busy).toHaveAttribute("aria-busy", "true");
+  fireEvent.click(busy);
+  expect(host.posts("settings.action")).toHaveLength(1); // the busy button ignores clicks
+});
+
+it("Connect in the browser card stays busy (and focused) until the host answers, and says so when it never does", () => {
   vi.useFakeTimers();
   const host = mockHost();
   render(<SettingsPanel state={open("settings", (s) => { s.notch.section = "integrations"; s.settings.integrations.chrome = "notInstalled"; })} />);
-  fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+  const connect = screen.getByRole("button", { name: "Connect" });
+  connect.focus();
+  fireEvent.click(connect);
   const busy = screen.getByRole("button", { name: "Connecting…" });
-  expect(busy).toBeDisabled();
+  expect(busy).toHaveFocus();
+  expect(busy).toHaveAttribute("aria-disabled", "true");
   expect(busy).toHaveAttribute("aria-busy", "true");
   fireEvent.click(busy);
   expect(host.posts("settings.action")).toHaveLength(1);
+  expect(screen.queryByRole("alert")).toBeNull();
+
   act(() => { vi.advanceTimersByTime(8_000); }); // nothing came back
-  expect(screen.getByRole("button", { name: "Connect" })).toBeEnabled();
+  expect(screen.getByRole("alert")).toHaveTextContent("Didn't hear back from the browser. Try again.");
+  expect(screen.getByRole("button", { name: "Connect" })).toHaveFocus();
+  fireEvent.click(screen.getByRole("button", { name: "Connect" })); // trying again clears the line
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(host.posts("settings.action")).toHaveLength(2);
+});
+
+it("the notch tabs have a 32px pointer target", () => {
+  mockHost();
+  render(<Notch state={open("home")} />);
+  for (const tab of screen.getAllByRole("tab")) expect(tab).toHaveClass("oc-hit");
 });
 
 it("Esc closes the Replay mode choice and returns focus to Replay; Esc in an in-page confirm keeps", () => {

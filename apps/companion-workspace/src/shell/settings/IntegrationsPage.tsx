@@ -81,7 +81,7 @@ function ConnectorRow({ c, multiAccount, open, setOpen }: { c: Connector; multiA
         <Badge tone={status.tone}>{status.text}</Badge>
         {signIn ? <PillButton size="sm" variant="primary" aria-label={`${signInText} ${title}`} onClick={() => act("connector.signIn", c.key)}>{signInText}</PillButton> : null}
         {c.status === "signingIn" ? null
-          : c.status === "checking" ? <PillButton size="sm" disabled aria-busy="true" aria-label={`Testing ${title}`}>Testing…</PillButton>
+          : c.status === "checking" ? <PillButton size="sm" busy aria-label={`Testing ${title}`}>Testing…</PillButton>
           : <PillButton size="sm" aria-label={`Test ${title}`} onClick={() => act("connector.test", c.key)}>Test</PillButton>}
         {multiAccount ? <PillButton size="sm" aria-label={`Rename ${title}`} onClick={() => setOpen({ kind: "rename", key: c.key })}>Rename</PillButton> : null}
         <PillButton size="sm" variant="danger" ref={trigger} aria-label={`${vault ? "Disconnect" : "Remove"} ${title}`} onClick={() => setOpen({ kind: "remove", key: c.key })}>

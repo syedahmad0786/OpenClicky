@@ -220,7 +220,7 @@ export function ConnectorEditor({ connectors, toasts, preset, onClose }: { conne
       {tooLong ? <p role="alert" className="settings-field__error settings-connector-secret-hint">That's too much to send at once. Shorten the headers or variables.</p> : null}
       <div className="settings-actions">
         <PillButton size="sm" variant="outline" onClick={onClose}>Cancel</PillButton>
-        <PillButton size="sm" variant="primary" disabled={!canAdd} aria-busy={pending ? true : undefined} onClick={add}>{pending ? "Adding…" : "Add connector"}</PillButton>
+        <PillButton size="sm" variant="primary" disabled={!canAdd && !pending} busy={!!pending} onClick={add}>{pending ? "Adding…" : "Add connector"}</PillButton>
       </div>
     </Group>
   );

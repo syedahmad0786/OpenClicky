@@ -52,6 +52,11 @@ const luminance = ([r, g, b]: Rgba) => {
 };
 const ratio = (a: Rgba, b: Rgba) => { const [x, y] = [luminance(a), luminance(b)].sort((m, n) => n - m); return (x + 0.05) / (y + 0.05); };
 
+/** The paper stocks (oc-paper--*), the same in both themes. */
+const PAPER = ["#f3efe2", "#f7e9a8", "#cfeedd", "#cfe3f7", "#fbd9c2", "#f8d3dc"];
+/** The deck's "Needs you" colour, read from deck.css. */
+const DECK_WARN = /data-tone="warn"\] \{ color: (#[0-9a-f]{6})/i.exec(readFileSync(resolve(__dirname, "deck/deck.css"), "utf8"))![1];
+
 /** [foreground, background, minimum] with token names, or a raw colour, or [colour, over] for a translucent background. */
 type Bg = string | [string, string];
 const PAIRS: [string, Bg, number][] = [
@@ -65,13 +70,17 @@ const PAIRS: [string, Bg, number][] = [
   ["--text-2", "--field", 4.5], // muted badge
   // Controls: the off knob against its track, and the track against the card it sits on.
   ["--knob-off", "--track-off", 3], ["--track-off", "--card", 3],
+  // The deck's "Needs you" line (deck.css) on every paper stock.
+  ...PAPER.map((paper): [string, Bg, number] => [DECK_WARN, paper, 4.5]),
 ];
 const ACCENT_PAIRS: [string, Bg, number][] = [
   ["--accent-text", "--panel", 4.5], ["--accent-text", "--card", 4.5], ["--accent-text", "--field", 4.5],
   ["--on-accent", "--accent", 4.5], ["--on-accent", "--accent-light", 4.5],
   ["--on-tint", ["--accent-tint", "--field"], 4.5], ["--on-tint", ["--accent-tint", "--panel"], 4.5],
+  // The switched-on toggle: its track against the card, and the knob against the track.
+  ["--toggle-on", "--card", 3], ["--toggle-on-knob", "--toggle-on", 3],
   // Accent text on paper cards (the deck's "Ready to view"), which are light in both themes.
-  ["--accent-ink", "#f7e9a8", 4.5], ["--accent-ink", "#cfeedd", 4.5], ["--accent-ink", "#cfe3f7", 4.5], ["--accent-ink", "#f8d3dc", 4.5],
+  ...PAPER.map((paper): [string, Bg, number] => ["--accent-ink", paper, 4.5]),
 ];
 
 const colour = (name: string, t: Tokens) => parse(name.startsWith("--") ? `var(${name})` : name, t);
