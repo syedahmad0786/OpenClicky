@@ -2,6 +2,7 @@ using System.Diagnostics;
 using OpenClicky.Agent;
 using OpenClicky.Core;
 using OpenClicky.Core.Shell;
+using OpenClicky.Core.Work;
 
 namespace OpenClicky.App;
 
@@ -46,8 +47,8 @@ internal sealed partial class TrayApplicationContext
         {
             try
             {
-                // Checked per action, on the UI thread: a running (not paused) agent task may be typing too.
-                var taskRunning = RunMayAct;
+                // Checked per action, on the UI thread: a foreground run that is not paused may be typing too.
+                var taskRunning = ForegroundMayAct;
                 var decision = TalkActionPolicy.Decide(action, mode, taskRunning);
                 Log($"talk_action kind={action.Kind} decision={decision} mode={mode} task_running={taskRunning}");
                 switch (decision)
@@ -154,12 +155,19 @@ internal sealed partial class TrayApplicationContext
             return;
         }
         // A task may have started or resumed while the dialog was open or keys were held: it may be typing too.
-        if (RunMayAct)
+        if (ForegroundMayAct)
         {
             ShowTalkActionCard(TalkActionText.TypeHeldForTask(action));
             return;
         }
         var text = TalkActionText.SanitizeForTyping(action.Value);
+        // The screen is held while the text goes in, so a background job's input waits instead of interleaving with it.
+        using var screen = await _lease.TryAcquireAsync(DesktopLease.TalkHolder, DesktopLease.TalkWait, _lifetime.Token);
+        if (screen is null)
+        {
+            ShowTalkActionCard(TalkActionText.TypeHeldForTask(action));
+            return;
+        }
         var result = await target.InsertAsync(text, _executor, _lifetime.Token, requireCurrentFocus: true, exclusions: exclusions);
         Log($"talk_type attempted={result.InputAttempted} verified={result.Verified}");
         // The insertion's own messages are worded for dictation drafts.

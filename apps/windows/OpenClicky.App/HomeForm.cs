@@ -399,6 +399,8 @@ internal sealed class HomeForm : Form
         _stopButton.Enabled = _walkthroughActive || _busy || running || _guide.Checked;
         if (!_busy) _status.Text = running ? "Task running · voice pauses it" : "Ready when you are";
     }
+    /// <summary>As <see cref="SetTaskRunning"/>, only when it changed (called on every lease change and twice a second).</summary>
+    public void RefreshTaskRunning(bool running) { if (running != _taskRunning) SetTaskRunning(running); }
     public void ShowTasks() => _workspace.SelectedIndex = 1;
     public void ShowNotes() => _workspace.SelectedTab = _notesPage;
 

@@ -37,8 +37,8 @@ internal sealed partial class TrayApplicationContext
     {
         _overlay.DetachedClicked += ToggleConversation;
         _overlay.ButtonClicked += OnDrawingButtonClicked;
-        // An agent task that is running (not paused) or driving injects input: it must not detach the companion or have a click swallowed.
-        _overlay.DetachSuppressed = () => RunMayAct;
+        // A foreground run that is not paused may inject input: it must not detach the companion or have a click swallowed.
+        _overlay.DetachSuppressed = () => ForegroundMayAct;
         // The invisible topmost click targets over drawn buttons come down while a confirm dialog is open, so they cannot take a click meant for Yes/No.
         _overlay.DrawingButtonsSuppressed = () => _confirm.IsDialogOpen;
         _talk.StateChanged += state => OnUi(() => { if (state == CompanionVoiceState.Listening && _micWatch is null) WatchMicLevels(); });
@@ -59,7 +59,7 @@ internal sealed partial class TrayApplicationContext
     {
         _talk.WalkthroughTargeted += target => OnUi(() =>
         {
-            if (_talk.Walkthrough.View is { Active: true, Busy: false } && !TaskOpen)
+            if (_talk.Walkthrough.View is { Active: true, Busy: false } && !RunInForeground)
                 _walkthroughWatch.Arm(target, Environment.TickCount64);
         });
         // Raw input: injected input (an agent's or any other app's) never arrives here, so only the user's own clicks count.
@@ -89,7 +89,7 @@ internal sealed partial class TrayApplicationContext
     /// </summary>
     private void OnWalkthroughClick()
     {
-        if (_walkthroughWatch.Target is null || TaskOpen || !_talk.Walkthrough.View.Active) return;
+        if (_walkthroughWatch.Target is null || RunInForeground || !_talk.Walkthrough.View.Active) return;
         var p = System.Windows.Forms.Cursor.Position;
         var own = _confirm.IsDialogOpen || ForegroundWindowInfo.IsCurrentProcessWindowAt(p.X, p.Y);
         OnWalkthroughEvent(_walkthroughWatch.OnClick(new Pt(p.X, p.Y), own, Environment.TickCount64));
@@ -101,7 +101,7 @@ internal sealed partial class TrayApplicationContext
         if (!_talk.Walkthrough.View.Active) return;
         var now = Environment.TickCount64;
         // While a task runs nothing is armed, and its time does not count as the user's idleness: the clock starts over after it.
-        if (TaskOpen) { _walkthroughWatch.Disarm(); _walkthroughWatch.RestartIdle(now); return; }
+        if (RunInForeground) { _walkthroughWatch.Disarm(); _walkthroughWatch.RestartIdle(now); return; }
         if (_walkthroughWatch.Target is { IsHover: true })
         {
             var p = System.Windows.Forms.Cursor.Position;
@@ -147,7 +147,7 @@ internal sealed partial class TrayApplicationContext
     private async Task AdvanceWalkthroughAsync()
     {
         await Task.Delay(AdvanceDelayMs);
-        if (_talk.Walkthrough.View is { Active: true, Busy: false } && !TaskOpen) await MoveWalkthroughAsync(WalkthroughMove.Next);
+        if (_talk.Walkthrough.View is { Active: true, Busy: false } && !RunInForeground) await MoveWalkthroughAsync(WalkthroughMove.Next);
     }
 
     /// <summary>
@@ -189,7 +189,7 @@ internal sealed partial class TrayApplicationContext
     /// </summary>
     private async void OnDrawingButtonClicked(string label, string prompt)
     {
-        if (_dictationActive || _confirm.IsDialogOpen || RunMayAct) return;
+        if (_dictationActive || _confirm.IsDialogOpen || ForegroundMayAct) return;
         PrepareSubmission();
         try { await _talk.SubmitTextAsync(OpenClicky.Core.Drawing.DrawingButtons.Request(label, prompt), displayAs: label); }
         catch (Exception ex) { Log($"drawing_button_failed={ex.GetType().Name}"); }

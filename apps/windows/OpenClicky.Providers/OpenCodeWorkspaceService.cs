@@ -399,6 +399,14 @@ public sealed class OpenCodeWorkspaceService : IAsyncDisposable
             ? "OpenCode returned an assistant error without details."
             : null);
 
+    /// <summary>The engine answered, then the user's later message(s) (a steer) went unanswered: the answer before them is complete.</summary>
+    internal static bool HasAnswerBeforeLaterUserMessages(IReadOnlyList<OpenCodeMessageSummary> messages)
+    {
+        var end = messages.Count;
+        while (end > 0 && messages[end - 1].Role != "assistant") end--;
+        return end < messages.Count && messages.Skip(end).Any(m => m.Role == "user") && HasTerminalAssistantMessage(messages.Take(end).ToList());
+    }
+
     internal static bool MissingTerminalTimedOut(DateTimeOffset? idleSince, DateTimeOffset now) =>
         idleSince is { } started && now - started >= MissingTerminalTimeout;
 

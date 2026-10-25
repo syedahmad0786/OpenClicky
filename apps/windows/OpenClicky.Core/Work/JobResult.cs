@@ -94,6 +94,16 @@ public sealed record JobResult(string Reply, string? Title, string? Summary, IRe
 
     public string ToJson() => JsonSerializer.Serialize(this, Json);
 
+    /// <summary>What a finished run stores for its card: its own result, else (a stopped or failed run) the previous one, so the last
+    /// good points, stat, next steps and files stay; with the run's own checklist when it had one. The reply is left out: the card never
+    /// reads it (runs.md and the chat keep it), and it can be large. Null: nothing to store.</summary>
+    public static JobResult? ForStore(JobResult? produced, JobResult? previous, IReadOnlyList<PlanStep> plan)
+    {
+        var kept = produced ?? previous;
+        if (plan.Count > 0) kept = (kept ?? Empty("")) with { Plan = plan };
+        return kept is null ? null : kept with { Reply = "" };
+    }
+
     /// <summary>Reads a stored result; null when there is none or it cannot be read.</summary>
     public static JobResult? FromJson(string json)
     {

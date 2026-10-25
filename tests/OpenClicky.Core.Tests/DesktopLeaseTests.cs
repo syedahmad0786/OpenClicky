@@ -85,6 +85,39 @@ public sealed class DesktopLeaseTests
     }
 
     [Fact]
+    public void ARunIsInTheForegroundOnlyAsANativeTaskOrWhileOnTheScreen()
+    {
+        var now = DateTimeOffset.UtcNow;
+        Assert.True(DesktopLease.InForeground(nativeTaskOpen: true, lastHolder: null, now));
+        Assert.False(DesktopLease.InForeground(false, null, now)); // only background jobs, none ever on the screen
+        Assert.True(DesktopLease.InForeground(false, (true, DrivePhase.Idle, null), now));
+        Assert.True(DesktopLease.InForeground(false, (false, DrivePhase.Idle, now.AddSeconds(-10)), now)); // the 10 s grace
+        Assert.False(DesktopLease.InForeground(false, (false, DrivePhase.Idle, now.AddSeconds(-11)), now));
+        Assert.True(DesktopLease.InForeground(false, (false, DrivePhase.Driving, now.AddHours(-1)), now));
+        Assert.True(DesktopLease.InForeground(true, (false, DrivePhase.Idle, now.AddHours(-1)), now));
+    }
+
+    [Fact]
+    public async Task TalkWaitsBrieflyForTheScreenThenGivesUp()
+    {
+        var lease = new DesktopLease();
+        using (await lease.AcquireAsync("job-1", CancellationToken.None))
+            Assert.Null(await lease.TryAcquireAsync(DesktopLease.TalkHolder, TimeSpan.FromMilliseconds(50), CancellationToken.None));
+        Assert.Null(lease.Holder); // the gave-up waiter never took it
+        using var talk = await lease.TryAcquireAsync(DesktopLease.TalkHolder, TimeSpan.FromMilliseconds(50), CancellationToken.None);
+        Assert.NotNull(talk);
+        Assert.Equal("talk", lease.Holder);
+        var job = lease.AcquireAsync("job-1", CancellationToken.None);
+        await Task.Delay(50);
+        Assert.False(job.IsCompleted); // a job's input waits while talk types
+        talk!.Dispose();
+        (await job).Dispose();
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => lease.TryAcquireAsync(DesktopLease.TalkHolder, TimeSpan.FromSeconds(5), cancelled.Token));
+    }
+
+    [Fact]
     public async Task DesktopToolsTakeTheLeaseButMemorySearchDoesNot()
     {
         var lease = new DesktopLease();

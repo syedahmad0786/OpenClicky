@@ -30,4 +30,12 @@ public class VoiceCatalogTests
         Assert.True(marin.Available);
         Assert.Equal(VoiceCatalog.Descriptor("marin"), marin.Detail);
     }
+
+    [Theory]
+    [InlineData("cedar", true, "cedar")]
+    [InlineData("cedar", false, SettingsCatalog.WindowsDefaultVoice)] // replies not read aloud: never a cloud voice
+    [InlineData("win:0123456789abcdef", false, "win:0123456789abcdef")]
+    [InlineData("windows-default", true, "windows-default")]
+    public void AnnouncementsUseALocalVoiceWhenRepliesAreNotReadAloud(string voice, bool readRepliesAloud, string expected) =>
+        Assert.Equal(expected, VoiceCatalog.ForAnnouncement(voice, readRepliesAloud));
 }

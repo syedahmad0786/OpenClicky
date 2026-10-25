@@ -56,11 +56,13 @@ internal sealed class SpeechOutput : ITtsClient
     }
 
     /// <summary>
-    /// Says a job announcement. It ignores <see cref="Enabled"/> (Settings → Voice "read replies aloud"): the announcement toggle is its own.
-    /// It is not a reply, so no word reaches the captions bar and no speaker check runs.
+    /// Says a job announcement. It plays even with <see cref="Enabled"/> (Settings → Voice "read replies aloud") off, since the
+    /// announcement toggle is its own, but then only in a local Windows voice: an OpenAI voice would send the line to OpenAI
+    /// (<see cref="VoiceCatalog.ForAnnouncement"/>). It is not a reply, so no word reaches the captions bar and no speaker check runs.
     /// </summary>
     public Task AnnounceAsync(string text, CancellationToken cancellationToken = default) =>
-        string.IsNullOrWhiteSpace(text) ? Task.CompletedTask : SpeakCoreAsync(text, null, cancellationToken, captions: false);
+        string.IsNullOrWhiteSpace(text) ? Task.CompletedTask
+            : SpeakCoreAsync(text, VoiceCatalog.ForAnnouncement(_settings().VoiceId, Enabled), cancellationToken, captions: false);
 
     /// <summary>
     /// Says the preview line with <paramref name="voiceId"/> at the current speed. Like the test sound, it stops whatever is

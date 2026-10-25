@@ -18,7 +18,8 @@ public sealed class JobCardsTests
         Assert.Equal(NotchCardKind.NeedsYou, card.Kind);
         Assert.Equal("Your turn: Pay the invoice", card.Title);
         Assert.Equal("Sign in to the bank", card.Body);
-        Assert.Equal([new CardAction("open-page", "Open page", CardActionStyle.Primary), new CardAction("done", "I'm done", CardActionStyle.Secondary)], card.Actions);
+        Assert.Equal([new CardAction("open-page", "Open page", CardActionStyle.Primary), new CardAction("done", "I'm done", CardActionStyle.Secondary),
+            new CardAction("stop", "Stop", CardActionStyle.Secondary)], card.Actions);
         Assert.Null(card.AutoDismissMs);
     }
 
@@ -26,7 +27,7 @@ public sealed class JobCardsTests
     public void WithNoPageThereIsNoOpenPageAction()
     {
         var card = JobCards.YourTurn(Job(), Step(null));
-        Assert.Equal([new CardAction("done", "I'm done", CardActionStyle.Secondary)], card.Actions);
+        Assert.Equal([new CardAction("done", "I'm done", CardActionStyle.Secondary), new CardAction("stop", "Stop", CardActionStyle.Secondary)], card.Actions);
     }
 
     [Fact]

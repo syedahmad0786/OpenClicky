@@ -8,8 +8,55 @@ public sealed class UserStepWatchTests
     private static UserStep Step(string? doneWhen = "/welcome", string? page = "https://example.com/login") => new("Sign in", page, doneWhen, Start);
 
     [Fact]
-    public void DoneWhenAddressContainsText() =>
-        Assert.Equal(UserStepStatus.Done, new UserStepWatch(Step("/WELCOME"), Start).Check(Start.AddSeconds(5), "https://example.com/welcome?x=1"));
+    public void DoneWhenAddressContainsTextAfterANonMatchingRead()
+    {
+        var watch = new UserStepWatch(Step("/WELCOME"), Start);
+        Assert.Equal(UserStepStatus.Waiting, watch.Check(Start.AddSeconds(2), null)); // an unreadable address is not a non-match
+        Assert.Equal(UserStepStatus.Waiting, watch.Check(Start.AddSeconds(3), "https://example.com/login"));
+        Assert.Equal(UserStepStatus.Done, watch.Check(Start.AddSeconds(5), "https://example.com/welcome?x=1"));
+    }
+
+    [Fact]
+    public void AnAddressThatAlreadyMatchesWhenAskedDoesNotComplete()
+    {
+        var watch = new UserStepWatch(Step(), Start);
+        Assert.Equal(UserStepStatus.Waiting, watch.Check(Start.AddSeconds(3), "https://example.com/welcome"));
+        Assert.Equal(UserStepStatus.Waiting, watch.Check(Start.AddSeconds(6), "https://example.com/welcome"));
+        // A resumed watch starts over: it too needs a non-matching read first.
+        Assert.Equal(UserStepStatus.Waiting, new UserStepWatch(Step(), Start).Check(Start.AddHours(1), "https://example.com/welcome"));
+    }
+
+    [Theory]
+    [InlineData("abc")]
+    [InlineData(" /w ")]
+    [InlineData("http")]
+    [InlineData("HTTPS")]
+    [InlineData("www")]
+    [InlineData("https://")]
+    [InlineData("https://www.")]
+    public void ShortOrGenericDoneTextNeverAutoCompletes(string doneWhen)
+    {
+        var watch = new UserStepWatch(Step(doneWhen), Start);
+        Assert.Equal(UserStepStatus.Waiting, watch.Check(Start.AddSeconds(3), "edge://newtab"));
+        Assert.Equal(UserStepStatus.Waiting, watch.Check(Start.AddSeconds(6), "https://www.example.com/abc/w"));
+    }
+
+    [Fact]
+    public void AfterThreeAutomaticContinuesADayOnlyImDoneCompletes()
+    {
+        var budget = new AutoContinueBudget();
+        UserStepStatus Run(string jobId, DateTimeOffset at)
+        {
+            var watch = new UserStepWatch(Step(), at, budget, jobId);
+            watch.Check(at.AddSeconds(3), "https://example.com/login");
+            return watch.Check(at.AddSeconds(6), "https://example.com/welcome");
+        }
+        for (var i = 0; i < AutoContinueBudget.PerDay; i++) Assert.Equal(UserStepStatus.Done, Run("job1", Start));
+        Assert.Equal(UserStepStatus.Waiting, Run("job1", Start)); // the fourth today waits for "I'm done"
+        Assert.Equal(UserStepStatus.Done, Run("job2", Start)); // per job
+        Assert.Equal(UserStepStatus.Done, Run("job1", Start.AddDays(1))); // and per day
+        Assert.Equal(3, AutoContinueBudget.PerDay);
+    }
 
     [Fact]
     public void WaitingOtherwise() =>

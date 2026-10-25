@@ -221,6 +221,7 @@ it("Agents: long folder paths are shortened in the middle but keep the full path
 it("Agents: toggles patch, no quiet-during-calls promise is shown and reach rows post openPrivacySetting with their id", () => {
   const posts = host();
   render(<SettingsPanel state={make("agents", (s) => { s.settings.agents.reach.push({ id: "mic", label: "Microphone", state: "denied" }); })} />);
+  expect(screen.getByText("Speaks a short line when a job starts or finishes. Uses your selected voice — OpenAI voices send the line to OpenAI.")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("switch", { name: "Speak when a job starts or finishes" }));
   fireEvent.click(screen.getByRole("switch", { name: "Show updates beside the cursor" }));
   expect(screen.queryByText(/stays quiet/)).toBeNull();

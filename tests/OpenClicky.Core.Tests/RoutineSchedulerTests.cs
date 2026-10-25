@@ -10,8 +10,28 @@ public class RoutineSchedulerTests
     private static Routine Due(string id, TimeSpan ago, string? jobId = null, bool paused = false) =>
         new(id, jobId ?? "j-" + id, RoutineCadence.Daily, 9 * 60, 0, 0, paused, Now - ago);
 
-    private static RoutineTick Tick(bool network = true, DateTimeOffset? hold = null, IReadOnlySet<string>? active = null, bool signedIn = true) =>
-        new(Now, network, hold, active ?? None, signedIn);
+    private static RoutineTick Tick(bool network = true, DateTimeOffset? hold = null, IReadOnlySet<string>? active = null, bool signedIn = true, bool paused = false) =>
+        new(Now, network, hold, active ?? None, signedIn, paused);
+
+    [Fact]
+    public void AJobWaitingForTheUserCountsAsActive()
+    {
+        Routine[] routines = [Due("a", TimeSpan.FromMinutes(1)), Due("b", TimeSpan.FromMinutes(1)), Due("c", TimeSpan.FromMinutes(1))];
+        var active = RoutineScheduler.ActiveJobIds(routines, admitted: id => id == "j-a", waitingForUser: ["j-b", "j-other"]);
+        Assert.Equal(new HashSet<string> { "j-a", "j-b" }, active);
+        Assert.Equal(["c"], RoutineScheduler.Decide(routines, Tick(active: active)).Start.Select(r => r.Id));
+    }
+
+    [Fact]
+    public void NothingStartsWhileOpenClickyIsPaused()
+    {
+        var decision = RoutineScheduler.Decide([Due("a", TimeSpan.FromMinutes(1)), Due("b", TimeSpan.FromMinutes(-5))], Tick(network: false, paused: true));
+        Assert.Empty(decision.Start);
+        Assert.Empty(decision.WaitingForNetwork);
+        Assert.Equal(["a"], decision.WaitingWhilePaused!.Select(r => r.Id));
+        Assert.Equal("OpenClicky is paused", RoutineScheduler.WaitingNotes(decision)["a"]);
+        Assert.Equal(["a"], RoutineScheduler.Decide([Due("a", TimeSpan.FromMinutes(1))], Tick()).Start.Select(r => r.Id)); // unpaused: it runs
+    }
 
     [Fact]
     public void Constants()

@@ -64,10 +64,17 @@ public static class ShellStateBuilder
     public static ShellState Build(ShellInputs inputs)
     {
         var settings = inputs.Settings;
+        // Each job's stored result is read once per push (the card, its files and the featured pick all use it).
+        var results = new Dictionary<ShellJobInput, JobResult?>(ReferenceEqualityComparer.Instance);
+        JobResult? Result(ShellJobInput input)
+        {
+            if (!results.TryGetValue(input, out var result)) results[input] = result = JobResult.FromJson(input.Job.ResultJson);
+            return result;
+        }
         // Newest first (index 0 = most recently run or created), then trimmed.
         var cards = inputs.Jobs.Where(j => !string.IsNullOrEmpty(j.Job.Id)).OrderByDescending(j => j.Job.LastRunAt ?? j.Job.CreatedAt).Select(MapJob).ToList();
         var jobs = cards.Take(MaxJobs).ToList();
-        var featured = Featured(inputs, cards);
+        var featured = Featured(inputs, cards, Result);
         var rows = MergeDrawings(inputs.Chat.SelectMany(t => TurnRows(t).Select(r => (At: t.CreatedAtUtc, Row: r))), inputs.Drawings).Concat(inputs.LiveRows).TakeLast(MaxChatRows)
             .Select(r => r.Text.Length <= MaxRowText ? r : r with { Text = r.Text[..(MaxRowText - 1)] + "…" }).ToList();
 
@@ -107,7 +114,8 @@ public static class ShellStateBuilder
                 _ => JobState.New,
             };
             // The last run's stored result; a run in progress shows its own live steps instead of the last run's points.
-            var result = state == JobState.Working ? null : JobResult.FromJson(job.ResultJson);
+            var stored = Result(input);
+            var result = state == JobState.Working ? null : stored;
             return new JobCard(
                 Cut(job.Id, 160),
                 Cut(string.IsNullOrWhiteSpace(job.Title) ? "Job" : job.Title.Trim(), 160),
@@ -117,7 +125,7 @@ public static class ShellStateBuilder
                 result?.Stat is { } stat ? new JobStat(Cut(stat.Value, 40), Cut(stat.Label, 80)) : null,
                 (result is { Points.Count: > 0 } ? result.Points : input.Bullets).Take(MaxBullets).Select(b => Cut(b, 400)).ToList(),
                 (result?.Next ?? []).Take(MaxNext).Select(n => Cut(n, 160)).ToList(),
-                UsableFiles(JobFiles(input)).Select(path => new JobFile(Cut(Path.GetFileName(path), 260), path, FileKind(path))).ToList(),
+                UsableFiles(JobFiles(input, stored)).Select(path => new JobFile(Cut(Path.GetFileName(path), 260), path, FileKind(path))).ToList(),
                 (state is JobState.Working or JobState.Queued) && !string.IsNullOrWhiteSpace(input.LiveLine) ? Cut(input.LiveLine, 400) : null,
                 (state == JobState.Working ? input.Plan ?? [] : result?.Plan ?? []).Take(JobProgress.MaxPlan)
                     .Select(step => new PlanStep(Cut(step.Text, 400), step.Done)).ToList(),
@@ -141,8 +149,8 @@ public static class ShellStateBuilder
     }
 
     /// <summary>The files the job's stored result named (checked inside the job folder when it was parsed), else today's output listing.</summary>
-    private static IReadOnlyList<string> JobFiles(ShellJobInput input) =>
-        JobResult.FromJson(input.Job.ResultJson) is { Files.Count: > 0 } result ? result.Files : input.Files;
+    private static IReadOnlyList<string> JobFiles(ShellJobInput input, JobResult? stored) =>
+        stored is { Files.Count: > 0 } result ? result.Files : input.Files;
 
     private static IEnumerable<string> UsableFiles(IReadOnlyList<string> files) =>
         files.Where(path => path.Length is > 0 and <= MaxPath).Take(MaxFiles);
@@ -155,11 +163,11 @@ public static class ShellStateBuilder
     };
 
     /// <summary>The job the host chose (job.open), else the most recently run job that produced files.</summary>
-    private static JobCard? Featured(ShellInputs inputs, List<JobCard> cards)
+    private static JobCard? Featured(ShellInputs inputs, List<JobCard> cards, Func<ShellJobInput, JobResult?> result)
     {
         if (inputs.FeaturedJobId is { } chosen && cards.FirstOrDefault(c => c.Id == chosen) is { } picked) return picked;
         return inputs.Jobs
-            .Where(j => !string.IsNullOrEmpty(j.Job.Id) && j.Job.LastRunAt is not null && UsableFiles(JobFiles(j)).Any() && !inputs.DismissedJobIds.Contains(j.Job.Id))
+            .Where(j => !string.IsNullOrEmpty(j.Job.Id) && j.Job.LastRunAt is not null && UsableFiles(JobFiles(j, result(j))).Any() && !inputs.DismissedJobIds.Contains(j.Job.Id))
             .OrderByDescending(j => j.Job.LastRunAt)
             .Select(j => cards.First(c => c.Id == Cut(j.Job.Id, 160)))
             .FirstOrDefault();

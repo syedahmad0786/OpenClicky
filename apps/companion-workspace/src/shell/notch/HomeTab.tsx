@@ -96,7 +96,8 @@ function FeaturedJob({ job }: { job: JobCard }) {
         : job.state === "done" ? <JobInput key={`followUp-${job.id}`} id={job.id} kind="job.followUp" /> : null}
       <div className="notch-job__actions">
         <PillButton variant="primary" size="sm" onClick={() => postPage({ kind: "job.open", id: job.id })}>{PRIMARY_LABEL[job.state]}</PillButton>
-        {running(job) ? <PillButton variant="outline" size="sm" onClick={() => postPage({ kind: "job.stop", id: job.id })}>Stop</PillButton> : null}
+        {running(job) || job.state === "needsYou"
+          ? <PillButton variant="outline" size="sm" onClick={() => postPage({ kind: "job.stop", id: job.id })}>Stop</PillButton> : null}
         {job.state === "failed" || job.state === "stopped"
           ? <PillButton variant="outline" size="sm" onClick={() => postPage({ kind: "job.retry", id: job.id })}>Try again</PillButton> : null}
       </div>

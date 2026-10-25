@@ -102,7 +102,7 @@ internal sealed partial class TrayApplicationContext
 
     private void Replay(SavedDrawing drawing, ReplayMode mode)
     {
-        if (TaskOpen || _talk.State != CompanionVoiceState.Idle)
+        if (RunInForeground || _talk.State != CompanionVoiceState.Idle)
         {
             _shell?.AddToast("Finish what I'm doing first, then replay it.");
             return;

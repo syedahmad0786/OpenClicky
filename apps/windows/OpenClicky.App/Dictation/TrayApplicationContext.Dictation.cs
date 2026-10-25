@@ -13,6 +13,8 @@ namespace OpenClicky.App;
 internal sealed partial class TrayApplicationContext
 {
     private const string DictationBusy = "Stop the current voice turn or task before dictating.";
+    /// <summary>A job kept the screen past <see cref="OpenClicky.Core.Work.DesktopLease.TalkWait"/>: nothing was typed.</summary>
+    internal const string ScreenBusyForText = "A job was using the screen, so I didn't type it. Try again in a moment.";
     private const string DictationNeedsWhisper = "Automatic dictation requires the local Whisper model. Download it in Settings → Voice first.";
 
     private bool _dictationHeld, _dictationShown;
@@ -56,7 +58,7 @@ internal sealed partial class TrayApplicationContext
     private string? DictationBlocker(out DictationTarget? target)
     {
         target = null;
-        if (_talk.State != CompanionVoiceState.Idle || _talk.ConversationActive || TaskOpen) return DictationBusy;
+        if (_talk.State != CompanionVoiceState.Idle || _talk.ConversationActive || RunInForeground) return DictationBusy;
         if (DictationWhisperPlan() is null) return DictationNeedsWhisper;
         DictationTarget.TryCapture(out var captured, out var failure, out _, AgentDenyList.ParseExtraFragments(_settings.AgentDenyListExtra));
         var gate = DictationGate.Check(failure);
@@ -184,7 +186,7 @@ internal sealed partial class TrayApplicationContext
         // Never type while a modifier is down (Ctrl+Enter would send): still held after 10 s, nothing is typed.
         var keysUp = await WaitForModifiersReleasedAsync(token).ConfigureAwait(false);
         var field = keysUp && target is not null
-            ? new UiaDictationField(target, _executor, () => AgentDenyList.ParseExtraFragments(_settings.AgentDenyListExtra))
+            ? new UiaDictationField(target, _executor, () => AgentDenyList.ParseExtraFragments(_settings.AgentDenyListExtra), _lease)
             : null;
         var copied = true;
         var tidy = run is { ShellUi: true } && _settings.DictationCleanup;

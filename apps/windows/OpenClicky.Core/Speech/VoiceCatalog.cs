@@ -22,5 +22,10 @@ public static class VoiceCatalog
     /// <summary>Exact, lower-case ids only (the ids the settings page sends).</summary>
     public static bool IsOpenAi(string? id) => id is not null && OpenAiIds.Contains(id);
 
+    /// <summary>The voice a job announcement uses: the selected one, except that with "Read replies aloud" off an OpenAI voice
+    /// becomes the local Windows voice, so an announcement never sends its line off the machine then.</summary>
+    public static string ForAnnouncement(string voiceId, bool readRepliesAloud) =>
+        readRepliesAloud || !IsOpenAi(voiceId) ? voiceId : Settings.SettingsCatalog.WindowsDefaultVoice;
+
     public static string Descriptor(string id) => OpenAi.FirstOrDefault(v => v.Id == id).Descriptor ?? "OpenAI voice";
 }

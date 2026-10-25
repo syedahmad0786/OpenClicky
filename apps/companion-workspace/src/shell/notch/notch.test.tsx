@@ -147,6 +147,20 @@ it("a working job can be stopped", () => {
   expect(host.posts("job.stop")).toEqual([{ kind: "job.stop", id: "job-working" }]);
 });
 
+it("a needs-you job can be stopped from its featured card", () => {
+  const host = mockHost();
+  render(<Notch state={open("home", { featured: { ...fixture.featured!, state: "needsYou" } })} />);
+  fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+  expect(host.posts("job.stop")).toEqual([{ kind: "job.stop", id: "job-working" }]);
+  expect(screen.queryByRole("button", { name: "Dismiss" })).toBeNull();
+});
+
+it.each(["done", "failed", "stopped", "new"] as const)("a %s job has no Stop", (state) => {
+  mockHost();
+  render(<Notch state={open("home", { featured: { ...fixture.featured!, state } })} />);
+  expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+});
+
 it.each(["working", "queued"] as const)("a %s job takes an instruction: Enter posts job.steer and clears the box", (state) => {
   const host = mockHost();
   render(<Notch state={open("home", { featured: { ...fixture.featured!, state } })} />);

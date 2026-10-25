@@ -377,6 +377,13 @@ public sealed class OpenWorkServerService : IAsyncDisposable
                 idleWithoutTerminalSince = snapshot.Status.Type == "idle"
                     ? idleWithoutTerminalSince ?? DateTimeOffset.UtcNow
                     : null;
+                if (OpenCodeWorkspaceService.MissingTerminalTimedOut(idleWithoutTerminalSince, DateTimeOffset.UtcNow)
+                    && sentBefore > 0 && OpenCodeWorkspaceService.HasAnswerBeforeLaterUserMessages(snapshot.Messages) && EndUnlessUpdated(sentBefore))
+                {
+                    // A steer the engine left unanswered after its answer: finish with that answer rather than fail the run.
+                    progress?.Report(new(OpenCodeTaskUpdateKind.Completed, session.Id, "OpenWork task finished."));
+                    return new(session.Id, snapshot.Messages);
+                }
                 if (OpenCodeWorkspaceService.MissingTerminalTimedOut(idleWithoutTerminalSince, DateTimeOffset.UtcNow))
                     throw new InvalidOperationException(
                         "OpenWork became idle without returning a completed assistant message. No successful result was received.");

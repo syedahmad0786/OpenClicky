@@ -59,6 +59,8 @@ internal sealed partial class TrayApplicationContext
     private readonly Dictionary<string, (UserStep Step, CancellationTokenSource Watch, NotchCard Card)> _userSteps = new(StringComparer.Ordinal);
     /// <summary>What one address read may take; a step watch reads every <see cref="UserStepWatch.Poll"/>, off the UI thread.</summary>
     private static readonly TimeSpan AddressReadBudget = TimeSpan.FromMilliseconds(300);
+    /// <summary>Automatic (address-match) continues: three per job per day, then only "I'm done" ends a step.</summary>
+    private readonly AutoContinueBudget _autoContinues = new();
     private const string SteerTooLate = "That job has already finished — ask a follow-up instead.";
 
     /// <param name="Ask">The ask it will start with once steered (its follow-up or request plus each steer); null: not steered.</param>
@@ -87,8 +89,17 @@ internal sealed partial class TrayApplicationContext
         if (NativeRun is { } native && !ReferenceEquals(native, screen)) yield return native;
     }
 
-    /// <summary>Some open run is not paused, so it may send input at any moment (talk typing, drawn buttons and detaching hold back).</summary>
-    private bool RunMayAct => _runHandles.Any(entry => !entry.Value.Control.IsPaused);
+    /// <summary>A run is in the foreground (<see cref="DesktopLease.InForeground"/>): a native task is open or a run is on the screen.
+    /// Esc, the classic window's running state, dictation, walkthroughs, replays and guidance treat OpenClicky as busy only then;
+    /// a background job never blocks them, and only its card stops it.</summary>
+    private bool RunInForeground => DesktopLease.InForeground(_taskCts is not null,
+        Volatile.Read(ref _screen) is { } run ? (_lease.Holder == run.Holder, run.Drive.Phase, run.ReleasedAt) : null, DateTimeOffset.UtcNow);
+
+    /// <summary>UI thread: the classic window shows a run as running (Esc, pausing on focus) only while it is in the foreground.</summary>
+    private void RefreshHomeRunning() { if (!_home.IsDisposed) _home.RefreshTaskRunning(RunInForeground); }
+
+    /// <summary>A foreground run is not paused, so it may send input at any moment (talk typing, drawn buttons and detaching hold back).</summary>
+    private bool ForegroundMayAct => ForegroundRuns().Any(run => !run.Control.IsPaused) || _taskCts is not null && NativeRun is null;
 
     /// <summary>Admits a native task (<paramref name="work"/> null) into the single slot, or a job run that <see cref="_admission"/> let in.</summary>
     private bool TryAdmit(CancellationTokenSource native, JobRun? work) => work is null
@@ -124,9 +135,16 @@ internal sealed partial class TrayApplicationContext
     /// position now (another run may have moved it), and the last run's Esc pill comes down.</summary>
     private void OnLeaseChanged()
     {
-        if (_lease.Holder is not { } holder) { Volatile.Read(ref _screen)?.MarkReleased(DateTimeOffset.UtcNow); return; }
+        if (_lease.Holder is not { } holder)
+        {
+            // Only the run on the screen giving it back starts its grace; talk typing letting go must not restart it.
+            if (Volatile.Read(ref _screen) is { ReleasedAt: null } screen) screen.MarkReleased(DateTimeOffset.UtcNow);
+            OnUi(RefreshHomeRunning);
+            return;
+        }
         if (!_runHandles.TryGetValue(holder, out var run)) return;
         run.MarkHolding();
+        OnUi(RefreshHomeRunning);
         if (run.Control.IsPaused) OnUi(RequestShellPush); // paused before it took the screen: its card says it holds it
         var previous = Interlocked.Exchange(ref _screen, run);
         if (ReferenceEquals(previous, run)) return;
@@ -426,10 +444,11 @@ internal sealed partial class TrayApplicationContext
             catch (Exception ex) when (ex is not OutOfMemoryException) { Log("routine_read_error=" + ex.GetType().Name); return; }
             UpdateKeepAwake(routines);
             // Routines take the same slots as the user's jobs; a job already running or waiting is left alone.
-            var active = routines.Select(r => r.JobId).Where(_admission.Contains).ToHashSet(StringComparer.Ordinal);
+            // A job waiting on the user's own step is not idle either: a routine must not supersede that step.
+            var active = RoutineScheduler.ActiveJobIds(routines, _admission.Contains, _userSteps.Keys);
             var signedIn = _settings.AuthProvider == AuthProvider.ChatGPT && ProviderFactory.IsChatGptSignedIn(_secrets);
             var decision = RoutineScheduler.Decide(routines,
-                new(now, System.Net.NetworkInformation.NetworkInterface.GetIsNetworkAvailable(), _routineHoldUntil, active, signedIn));
+                new(now, System.Net.NetworkInformation.NetworkInterface.GetIsNetworkAvailable(), _routineHoldUntil, active, signedIn, _settings.Paused));
             _routinesWaiting = RoutineScheduler.WaitingNotes(decision);
             // Not signed in: the routines wait (no failure counted) and the user hears it once, not once per routine or tick.
             if (decision.WaitingForSignIn.Count > 0 && !_routinesSignInNoted) ClassicMessage(RoutineScheduler.SignInLine + ".");
@@ -481,12 +500,12 @@ internal sealed partial class TrayApplicationContext
         var summary = status == AgentProgressStates.Completed ? result?.Summary ?? JobPrompt.FirstSentence(text) : text;
         // A run that ended by asking for the user's own step waits for them (needs-you) instead of being done.
         var step = status == AgentProgressStates.Completed ? result?.YourTurn : null;
-        // The run's last checklist is stored with its result so the card keeps it after the run (even a stopped or failed one).
-        if (work.Live.Plan.Count > 0) result = (result ?? JobResult.Parse("", "")) with { Plan = work.Live.Plan };
+        // The card keeps the last good result when this run produced none (a stop or a failure), with this run's checklist if it had one.
+        var stored = JobResult.ForStore(result, JobResult.FromJson(work.Job.ResultJson), work.Live.Plan);
         try
         {
             _work.RecordJobRun(work.Job.Id, step is null ? status : WorkJobStates.NeedsYou, summary, DateTimeOffset.UtcNow);
-            _work.SetJobResult(work.Job.Id, result?.ToJson() ?? "");
+            _work.SetJobResult(work.Job.Id, stored?.ToJson() ?? "");
             _work.SetUserStep(work.Job.Id, step is null ? null : UserStepWatch.ToJson(step));
             if (work.FromTalk && result?.Title is { } title) _work.RenameJob(work.Job.Id, title);
             SaveHowTos(work.Job.Id, status == AgentProgressStates.Completed ? result?.Learned : null);
@@ -638,7 +657,7 @@ internal sealed partial class TrayApplicationContext
         if (!resumed) AnnounceJob(JobEvent.NeedsYou, job.Title, job.Id);
         _shell?.RemoveCard(JobAnnouncer.CardId(job.Id)); // the your-turn card says it better than the plain "Needs you" one
         _shell?.AddCard(card); // at start-up there is no shell yet: ShowUserStepCards adds it once the shell is up
-        _ = WatchUserStepAsync(job.Id, new UserStepWatch(step, step.AskedAt), watch.Token);
+        _ = WatchUserStepAsync(job.Id, new UserStepWatch(step, step.AskedAt, _autoContinues, job.Id), watch.Token);
     }
 
     /// <summary>Off the UI thread: every <see cref="UserStepWatch.Poll"/>, reads the browser address (only when the step names text to wait
@@ -697,6 +716,7 @@ internal sealed partial class TrayApplicationContext
     {
         if (!_userSteps.TryGetValue(jobId, out var open)) return false;
         if (actionId == JobCards.DoneAction) { EndUserStep(jobId, UserStepEnd.Done); return false; }
+        if (actionId == JobCards.StopAction) { ((IShellHost)this).StopJob(jobId); return false; } // the card Stop's path: EndUserStep(Stopped)
         if (actionId == JobCards.OpenPageAction && UserStepWatch.PageToOpen(open.Step) is { } page) OpenUrl(page.AbsoluteUri);
         return true;
     }

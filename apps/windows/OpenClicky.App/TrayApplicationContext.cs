@@ -223,7 +223,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             var title = ForegroundWindowInfo.GetCompanionTitle();
             if (_responseWindow is not null && title != _responseWindow) { _talk.CancelCurrentTurn(); return; }
             if (AgentDenyList.IsDenied(title, AgentDenyList.ParseExtraFragments(_settings.AgentDenyListExtra))) title = null;
-            if (_appGuide.Observe(title, !_talk.Walkthrough.View.Active && !_talk.ConversationActive && _talk.State == CompanionVoiceState.Idle && _submissionCts is null && !TaskOpen, DateTimeOffset.UtcNow) is not null)
+            if (_appGuide.Observe(title, !_talk.Walkthrough.View.Active && !_talk.ConversationActive && _talk.State == CompanionVoiceState.Idle && _submissionCts is null && !RunInForeground, DateTimeOffset.UtcNow) is not null)
             {
                 _companionDock.OfferHelp(() => _talk.StartConversation(), () => _appGuide.Snooze(DateTimeOffset.UtcNow));
             }
@@ -233,6 +233,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         visualGuard.Tick += (_, _) =>
         {
             if (_talk.Walkthrough.View.Active) TrackWalkthroughTarget();
+            RefreshHomeRunning(); // a job leaving the screen (its 10 s grace over) is no longer "running" for the classic window
             if (_responseWindow is not null && (ForegroundWindowInfo.GetCompanionTitle() != _responseWindow
                 || ForegroundWindowInfo.GetHandle() != _responseWindowHandle || ForegroundWindowInfo.GetBounds() != _responseWindowBounds)) _talk.CancelCurrentTurn();
         };
@@ -758,12 +759,12 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
                 _taskRuns.Clear();
                 _taskRuns.AddRange(previous);
                 _home.UpdateTasks(_taskRuns);
-                _home.SetTaskRunning(false);
+                _home.SetTaskRunning(RunInForeground);
                 initialized.TrySetResult(false);
                 return;
             }
             _home.UpdateTasks(_taskRuns);
-            _home.SetTaskRunning(true);
+            _home.SetTaskRunning(RunInForeground); // a job only counts once it is on the screen
             initialized.TrySetResult(true);
         }, null);
         return await initialized.Task.WaitAsync(token).ConfigureAwait(false);
@@ -914,7 +915,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
                 ReleaseSlot(work.Job.Id); // the next queued job takes this slot
             }
             job.Dispose();
-            OnUi(() => { _home.SetTaskRunning(TaskOpen); if (_talk.State == CompanionVoiceState.Idle) _overlay.ShowIdle(); SaveTasks(); RequestShellPush(); });
+            OnUi(() => { _home.SetTaskRunning(RunInForeground); if (_talk.State == CompanionVoiceState.Idle) _overlay.ShowIdle(); SaveTasks(); RequestShellPush(); });
             _talk.ResumeConversation();
         }
     }
@@ -1085,7 +1086,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
 
     private async Task BeginDictationFromHomeAsync()
     {
-        if (_talk.State != CompanionVoiceState.Idle || _talk.ConversationActive || TaskOpen)
+        if (_talk.State != CompanionVoiceState.Idle || _talk.ConversationActive || RunInForeground)
         {
             ClassicStatus("Stop the current voice turn or task before dictating.");
             return;
@@ -1175,8 +1176,14 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
                 return;
             }
             CancelTalk();
-            var result = await _dictationTarget.InsertAsync(draft, _executor,
-                exclusions: AgentDenyList.ParseExtraFragments(_settings.AgentDenyListExtra));
+            DictationInsertResult result;
+            // The screen is held while the text goes in, so a job's input waits instead of interleaving with it.
+            using (var screen = await _lease.TryAcquireAsync(DesktopLease.TalkHolder, DesktopLease.TalkWait, _lifetime.Token))
+            {
+                if (screen is null) { _home.SetDictationResult(ScreenBusyForText); return; }
+                result = await _dictationTarget.InsertAsync(draft, _executor,
+                    exclusions: AgentDenyList.ParseExtraFragments(_settings.AgentDenyListExtra));
+            }
             OnUi(() => _home.SetDictationResult(result.Message, canContinue: !result.InputAttempted));
             if (result.InputAttempted)
             {
@@ -1213,8 +1220,9 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
     /// <summary>"Hold Ctrl+Alt" or "Double-tap Ctrl+Alt".</summary>
     private string TalkGesture => ShortcutBindings.From(_settings).Talk.Gesture;
 
-    /// <summary>Esc stops only what is running: a task, a voice turn or its speech, dictation, a conversation or a walkthrough.</summary>
-    private bool IsBusy => TaskOpen || _submissionCts is not null || (_dictationActive && !DictationHidden) || _talk.ConversationActive
+    /// <summary>Esc stops only what is running: a foreground run (a native task, or a job on the screen), a voice turn or its speech,
+    /// dictation, a conversation or a walkthrough. A background job alone is not "busy": Esc never stops it or turns guidance off.</summary>
+    private bool IsBusy => RunInForeground || _submissionCts is not null || (_dictationActive && !DictationHidden) || _talk.ConversationActive
         || _talk.State != CompanionVoiceState.Idle || _talk.Walkthrough.View.Active || _replay is not null;
 
     /// <summary>After a settings change: the monitor applies new bindings once no shortcut is held.</summary>

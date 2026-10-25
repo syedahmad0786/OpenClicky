@@ -211,4 +211,33 @@ public class JobResultTests
         Assert.Null(JobResult.FromJson("{broken"));
         Assert.Empty(JobResult.FromJson("{\"reply\":\"x\"}")!.Points);
     });
+
+    [Fact]
+    public void AStoredResultLeavesTheReplyOut()
+    {
+        var produced = JobResult.Parse("A very long reply.\n" + Block("""{"summary":"S","points":["p"]}"""), "");
+        var stored = JobResult.ForStore(produced, previous: null, plan: [])!;
+        Assert.Equal("", stored.Reply);
+        Assert.Equal(["p"], stored.Points);
+        Assert.Equal("", JobResult.FromJson(stored.ToJson())!.Reply);
+    }
+
+    [Fact]
+    public void ARunWithoutAResultKeepsThePreviousOneAndItsOwnPlan()
+    {
+        var previous = JobResult.Parse("Old reply\n" + Block("""{"points":["kept"],"stat":{"value":"4","label":"rows"},"next":["n"]}"""), "")
+            with { Plan = [new PlanStep("Old", true)] };
+        var plan = new[] { new PlanStep("New", false) };
+        var kept = JobResult.ForStore(produced: null, previous, plan)!;
+        Assert.Equal(["kept"], kept.Points);
+        Assert.Equal(new JobStat("4", "rows"), kept.Stat);
+        Assert.Equal(["n"], kept.Next);
+        Assert.Equal(plan, kept.Plan);
+        Assert.Equal("", kept.Reply);
+        Assert.Equal(previous.Plan, JobResult.ForStore(null, previous, [])!.Plan); // no new checklist: the old one stays
+        Assert.Equal(plan, JobResult.ForStore(null, null, plan)!.Plan);
+        Assert.Null(JobResult.ForStore(null, null, []));
+        var fresh = JobResult.Parse(Block("""{"points":["new"]}"""), "");
+        Assert.Equal(["new"], JobResult.ForStore(fresh, previous, plan)!.Points); // a result of its own replaces the old one
+    }
 }

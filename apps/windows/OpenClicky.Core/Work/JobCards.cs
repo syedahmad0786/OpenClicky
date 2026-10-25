@@ -5,7 +5,7 @@ namespace OpenClicky.Core.Work;
 /// <summary>Notch cards for a job that needs the user's hands (E8). Card ids carry the job id; the shell only forwards actions a card offers.</summary>
 public static class JobCards
 {
-    public const string YourTurnPrefix = "your-turn:", OpenPageAction = "open-page", DoneAction = "done";
+    public const string YourTurnPrefix = "your-turn:", OpenPageAction = "open-page", DoneAction = "done", StopAction = "stop";
 
     public static string YourTurnId(string jobId) => YourTurnPrefix + jobId;
 
@@ -20,6 +20,7 @@ public static class JobCards
         List<CardAction> actions = [];
         if (UserStepWatch.PageToOpen(step) is not null) actions.Add(new(OpenPageAction, "Open page", CardActionStyle.Primary));
         actions.Add(new(DoneAction, "I'm done", CardActionStyle.Secondary));
+        actions.Add(new(StopAction, "Stop", CardActionStyle.Secondary)); // ends the job (Stopped), as the card Stop does
         return new(YourTurnId(job.Id), NotchCardKind.NeedsYou, "Your turn: " + title, step.Step, actions);
     }
 }

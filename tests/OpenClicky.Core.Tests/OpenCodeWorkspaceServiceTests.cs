@@ -273,4 +273,20 @@ public class OpenCodeWorkspaceServiceTests
         Assert.NotEqual(first, changed);
         Assert.Equal("busy", blank);
     }
+
+    [Fact]
+    public void AnAnswerBeforeAnUnansweredSteerIsTheRunsAnswer()
+    {
+        OpenCodeMessageSummary[] steered =
+        [
+            new("msg_user", "user", "Do the task", null, null),
+            new("msg_ai", "assistant", "Done", "stop", null),
+            new("msg_steer", "user", "Update from the user: use March", null, null),
+        ];
+        Assert.True(OpenCodeWorkspaceService.HasAnswerBeforeLaterUserMessages(steered));
+        Assert.False(OpenCodeWorkspaceService.HasAnswerBeforeLaterUserMessages([steered[0]])); // never answered
+        Assert.False(OpenCodeWorkspaceService.HasAnswerBeforeLaterUserMessages([steered[0], steered[1]])); // nothing unanswered: the normal end
+        Assert.False(OpenCodeWorkspaceService.HasAnswerBeforeLaterUserMessages(
+            [steered[0], new("msg_ai", "assistant", "", "stop", "ProviderAuthError: no"), steered[2]])); // a failed answer is not one
+    }
 }

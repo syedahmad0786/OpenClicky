@@ -180,8 +180,8 @@ internal sealed partial class TrayApplicationContext
             case (var id, JobAnnouncer.OpenAction) when id.StartsWith(JobAnnouncer.CardIdPrefix, StringComparison.Ordinal):
                 _shell?.OpenJob(id[JobAnnouncer.CardIdPrefix.Length..]);
                 return false;
-            // The user's own step: Open page keeps the card up for I'm done.
-            case (var id, JobCards.OpenPageAction or JobCards.DoneAction) when JobCards.JobIdOf(id) is { } jobId:
+            // The user's own step: Open page keeps the card up for I'm done; Stop ends the job.
+            case (var id, JobCards.OpenPageAction or JobCards.DoneAction or JobCards.StopAction) when JobCards.JobIdOf(id) is { } jobId:
                 return UserStepCardAction(jobId, actionId);
             // Schedule makes the routine; Not now drops the request. Either way the card goes.
             case (var id, RoutineRequests.ScheduleAction or RoutineRequests.DismissAction) when RoutineRequests.RequestIdOf(id) is { } requestId:

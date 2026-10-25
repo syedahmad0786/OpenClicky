@@ -3,12 +3,16 @@ namespace OpenClicky.Core.Work;
 /// <param name="HoldUntil">Set for <see cref="RoutineScheduler.WakeHold"/> after the PC wakes: nothing starts before it.</param>
 /// <param name="ActiveJobIds">Jobs already running or waiting for a slot; their routines are left alone.</param>
 /// <param name="SignedIn">Jobs can run (ChatGPT is signed in); without it due routines wait, as for the network.</param>
-public sealed record RoutineTick(DateTimeOffset Now, bool NetworkUp, DateTimeOffset? HoldUntil, IReadOnlySet<string> ActiveJobIds, bool SignedIn = true);
+/// <param name="Paused">OpenClicky is paused from the tray: due routines wait until it is resumed.</param>
+public sealed record RoutineTick(DateTimeOffset Now, bool NetworkUp, DateTimeOffset? HoldUntil, IReadOnlySet<string> ActiveJobIds, bool SignedIn = true,
+    bool Paused = false);
 
 /// <param name="Start">Due routines to start, oldest first. Not capped: admission queues past five.</param>
 /// <param name="WaitingForNetwork">Due routines that would start but the network is down.</param>
 /// <param name="WaitingForSignIn">Due routines that would start but ChatGPT is not signed in (the network is up).</param>
-public sealed record RoutineDecision(IReadOnlyList<Routine> Start, IReadOnlyList<Routine> WaitingForNetwork, IReadOnlyList<Routine> WaitingForSignIn);
+/// <param name="WaitingWhilePaused">Due routines that would start but OpenClicky is paused (null: none).</param>
+public sealed record RoutineDecision(IReadOnlyList<Routine> Start, IReadOnlyList<Routine> WaitingForNetwork, IReadOnlyList<Routine> WaitingForSignIn,
+    IReadOnlyList<Routine>? WaitingWhilePaused = null);
 
 /// <summary>How a routine's run ended, for <see cref="RoutineSchedule.AfterRun"/>: only <see cref="Failed"/> counts towards the pause.</summary>
 public enum RoutineRunEnd { Succeeded, Failed, Stopped }
@@ -23,6 +27,7 @@ public static class RoutineScheduler
     public const int PauseAfterFailures = 3;
     public const string WaitingLine = "Waiting for the internet";
     public const string SignInLine = "Sign in to ChatGPT to run routines";
+    public const string PausedLine = "OpenClicky is paused";
     public const string StaleOutcome = "Took longer than 2 hours";
     public const string PausedOutcome = "Paused after 3 failed runs";
 
@@ -35,7 +40,15 @@ public static class RoutineScheduler
         var due = routines.Where(r => RoutineSchedule.IsDue(r, tick.Now) && !tick.ActiveJobIds.Contains(r.JobId))
             .OrderBy(r => r.NextRunAt).ThenBy(r => r.Id, StringComparer.Ordinal)
             .DistinctBy(r => r.JobId, StringComparer.Ordinal).ToList();
-        return !tick.NetworkUp ? new([], due, []) : !tick.SignedIn ? new([], [], due) : new(due, [], []);
+        return tick.Paused ? new([], [], [], due) : !tick.NetworkUp ? new([], due, []) : !tick.SignedIn ? new([], [], due) : new(due, [], []);
+    }
+
+    /// <summary>The jobs a tick leaves alone: running or waiting for a slot (<paramref name="admitted"/>), or waiting on the user's own
+    /// step (needs-you): a routine must not supersede a step the user is in the middle of.</summary>
+    public static IReadOnlySet<string> ActiveJobIds(IEnumerable<Routine> routines, Func<string, bool> admitted, IEnumerable<string> waitingForUser)
+    {
+        var waiting = waitingForUser.ToHashSet(StringComparer.Ordinal);
+        return routines.Select(r => r.JobId).Where(id => admitted(id) || waiting.Contains(id)).ToHashSet(StringComparer.Ordinal);
     }
 
     /// <summary>Routine id to the line its row shows while it waits.</summary>
@@ -44,6 +57,7 @@ public static class RoutineScheduler
         var notes = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var r in decision.WaitingForNetwork) notes[r.Id] = WaitingLine;
         foreach (var r in decision.WaitingForSignIn) notes[r.Id] = SignInLine;
+        foreach (var r in decision.WaitingWhilePaused ?? []) notes[r.Id] = PausedLine;
         return notes;
     }
 

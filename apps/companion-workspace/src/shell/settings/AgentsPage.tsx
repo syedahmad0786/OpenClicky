@@ -24,7 +24,7 @@ export function AgentsPage({ state }: { state: ShellState }) {
         </Row>
       </Group>
       <Group title="Announcements">
-        <Row title="Speak when a job starts or finishes">
+        <Row title="Speak when a job starts or finishes" description="Speaks a short line when a job starts or finishes. Uses your selected voice — OpenAI voices send the line to OpenAI.">
           <Toggle label="Speak when a job starts or finishes" checked={a.speakAnnouncements} onChange={(v) => patch("agents.speakAnnouncements", v)} />
         </Row>
         <Row title="Show updates beside the cursor">
