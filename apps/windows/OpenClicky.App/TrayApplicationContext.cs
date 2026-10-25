@@ -4,6 +4,7 @@ using OpenClicky.App.Speech;
 using OpenClicky.Core;
 using OpenClicky.Core.Agent;
 using OpenClicky.Core.CompanionCursor;
+using OpenClicky.Core.Dictation;
 using OpenClicky.Core.Input;
 using OpenClicky.Input;
 using OpenClicky.Overlay;
@@ -103,12 +104,12 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             CreateTalkCapture(),
             _mic,
             () => _dictationActive
-                ? LocalWhisperModel.IsAvailable
-                    ? new LocalWhisperSttClient(NewSttMic(), _whisperRuntime, Log)
+                ? DictationWhisperPlan() is { } dictation
+                    ? new LocalWhisperSttClient(NewSttMic(), _whisperRuntime, dictation, WhisperPrompt.FromDictionary(_settings.DictionaryWords ?? []), Log)
                     : _settings.UseWindowsSpeech ? new LocalSpeechSttClient() : null
                 : _settings.UseWindowsSpeech || _settings.AuthProvider == AuthProvider.ChatGPT
-                ? LocalWhisperModel.IsAvailable
-                    ? new LocalWhisperSttClient(NewSttMic(), _whisperRuntime, Log)
+                ? TalkWhisperPlan() is { } talk
+                    ? new LocalWhisperSttClient(NewSttMic(), _whisperRuntime, talk, log: Log)
                     : new LocalSpeechSttClient()
                 : ProviderFactory.CreateSttClient(_settings, _secrets),
             () => _demoTalk ? new OfflineTalkClient() : ProviderFactory.CreateTalkClient(_settings, _secrets, Log),
@@ -118,9 +119,10 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             Log,
             ForegroundWindowInfo.GetCompanionTitle, ForegroundWindowInfo.GetBounds,
             userContext: MemoryContext, requestInterceptor: HandleTaskVoiceAsync, windowHandle: ForegroundWindowInfo.GetHandle,
-            canInterruptSpeech: () => LocalWhisperModel.IsAvailable && !_dictationActive,
+            canInterruptSpeech: () => TalkWhisperPlan() is not null && !_dictationActive,
             interruptionSttFactory: () => new LocalWhisperSttClient(
-                new EchoCancelledMicrophoneRecorder(() => _settings.MicrophoneDeviceId, Log), _whisperRuntime, Log),
+                new EchoCancelledMicrophoneRecorder(() => _settings.MicrophoneDeviceId, Log), _whisperRuntime,
+                TalkWhisperPlan() ?? new(WhisperModels.English, "en"), log: Log),
             foregroundCaptureEligible: ForegroundWindowInfo.IsCompanionCaptureEligible, visibleWindows: OtherVisibleWindows,
             takeHighlight: TakeHighlight,
             snapTarget: SnapControl,
@@ -282,9 +284,9 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         _talk.Start();
         LogShortcuts("shortcut_monitor_started");
         if (_settings.Paused) _hotkey.Stop();
-        if (LocalWhisperModel.IsAvailable) _ = Task.Run(async () =>
+        if (DictationWhisperPlan() is { } warm) _ = Task.Run(async () =>
         {
-            try { await _whisperRuntime.WarmAsync(_lifetime.Token).ConfigureAwait(false); }
+            try { await _whisperRuntime.WarmAsync(warm.Model, _lifetime.Token).ConfigureAwait(false); }
             catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
             catch (Exception ex) { Log("local_whisper_startup_warm_error=" + ex.GetType().Name); }
         });
@@ -450,7 +452,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
                 ? (ProviderFactory.IsChatGptSignedIn(_secrets) ? "ChatGPT plan · screen replies: " + (string.IsNullOrWhiteSpace(_settings.ResolveTalkModel()) ? "choose a model in Settings" : _settings.ResolveTalkModel()) : "ChatGPT · Continue with ChatGPT in Settings")
                 : string.IsNullOrWhiteSpace(_settings.OpenRouterApiKey) ? "Connect a provider in Settings · demos work without a key" : "OpenRouter key saved · " + _settings.ResolveVisionModel();
         _home.SetConnection(status);
-        _home.SetMicrophone((string.IsNullOrWhiteSpace(_settings.MicrophoneDeviceId) ? "Windows default · " : "") + NAudioMicrophoneRecorder.DeviceName(_settings.MicrophoneDeviceId), LocalWhisperModel.IsAvailable);
+        _home.SetMicrophone((string.IsNullOrWhiteSpace(_settings.MicrophoneDeviceId) ? "Windows default · " : "") + NAudioMicrophoneRecorder.DeviceName(_settings.MicrophoneDeviceId), TalkWhisperPlan() is not null);
     }
 
     private void Stop()
@@ -1133,7 +1135,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             ClassicStatus("Stop the current voice turn or task before dictating.");
             return;
         }
-        if (!LocalWhisperModel.IsAvailable)
+        if (DictationWhisperPlan() is null)
         {
             ClassicStatus("Automatic dictation requires the local Whisper model. Download it in Settings → Voice first.");
             return;
@@ -1196,12 +1198,21 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
     private const string DictationBusy = "Stop the current voice turn or task before dictating.";
     private const string DictationNeedsWhisper = "Automatic dictation requires the local Whisper model. Download it in Settings → Voice first.";
 
+    /// <summary>The installed model and language for dictation's settings; null when no Whisper model is installed.</summary>
+    private WhisperDecodePlan? DictationWhisperPlan() => WhisperPlan(_settings.DictationAutoDetect, _settings.DictationLanguage);
+
+    /// <summary>Talk always decodes English, with no dictionary prompt.</summary>
+    private static WhisperDecodePlan? TalkWhisperPlan() => WhisperPlan(false, "en");
+
+    private static WhisperDecodePlan? WhisperPlan(bool autoDetect, string language) => WhisperModelChoice.Resolve(autoDetect, language,
+        LocalWhisperModel.IsAvailable(WhisperModels.English), LocalWhisperModel.IsAvailable(WhisperModels.Multilingual));
+
     /// <summary>Why dictation cannot start now (null when it can, with the focused field in <paramref name="target"/>). Shows nothing.</summary>
     private string? DictationBlocker(out DictationTarget? target)
     {
         target = null;
         if (_talk.State != CompanionVoiceState.Idle || _talk.ConversationActive || _taskCts is not null) return DictationBusy;
-        if (!LocalWhisperModel.IsAvailable) return DictationNeedsWhisper;
+        if (DictationWhisperPlan() is null) return DictationNeedsWhisper;
         if (!DictationTarget.TryCapture(out target, out var error, AgentDenyList.ParseExtraFragments(_settings.AgentDenyListExtra)) || target is null)
             return error;
         return null;

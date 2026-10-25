@@ -197,6 +197,29 @@ it("Dictation: dictionary cap of 50 is enforced in the UI", () => {
   expect(screen.getByText("50 of 50 words")).toBeInTheDocument();
 });
 
+it("Dictation: auto-detect without the multilingual voice offers the download", () => {
+  const posts = host();
+  const notice = "Other languages and auto-detect need the multilingual voice (142 MB, runs on this PC). Until then OpenClicky dictates in English.";
+  const { rerender } = render(<SettingsPanel state={make("dictation", (s) => { s.settings.dictation.autoDetect = true; s.settings.dictation.multilingual = "missing"; })} />);
+  expect(screen.getByText(notice)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Download multilingual voice" }));
+  expect(posts("settings.action")).toEqual([{ kind: "settings.action", action: "downloadWhisperMultilingual" }]);
+
+  rerender(<SettingsPanel state={make("dictation", (s) => {
+    s.settings.dictation.autoDetect = true; s.settings.dictation.multilingual = "downloading"; s.settings.dictation.multilingualProgress = 0.42;
+  })} />);
+  expect(screen.getByText("Downloading… 42%")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Download multilingual voice" })).toBeNull();
+
+  rerender(<SettingsPanel state={make("dictation", (s) => { s.settings.dictation.autoDetect = true; s.settings.dictation.multilingual = "ready"; })} />);
+  expect(screen.queryByText(notice)).toBeNull();
+
+  rerender(<SettingsPanel state={make("dictation", (s) => { s.settings.dictation.autoDetect = false; s.settings.dictation.language = "en"; s.settings.dictation.multilingual = "missing"; })} />);
+  expect(screen.queryByText(notice)).toBeNull();
+  rerender(<SettingsPanel state={make("dictation", (s) => { s.settings.dictation.autoDetect = false; s.settings.dictation.language = "fr"; s.settings.dictation.multilingual = "missing"; })} />);
+  expect(screen.getByText(notice)).toBeInTheDocument();
+});
+
 // ---- Shortcuts
 it("Shortcuts: four rows with key caps and trigger, Change posts recordHotkey with the action", () => {
   const posts = host();

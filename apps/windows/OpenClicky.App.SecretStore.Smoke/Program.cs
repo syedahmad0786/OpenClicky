@@ -1,6 +1,7 @@
 using System.Text;
 using OpenClicky.App;
 using OpenClicky.Core;
+using OpenClicky.Core.Dictation;
 using System.Speech.Synthesis;
 using System.Speech.AudioFormat;
 using OpenClicky.Input;
@@ -114,7 +115,7 @@ if (args.Contains("--whisper")) return await CheckWhisperAsync();
 if (args.Contains("--download-voice"))
 {
     var last = -1;
-    await LocalWhisperModel.DownloadAsync(new Progress<int>(percent => { if (percent / 10 != last) { last = percent / 10; Console.WriteLine($"Voice model: {percent}%"); } }));
+    await LocalWhisperModel.DownloadAsync(WhisperModels.English, new Progress<int>(percent => { if (percent / 10 != last) { last = percent / 10; Console.WriteLine($"Voice model: {percent}%"); } }));
     Console.WriteLine("PASS voice model size and SHA-256 verified");
     return 0;
 }
@@ -515,18 +516,19 @@ static async Task<int> CheckWhisperAsync()
         }
         var bytes = NAudioMicrophoneRecorder.PcmToWav(wav.ToArray(), new WaveFormat(16000,16,1));
         var modelLoads = 0;
+        var english = new WhisperDecodePlan(WhisperModels.English, "en");
         using var runtime = new LocalWhisperRuntime(message =>
         {
             if (message.StartsWith("local_whisper_model_load_ms=", StringComparison.Ordinal)) Interlocked.Increment(ref modelLoads);
         });
         var coldClock = System.Diagnostics.Stopwatch.StartNew();
         string cold;
-        using (var coldTurn = new LocalWhisperSttClient(new VoiceFixture(bytes), runtime))
+        using (var coldTurn = new LocalWhisperSttClient(new VoiceFixture(bytes), runtime, english))
             cold = await coldTurn.TranscribeAsync(bytes, timeout.Token);
         var coldMs = coldClock.ElapsedMilliseconds;
         var warmClock = System.Diagnostics.Stopwatch.StartNew();
         string warm;
-        using (var warmTurn = new LocalWhisperSttClient(new VoiceFixture(bytes), runtime))
+        using (var warmTurn = new LocalWhisperSttClient(new VoiceFixture(bytes), runtime, english))
             warm = await warmTurn.TranscribeAsync(bytes, timeout.Token);
         var warmMs = warmClock.ElapsedMilliseconds;
         if (!cold.Contains("what is on my screen", StringComparison.OrdinalIgnoreCase)
@@ -534,8 +536,13 @@ static async Task<int> CheckWhisperAsync()
             Fail($"Whisper shared-runtime request mismatch: cold={cold}; warm={warm}");
         if (modelLoads != 1) Fail($"Whisper model loaded {modelLoads} times across two turns; expected one.");
         Console.WriteLine($"PASS shared real Whisper runtime model_loads={modelLoads} cold_transcription_ms={coldMs} warm_transcription_ms={warmMs}. Synthesized WAV only; this is not microphone acceptance.");
+        string prompted;
+        using (var dictionaryTurn = new LocalWhisperSttClient(new VoiceFixture(bytes), runtime, english, WhisperPrompt.FromDictionary(["OpenClicky", "Ahmad"])))
+            prompted = await dictionaryTurn.TranscribeAsync(bytes, timeout.Token);
+        if (!prompted.Contains("what is on my screen", StringComparison.OrdinalIgnoreCase)) Fail("Whisper with a dictionary prompt mismatch: " + prompted);
+        Console.WriteLine("PASS real Whisper with a dictionary prompt: " + prompted);
         var fixture = new VoiceFixture(bytes);
-        using var live = new LocalWhisperSttClient(fixture, runtime);
+        using var live = new LocalWhisperSttClient(fixture, runtime, english);
         var preview = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         live.TranscriptChanged += text => { if (text.Length > 0) preview.TrySetResult(text); };
         var clock = System.Diagnostics.Stopwatch.StartNew();

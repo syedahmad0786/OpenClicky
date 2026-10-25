@@ -2,6 +2,7 @@ using System.Speech.Synthesis;
 using NAudio.CoreAudioApi;
 using NAudio.CoreAudioApi.Interfaces;
 using OpenClicky.Core;
+using OpenClicky.Core.Dictation;
 using OpenClicky.Core.Settings;
 using OpenClicky.Core.Shell;
 using OpenClicky.Providers;
@@ -30,7 +31,7 @@ internal sealed class SettingsRuntimeProbe : IDisposable
     private readonly DeviceWatcher? _watcher;
     private SettingsRuntime _cached = SettingsRuntime.Empty;
     private IReadOnlyDictionary<string, string> _voiceNames = new Dictionary<string, string>();
-    private double? _whisperDownload;
+    private double? _whisperDownload, _multilingualDownload;
     private bool _busy, _dirty, _disposed;
 
     /// <param name="changed">Raised on a worker thread after new facts were cached.</param>
@@ -66,6 +67,8 @@ internal sealed class SettingsRuntimeProbe : IDisposable
                     OpenRouterKeySet = !string.IsNullOrWhiteSpace(settings.OpenRouterApiKey),
                     Whisper = _whisperDownload is null ? _cached.Whisper : WhisperState.Downloading,
                     WhisperProgress = _whisperDownload ?? (_cached.Whisper == WhisperState.Ready ? 1 : 0),
+                    Multilingual = _multilingualDownload is null ? _cached.Multilingual : WhisperState.Downloading,
+                    MultilingualProgress = _multilingualDownload ?? (_cached.Multilingual == WhisperState.Ready ? 1 : 0),
                 };
             }
         }
@@ -77,10 +80,14 @@ internal sealed class SettingsRuntimeProbe : IDisposable
         lock (_gate) return _voiceNames.GetValueOrDefault(id);
     }
 
-    /// <summary>Whisper download progress 0–1, or null when no download is running (the next refresh reads the disk again).</summary>
-    public void SetWhisperDownload(double? progress)
+    /// <summary>That model's download progress 0–1, or null when no download is running (the next refresh reads the disk again).</summary>
+    public void SetWhisperDownload(WhisperModelInfo model, double? progress)
     {
-        lock (_gate) _whisperDownload = progress;
+        lock (_gate)
+        {
+            if (model.Multilingual) _multilingualDownload = progress;
+            else _whisperDownload = progress;
+        }
     }
 
     /// <summary>Starts a probe on a worker thread; a request while one runs queues exactly one more.</summary>
@@ -145,7 +152,8 @@ internal sealed class SettingsRuntimeProbe : IDisposable
             RenderDevices = Guard("render devices", () => Devices(DataFlow.Render), []),
             InstalledVoices = installed,
             SignedInAs = credential?.AccessToken is { Length: > 0 } ? credential.Email ?? _settings().ChatGptAccountEmail ?? "your ChatGPT account" : null,
-            Whisper = Guard("whisper", () => LocalWhisperModel.IsAvailable, false) ? WhisperState.Ready : WhisperState.Missing,
+            Whisper = Guard("whisper", () => LocalWhisperModel.IsAvailable(WhisperModels.English), false) ? WhisperState.Ready : WhisperState.Missing,
+            Multilingual = Guard("whisper multilingual", () => LocalWhisperModel.IsAvailable(WhisperModels.Multilingual), false) ? WhisperState.Ready : WhisperState.Missing,
             Chrome = Guard("chrome", () => !File.Exists(ChromeBridgeConfiguration.DefaultPath) ? ChromeState.NotInstalled
                 : _chromeConnected() ? ChromeState.Connected : ChromeState.Waiting, ChromeState.NotInstalled),
             Reach = Guard("privacy", PrivacyConsent.Read, []),

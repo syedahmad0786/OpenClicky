@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using OpenClicky.App;
 using OpenClicky.Core;
+using OpenClicky.Core.Dictation;
 
 internal static class WhisperWarmReuseCheck
 {
@@ -9,13 +10,14 @@ internal static class WhisperWarmReuseCheck
     {
         VerifyPreviewReuseBoundary();
         await VerifyPendingPreviewReuseAsync();
+        await VerifyModelSwapAsync();
         var loads = 0;
         var inferences = 0;
         var concurrent = 0;
         var maximumConcurrent = 0;
         using var runtime = new LocalWhisperRuntime(
-            _ => Task.CompletedTask,
-            () => { loads++; return new FakeEngine(() =>
+            (_, _) => Task.CompletedTask,
+            _ => { loads++; return new FakeEngine(() =>
             {
                 var active = Interlocked.Increment(ref concurrent);
                 maximumConcurrent = Math.Max(maximumConcurrent, active);
@@ -24,11 +26,11 @@ internal static class WhisperWarmReuseCheck
             }); });
 
         var warm = Stopwatch.StartNew();
-        await runtime.WarmAsync();
+        await runtime.WarmAsync(WhisperModels.English);
         var warmMs = warm.ElapsedMilliseconds;
         var inference = Stopwatch.StartNew();
-        var first = runtime.TranscribeAsync([0.2f, 0.1f]);
-        var second = runtime.TranscribeAsync([0.3f, 0.1f]);
+        var first = runtime.TranscribeAsync(WhisperModels.English, [0.2f, 0.1f], English);
+        var second = runtime.TranscribeAsync(WhisperModels.English, [0.3f, 0.1f], English);
         var results = await Task.WhenAll(first, second);
         var inferenceMs = inference.ElapsedMilliseconds;
 
@@ -37,6 +39,45 @@ internal static class WhisperWarmReuseCheck
         await VerifyDisposeRejectsQueuedInferenceAsync();
         Console.WriteLine($"PASS shared Whisper runtime: synthetic warm_ms={warmMs} two_inference_ms={inferenceMs} model_loads={loads} inferences={inferences} maximum_concurrent={maximumConcurrent}. No microphone or user audio was used.");
         return 0;
+    }
+
+    private static readonly WhisperDecodeOptions English = new("en", null);
+
+    /// <summary>A second model replaces the first (disposed before the new one loads), and each call's language and prompt reach the engine.</summary>
+    private static async Task VerifyModelSwapAsync()
+    {
+        var engines = new List<RecordingEngine>();
+        using (var runtime = new LocalWhisperRuntime((_, _) => Task.CompletedTask, model =>
+        {
+            if (engines.Any(e => !e.Disposed)) throw new InvalidOperationException("A second Whisper model was loaded while another was in memory.");
+            var engine = new RecordingEngine(model);
+            engines.Add(engine);
+            return engine;
+        }))
+        {
+            await runtime.WarmAsync(WhisperModels.English);
+            if (!runtime.IsWarmFor(WhisperModels.English) || runtime.IsWarmFor(WhisperModels.Multilingual))
+                throw new InvalidOperationException("Warm state does not follow the loaded model.");
+            await runtime.TranscribeAsync(WhisperModels.English, [0.1f], English);
+            await runtime.TranscribeAsync(WhisperModels.Multilingual, [0.1f], new("auto", "OpenClicky, Ahmad"));
+            await runtime.TranscribeAsync(WhisperModels.Multilingual, [0.1f], new("ur", null));
+            if (engines.Count != 2 || !engines[0].Disposed || engines[1].Disposed || engines[1].Model != WhisperModels.Multilingual
+                || !runtime.IsWarmFor(WhisperModels.Multilingual)
+                || !engines[0].Calls.SequenceEqual([English])
+                || !engines[1].Calls.SequenceEqual([new WhisperDecodeOptions("auto", "OpenClicky, Ahmad"), new WhisperDecodeOptions("ur", null)]))
+                throw new InvalidOperationException($"Model swap or decode options were wrong: engines={engines.Count}.");
+        }
+        if (!engines[1].Disposed) throw new InvalidOperationException("Disposing the runtime left the model loaded.");
+        Console.WriteLine("PASS Whisper runtime keeps one model in memory, swaps on request and passes language and prompt through");
+    }
+
+    private sealed class RecordingEngine(WhisperModelInfo model) : ILocalWhisperEngine
+    {
+        public WhisperModelInfo Model { get; } = model;
+        public List<WhisperDecodeOptions> Calls { get; } = [];
+        public bool Disposed { get; private set; }
+        public Task<string> TranscribeAsync(float[] samples, WhisperDecodeOptions options, CancellationToken token) { Calls.Add(options); return Task.FromResult("x"); }
+        public void Dispose() => Disposed = true;
     }
 
     private static void VerifyPreviewReuseBoundary()
@@ -73,8 +114,8 @@ internal static class WhisperWarmReuseCheck
         for (var i = 1; i < samples.Length; i += 2) samples[i] = 8;
         var final = new byte[9600]; samples.CopyTo(final, 0);
         var engine = new BlockingEngine(entered, release);
-        using var runtime = new LocalWhisperRuntime(_ => Task.CompletedTask, () => engine);
-        using var client = new LocalWhisperSttClient(new PreviewRecorder(Wav(samples), Wav(final)), runtime);
+        using var runtime = new LocalWhisperRuntime((_, _) => Task.CompletedTask, _ => engine);
+        using var client = new LocalWhisperSttClient(new PreviewRecorder(Wav(samples), Wav(final)), runtime, new(WhisperModels.Multilingual, "fr"), "Ahmad");
         var speechStarts = 0;
         client.SpeechStarted += () => Interlocked.Increment(ref speechStarts);
         client.StartListening();
@@ -83,6 +124,8 @@ internal static class WhisperWarmReuseCheck
         release.TrySetResult();
         if (await completed.WaitAsync(TimeSpan.FromSeconds(2)) != "active transcript" || engine.Calls != 1 || speechStarts != 1)
             throw new InvalidOperationException("Final transcription did not reuse the exact in-flight preview or speech onset fired incorrectly.");
+        if (engine.Options != new WhisperDecodeOptions("fr", "Ahmad"))
+            throw new InvalidOperationException("The preview transcription did not use the client's language and dictionary prompt.");
     }
 
     private sealed class PreviewRecorder(byte[] preview, byte[] final) : IMicrophoneRecorder
@@ -98,10 +141,10 @@ internal static class WhisperWarmReuseCheck
     {
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var runtime = new LocalWhisperRuntime(_ => Task.CompletedTask, () => new BlockingEngine(entered, release));
-        var active = runtime.TranscribeAsync([0.1f]);
+        var runtime = new LocalWhisperRuntime((_, _) => Task.CompletedTask, _ => new BlockingEngine(entered, release));
+        var active = runtime.TranscribeAsync(WhisperModels.English, [0.1f], English);
         await entered.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        var queued = runtime.TranscribeAsync([0.2f]);
+        var queued = runtime.TranscribeAsync(WhisperModels.English, [0.2f], English);
         var disposing = Task.Run(runtime.Dispose);
         await WaitUntilAsync(() => runtime.IsDisposed, TimeSpan.FromSeconds(2));
         release.TrySetResult();
@@ -120,7 +163,7 @@ internal static class WhisperWarmReuseCheck
 
     private sealed class FakeEngine(Func<Action> enter) : ILocalWhisperEngine
     {
-        public async Task<string> TranscribeAsync(float[] samples, CancellationToken token)
+        public async Task<string> TranscribeAsync(float[] samples, WhisperDecodeOptions options, CancellationToken token)
         {
             var leave = enter();
             try { await Task.Delay(20, token); return "synthetic transcript"; }
@@ -132,8 +175,10 @@ internal static class WhisperWarmReuseCheck
     private sealed class BlockingEngine(TaskCompletionSource entered, TaskCompletionSource release) : ILocalWhisperEngine
     {
         public int Calls;
-        public async Task<string> TranscribeAsync(float[] samples, CancellationToken token)
+        public WhisperDecodeOptions? Options;
+        public async Task<string> TranscribeAsync(float[] samples, WhisperDecodeOptions options, CancellationToken token)
         {
+            Options = options;
             Interlocked.Increment(ref Calls);
             entered.TrySetResult();
             await release.Task.WaitAsync(token);

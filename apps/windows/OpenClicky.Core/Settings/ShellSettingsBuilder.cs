@@ -24,6 +24,8 @@ public sealed record SettingsRuntime
     public bool OpenAiKeySet { get; init; }
     public WhisperState Whisper { get; init; } = WhisperState.Missing;
     public double WhisperProgress { get; init; }
+    public WhisperState Multilingual { get; init; } = WhisperState.Missing;
+    public double MultilingualProgress { get; init; }
     public ChromeState Chrome { get; init; } = ChromeState.NotInstalled;
     public IReadOnlyList<ConnectorView> Connectors { get; init; } = [];
     public IReadOnlyList<RoutineView> Routines { get; init; } = [];
@@ -57,7 +59,7 @@ public static class ShellSettingsBuilder
             new SettingsVoice(voice, voices, SettingsCatalog.SnapSpeed(s.SpeechSpeed), s.Captions, s.SpeakReplies, outputId, outputs),
             new SettingsMicrophone(micId, mics, runtime.Whisper, runtime.WhisperProgress),
             new SettingsDictation(s.DictationAutoDetect, SettingsCatalog.Languages.Any(l => l.Code == s.DictationLanguage) ? s.DictationLanguage : "en", SettingsCatalog.Languages, s.DictionaryWords ?? [],
-                s.DictationCleanup, WhisperState.Missing, 0),
+                s.DictationCleanup, runtime.Multilingual, runtime.MultilingualProgress),
             new SettingsShortcuts(
                 HotkeyBinding.OrDefault(s.TalkHotkey, HotkeyBinding.DefaultTalk).ToView(),
                 HotkeyBinding.OrDefault(s.TextHotkey, HotkeyBinding.DefaultText).ToView(),

@@ -1,5 +1,6 @@
 using OpenClicky.App.Settings;
 using OpenClicky.Core;
+using OpenClicky.Core.Dictation;
 using OpenClicky.Core.Settings;
 using OpenClicky.Providers;
 using OpenClicky.Input;
@@ -143,7 +144,7 @@ internal sealed class SettingsForm : Form
         };
         Disposed += (_, _) => { StopMicrophoneTest(); _meterTimer.Dispose(); _voiceDownload.Cancel(); _voiceDownload.Dispose(); };
         RefreshMicrophones();
-        _voiceModelStatus = AppTheme.Label(LocalWhisperModel.IsAvailable ? "Whisper is ready · English speech stays on this PC." : "Compatibility voice is active. Download Whisper for stronger recognition and live previews.", 9);
+        _voiceModelStatus = AppTheme.Label(LocalWhisperModel.IsAvailable(WhisperModels.English) ? "Whisper is ready · English speech stays on this PC." : "Compatibility voice is active. Download Whisper for stronger recognition and live previews.", 9);
         _voiceModelStatus.MaximumSize = new Size(530, 0);
         voice.Controls.Add(_voiceModelStatus);
         var downloadVoice = AppTheme.Button("Download accurate voice · 142 MB");
@@ -152,7 +153,7 @@ internal sealed class SettingsForm : Form
             downloadVoice.Enabled = false;
             try
             {
-                await LocalWhisperModel.DownloadAsync(new Progress<int>(percent => { if (!IsDisposed) _voiceModelStatus.Text = $"Downloading local voice: {percent}%"; }), _voiceDownload.Token);
+                await LocalWhisperModel.DownloadAsync(WhisperModels.English, new Progress<int>(percent => { if (!IsDisposed) _voiceModelStatus.Text = $"Downloading local voice: {percent}%"; }), _voiceDownload.Token);
                 if (IsDisposed) return;
                 _voiceModelStatus.Text = "Whisper is ready · English speech stays on this PC.";
                 _onApplied();
@@ -460,7 +461,7 @@ internal sealed class SettingsForm : Form
         _debugTranscriptBox.Text = _settings.DebugTranscriptOverride ?? "";
         _microphoneBox.Items.Clear(); // so RefreshMicrophones selects the saved device, not the old selection
         RefreshMicrophones();
-        _voiceModelStatus.Text = LocalWhisperModel.IsAvailable ? "Whisper is ready · English speech stays on this PC." : "Compatibility voice is active. Download Whisper for stronger recognition and live previews.";
+        _voiceModelStatus.Text = LocalWhisperModel.IsAvailable(WhisperModels.English) ? "Whisper is ready · English speech stays on this PC." : "Compatibility voice is active. Download Whisper for stronger recognition and live previews.";
         _logBox.Text = DebugLog.Snapshot();
         RefreshChatGptButtons();
         RefreshProviderPanels();

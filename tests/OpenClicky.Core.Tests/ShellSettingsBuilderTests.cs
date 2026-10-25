@@ -13,6 +13,14 @@ public class ShellSettingsBuilderTests
     private static string[] Keys(Hotkey h) => h.Keys.ToArray();
 
     [Fact]
+    public void MultilingualStateComesFromTheProbe()
+    {
+        var v = Build(r: SettingsRuntime.Empty with { Multilingual = WhisperState.Downloading, MultilingualProgress = 0.4 });
+        Assert.Equal(WhisperState.Downloading, v.Dictation.Multilingual);
+        Assert.Equal(0.4, v.Dictation.MultilingualProgress);
+    }
+
+    [Fact]
     public void DefaultsMatchThePlan()
     {
         var v = Build();

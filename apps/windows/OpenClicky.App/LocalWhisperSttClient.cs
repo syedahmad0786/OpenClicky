@@ -1,5 +1,6 @@
 using NAudio.Wave;
 using OpenClicky.Core;
+using OpenClicky.Core.Dictation;
 using System.Diagnostics;
 
 namespace OpenClicky.App;
@@ -8,8 +9,9 @@ internal sealed class LocalWhisperSttClient : ILiveSttClient
 {
     private readonly IMicrophoneRecorder microphone;
     private readonly LocalWhisperRuntime runtime;
+    private readonly WhisperDecodePlan plan;
+    private readonly WhisperDecodeOptions options;
     private readonly Action<string>? log;
-    private readonly bool ownsRuntime;
     private CancellationTokenSource? _listening;
     private CancellationTokenSource? _recognition;
     private readonly object _previewGate = new();
@@ -20,18 +22,14 @@ internal sealed class LocalWhisperSttClient : ILiveSttClient
     private Stopwatch? _sessionClock;
     private bool _disposed;
 
-    internal LocalWhisperSttClient(IMicrophoneRecorder microphone, Action<string>? log = null)
-        : this(microphone, new LocalWhisperRuntime(log), log, ownsRuntime: true) { }
-
-    internal LocalWhisperSttClient(IMicrophoneRecorder microphone, LocalWhisperRuntime runtime, Action<string>? log = null)
-        : this(microphone, runtime, log, ownsRuntime: false) { }
-
-    private LocalWhisperSttClient(IMicrophoneRecorder microphone, LocalWhisperRuntime runtime, Action<string>? log, bool ownsRuntime)
+    /// <summary>Every transcription, previews included, uses <paramref name="plan"/> and the dictionary <paramref name="prompt"/>.</summary>
+    internal LocalWhisperSttClient(IMicrophoneRecorder microphone, LocalWhisperRuntime runtime, WhisperDecodePlan plan, string? prompt = null, Action<string>? log = null)
     {
         this.microphone = microphone;
         this.runtime = runtime;
+        this.plan = plan;
+        options = new WhisperDecodeOptions(plan.Language, prompt);
         this.log = log;
-        this.ownsRuntime = ownsRuntime;
     }
     public event Action<string>? TranscriptChanged;
     public event Action? SpeechStarted;
@@ -49,14 +47,14 @@ internal sealed class LocalWhisperSttClient : ILiveSttClient
         microphone.Start();
         _sessionClock = Stopwatch.StartNew();
         log?.Invoke("local_whisper_start");
-        if (!runtime.IsWarm)
+        if (!runtime.IsWarmFor(plan.Model))
         {
             _warmup = Task.Run(async () =>
             {
                 var clock = Stopwatch.StartNew();
                 try
                 {
-                    await runtime.WarmAsync(session.Token);
+                    await runtime.WarmAsync(plan.Model, session.Token);
                     log?.Invoke($"local_whisper_warmup_ms={clock.ElapsedMilliseconds}");
                 }
                 catch (OperationCanceledException) { }
@@ -207,7 +205,7 @@ internal sealed class LocalWhisperSttClient : ILiveSttClient
         var inferenceClock = Stopwatch.StartNew();
         try
         {
-            return await runtime.TranscribeAsync(samples, cancellationToken).ConfigureAwait(false);
+            return await runtime.TranscribeAsync(plan.Model, samples, options, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -228,7 +226,6 @@ internal sealed class LocalWhisperSttClient : ILiveSttClient
             lock (_previewGate) _preview = null;
             _listening?.Dispose();
             _recognition?.Dispose();
-            if (ownsRuntime) runtime.Dispose();
         });
     }
 }

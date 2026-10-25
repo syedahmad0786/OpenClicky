@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ShellState } from "../contract";
-import { CloseIcon, Group, PillButton, Row, SearchField, Tile, Toggle } from "../ui";
-import { Page, patch } from "./common";
+import { Badge, CloseIcon, Group, Meter, PillButton, Row, SearchField, Tile, Toggle } from "../ui";
+import { act, Page, patch } from "./common";
 
 const MAX_WORDS = 50;
 const MAX_WORD_LENGTH = 60;
@@ -49,6 +49,7 @@ export function DictationPage({ state }: { state: ShellState }) {
   const d = state.settings.dictation;
   const [query, setQuery] = useState("");
   const q = query.trim().toLowerCase();
+  const needsMultilingual = (d.autoDetect || d.language !== "en") && d.multilingual !== "ready";
   const shown = q ? d.languages.filter((l) => [l.name, l.native, l.code].some((t) => t.toLowerCase().includes(q))) : d.languages;
   return (
     <Page title="Dictation" subtitle="Languages and words OpenClicky should get right.">
@@ -56,6 +57,16 @@ export function DictationPage({ state }: { state: ShellState }) {
         <Row title="Auto-detect language" description="Work out the language you are speaking each time.">
           <Toggle label="Auto-detect language" checked={d.autoDetect} onChange={(value) => patch("dictation.autoDetect", value)} />
         </Row>
+        {needsMultilingual ? (
+          <Row title="Multilingual voice" description="Other languages and auto-detect need the multilingual voice (142 MB, runs on this PC). Until then OpenClicky dictates in English.">
+            {d.multilingual === "missing" ? <PillButton variant="primary" onClick={() => act("downloadWhisperMultilingual")}>Download multilingual voice</PillButton> : null}
+            {d.multilingual === "downloading" ? <Badge tone="muted">{`Downloading… ${Math.round(d.multilingualProgress * 100)}%`}</Badge> : null}
+          </Row>
+        ) : null}
+        {needsMultilingual && d.multilingual === "downloading"
+          ? <div className="settings-meter settings-meter--progress"><Meter value={d.multilingualProgress} max={1} label="Download progress" /></div> : null}
+      </Group>
+      <Group title="Tidy up">
         <Row title="Tidy up with AI" description="Fixes punctuation and filler words. Sends what you said, the app name and the text around the cursor to your model provider. Your voice stays on this PC.">
           <Toggle label="Tidy up with AI" checked={d.cleanup} onChange={(value) => patch("dictation.cleanup", value)} />
         </Row>

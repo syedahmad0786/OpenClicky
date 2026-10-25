@@ -3,6 +3,7 @@ using System.Text.Json;
 using OpenClicky.App.Settings;
 using OpenClicky.App.Speech;
 using OpenClicky.Core;
+using OpenClicky.Core.Dictation;
 using OpenClicky.Core.Settings;
 using OpenClicky.Core.Shell;
 using OpenClicky.Core.Speech;
@@ -20,7 +21,8 @@ internal sealed partial class TrayApplicationContext
     private readonly Dictionary<string, (ConnectorStatus Status, int? Tools)> _connectorChecks = new(StringComparer.Ordinal);
     private NAudioMicrophoneRecorder? _micTest;
     private System.Windows.Forms.Timer? _micTestTimer;
-    private bool _accountBusy, _whisperBusy;
+    private bool _accountBusy;
+    private readonly HashSet<WhisperModelInfo> _whisperDownloads = []; // UI thread only
     private int _recordGeneration;
     /// <summary>One native modal at a time from the notch: a double click must not stack warnings, prompts or pickers.</summary>
     private bool _settingsModalOpen;
@@ -138,7 +140,8 @@ internal sealed partial class TrayApplicationContext
             case "manageUsage": OpenUrl(NativeSettings.UsageUrl); break;
             case "secret.edit": EditSecret(arg); break;
             case "testMic": StartMicTest(); break;
-            case "downloadWhisper": _ = DownloadWhisperFromShellAsync(); break;
+            case "downloadWhisper": _ = DownloadWhisperFromShellAsync(WhisperModels.English); break;
+            case "downloadWhisperMultilingual": _ = DownloadWhisperFromShellAsync(WhisperModels.Multilingual); break;
             case "playTestSound": _ = _tts.PlayTestSoundAsync(); break;
             case "previewVoice": PreviewVoice(arg); break;
             case "clearHistory": ClearHistory(); _shell?.AddToast("Conversation and task history cleared."); break;
@@ -295,28 +298,28 @@ internal sealed partial class TrayApplicationContext
         _micTest = null;
     }
 
-    private async Task DownloadWhisperFromShellAsync()
+    private async Task DownloadWhisperFromShellAsync(WhisperModelInfo model)
     {
-        if (_whisperBusy || LocalWhisperModel.IsAvailable) { SettingsProbe.Refresh(); return; }
-        _whisperBusy = true;
-        SettingsProbe.SetWhisperDownload(0);
+        if (_whisperDownloads.Contains(model) || LocalWhisperModel.IsAvailable(model)) { SettingsProbe.Refresh(); return; }
+        _whisperDownloads.Add(model);
+        SettingsProbe.SetWhisperDownload(model, 0);
         RequestShellPush();
         try
         {
-            await LocalWhisperModel.DownloadAsync(new Progress<int>(percent =>
+            await LocalWhisperModel.DownloadAsync(model, new Progress<int>(percent =>
             {
-                SettingsProbe.SetWhisperDownload(Math.Clamp(percent / 100.0, 0, 1));
+                SettingsProbe.SetWhisperDownload(model, Math.Clamp(percent / 100.0, 0, 1));
                 RequestShellPush();
             }), _lifetime.Token);
             RefreshConnection();
-            _shell?.AddToast("Whisper is ready · English speech stays on this PC.");
+            _shell?.AddToast(model.Multilingual ? "Multilingual voice is ready · speech stays on this PC." : "Whisper is ready · English speech stays on this PC.");
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) when (ex is not OutOfMemoryException) { _shell?.AddToast("Download failed: " + ex.Message); }
         finally
         {
-            _whisperBusy = false;
-            SettingsProbe.SetWhisperDownload(null);
+            _whisperDownloads.Remove(model);
+            SettingsProbe.SetWhisperDownload(model, null);
             SettingsProbe.Refresh();
         }
     }
