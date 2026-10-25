@@ -91,17 +91,67 @@ public class CalendarEventsTests
         Assert.True(events[1].IsAllDay);
         Assert.Equal(new DateTimeOffset(2026, 10, 25, 0, 0, 0, TimeSpan.FromHours(1)), events[1].StartsAt);
 
-        var teams = Assert.Single(CalendarEvents.Parse("""
+        var both = CalendarEvents.Parse("""
             {"value":[{"eventId":"t","name":"Sync\u0007  now","startTime":"2026-10-25T10:00:00","onlineMeeting":{"joinUrl":"https://teams.microsoft.com/l/1"},"webLink":"https://outlook.office.com/e","location":"HQ"},
              {"event_id":"c","title":"Video","start_time":{"date_time":"2026-10-25T11:00:00Z"},"conferenceData":{"entryPoints":[{"entryPointType":"phone","uri":"tel:1"},{"entryPointType":"video","uri":"https://meet.google.com/y"}]}}]}
-            """, Zone), x => x.Id == "t");
+            """, Zone);
+        Assert.Equal(["t", "c"], both.Select(x => x.Id));
+        var teams = both[0];
         Assert.Equal("Sync now", teams.Title);
         Assert.Equal(new DateTimeOffset(2026, 10, 25, 10, 0, 0, TimeSpan.Zero), teams.StartsAt); // no offset → UTC
         Assert.Equal("https://teams.microsoft.com/l/1", teams.MeetingUrl);
         Assert.Equal("https://outlook.office.com/e", teams.HtmlLink);
         Assert.Equal("HQ", teams.Location);
-        var video = CalendarEvents.Parse("""{"e":[{"event_id":"c","title":"Video","start_time":{"date_time":"2026-10-25T11:00:00Z"},"conferenceData":{"entryPoints":[{"entryPointType":"phone","uri":"tel:1"},{"entryPointType":"video","uri":"https://meet.google.com/y"}]}}]}""", Zone);
-        Assert.Equal("https://meet.google.com/y", Assert.Single(video).MeetingUrl);
+        Assert.Equal("Video", both[1].Title);
+        Assert.Equal(new DateTimeOffset(2026, 10, 25, 11, 0, 0, TimeSpan.Zero), both[1].StartsAt);
+        Assert.Equal("https://meet.google.com/y", both[1].MeetingUrl);
+    }
+
+    [Fact]
+    public void ReadsDateTimeInItsNamedTimeZone()
+    {
+        var events = CalendarEvents.Parse("""
+            [{"id":"g","summary":"Graph","start":{"dateTime":"2026-10-25T10:00:00.0000000","timeZone":"Pacific Standard Time"},"end":{"dateTime":"2026-10-25T10:30:00","timeZone":"Pacific Standard Time"}},
+             {"id":"o","summary":"Offset wins","start":{"dateTime":"2026-10-25T10:00:00+02:00","timeZone":"Pacific Standard Time"}},
+             {"id":"u","summary":"Unknown zone","start":{"dateTime":"2026-10-25T10:00:00","timeZone":"Mars/Olympus"}},
+             {"id":"d","summary":"All day","start":{"date":"2026-10-25","timeZone":"Pacific Standard Time"}}]
+            """, Zone);
+        Assert.Equal(new DateTimeOffset(2026, 10, 25, 17, 0, 0, TimeSpan.Zero), events[0].StartsAt); // PDT is UTC-7 until 1 Nov 2026
+        Assert.Equal(new DateTimeOffset(2026, 10, 25, 17, 30, 0, TimeSpan.Zero), events[0].EndsAt);
+        Assert.Equal(new DateTimeOffset(2026, 10, 25, 8, 0, 0, TimeSpan.Zero), events[1].StartsAt);
+        Assert.Equal(new DateTimeOffset(2026, 10, 25, 10, 0, 0, TimeSpan.Zero), events[2].StartsAt);
+        Assert.Equal(new DateTimeOffset(2026, 10, 25, 0, 0, 0, TimeSpan.FromHours(1)), events[3].StartsAt);
+        Assert.True(events[3].IsAllDay);
+    }
+
+    [Fact]
+    public void KeepsCompleteEventsFromTruncatedOrConcatenatedReplies()
+    {
+        // A pretty-printed Google events.list cut where RemoteMcpConnector cuts replies (20,000 characters).
+        var items = Enumerable.Range(0, 40).Select(i => new
+        {
+            kind = "calendar#event", id = $"ev{i:00}", status = "confirmed", summary = $"Meeting {i}",
+            description = new string('d', 600),
+            start = new { dateTime = $"2026-10-25T{8 + i % 10:00}:00:00+01:00", timeZone = "Europe/London" },
+            end = new { dateTime = $"2026-10-25T{8 + i % 10:00}:30:00+01:00" },
+            attendees = new[] { new { email = "a@example.test", responseStatus = "accepted" }, new { email = "b@example.test", responseStatus = "needsAction" } },
+            hangoutLink = $"https://meet.google.com/{i}",
+        });
+        var full = JsonSerializer.Serialize(new { kind = "calendar#events", summary = "Me", items }, new JsonSerializerOptions { WriteIndented = true });
+        var cut = full[..20_000];
+        var events = CalendarEvents.Parse(cut, Zone);
+        var complete = Enumerable.Range(0, 40).Count(i => cut.Contains($"\"hangoutLink\": \"https://meet.google.com/{i}\"", StringComparison.Ordinal));
+        Assert.True(complete >= 5, $"fixture should hold several complete events, holds {complete}");
+        Assert.Equal(Enumerable.Range(0, complete).Select(i => $"ev{i:00}"), events.Select(e => e.Id));
+        Assert.Equal("Meeting 0", events[0].Title);
+
+        var two = CalendarEvents.Parse("""
+            {"items":[{"id":"a","summary":"First","start":{"dateTime":"2026-10-25T09:00:00Z"}}]}
+            {"items":[{"id":"b","summary":"Second","start":{"dateTime":"2026-10-25T10:00:00Z"}}]}
+            """, Zone);
+        Assert.Equal(["a", "b"], two.Select(e => e.Id));
+        var withProse = CalendarEvents.Parse("""Calendar 1: {"id":"a","summary":"First","start":"2026-10-25T09:00:00Z"} and calendar 2: [{"id":"b","summary":"Second","start":"2026-10-25T10:00:00Z"}, {"id":"c","sum""", Zone);
+        Assert.Equal(["a", "b"], withProse.Select(e => e.Id));
     }
 
     [Fact]

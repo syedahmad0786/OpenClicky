@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text;
 using System.Text.Json;
 
 namespace OpenClicky.Core.Proactive;
@@ -80,20 +81,21 @@ public static class CalendarEvents
 
     /// <summary>
     /// Events found in a tool's text reply: the whole text as JSON, else the span from the first '{' or '[' to its last
-    /// closing match. Walks at most 8 levels and 2,000 nodes, skips cancelled events, dedupes by id, keeps at most
+    /// closing match, else every complete JSON value a tolerant scan can read (a reply cut at the connector's size cap,
+    /// or several JSON blocks one after another). Walks at most 8 levels and 2,000 nodes, skips cancelled events, dedupes by id, keeps at most
     /// <see cref="MaxEvents"/>. A date-only start is all-day from local midnight in <paramref name="zone"/>.
     /// </summary>
     public static IReadOnlyList<UpcomingEvent> Parse(string text, TimeZoneInfo zone)
     {
         var events = new List<UpcomingEvent>();
         if (string.IsNullOrWhiteSpace(text) || zone is null) return events;
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        var nodes = 0;
         try
         {
             using var doc = TryParse(text) ?? TryParse(JsonSpan(text));
-            if (doc is null) return events;
-            var ids = new HashSet<string>(StringComparer.Ordinal);
-            var nodes = 0;
-            Walk(doc.RootElement, 0);
+            if (doc is not null) Walk(doc.RootElement, 0);
+            else Scan(Encoding.UTF8.GetBytes(text));
 
             void Walk(JsonElement element, int depth)
             {
@@ -108,6 +110,37 @@ public static class CalendarEvents
                         return;
                     }
                     foreach (var property in element.EnumerateObject()) Walk(property.Value, depth + 1);
+                }
+            }
+
+            // Reads tokens from each '{' or '[' on; every complete object or array within the depth cap is parsed and
+            // walked, an incomplete one is entered token by token. Invalid JSON (prose, or a second top-level block)
+            // restarts the scan at the next '{' or '[' after the last good token.
+            // ponytail: a restart may rescan to the end of the text; the node cap bounds restarts, fine for 20,000 chars.
+            void Scan(byte[] bytes)
+            {
+                var offset = 0;
+                while (++nodes <= MaxNodes && events.Count < MaxEvents && offset < bytes.Length)
+                {
+                    var start = bytes.AsSpan(offset).IndexOfAny((byte)'{', (byte)'[');
+                    if (start < 0) return;
+                    offset += start;
+                    var reader = new Utf8JsonReader(bytes.AsSpan(offset), isFinalBlock: false, state: default);
+                    var consumed = 0;
+                    try
+                    {
+                        while (reader.Read())
+                        {
+                            if (++nodes > MaxNodes || events.Count >= MaxEvents) return;
+                            if (reader.TokenType is JsonTokenType.StartObject or JsonTokenType.StartArray && reader.CurrentDepth <= MaxDepth
+                                && JsonDocument.TryParseValue(ref reader, out var value))
+                                using (value) Walk(value.RootElement, reader.CurrentDepth);
+                            consumed = (int)reader.BytesConsumed;
+                        }
+                        return; // the rest is an incomplete value: nothing more to read
+                    }
+                    catch (JsonException) { }
+                    offset += Math.Max(1, consumed);
                 }
             }
         }
@@ -169,14 +202,27 @@ public static class CalendarEvents
             if (!e.TryGetProperty(name, out var v)) continue;
             if (v.ValueKind == JsonValueKind.Object)
             {
-                if ((ParseTime(Str(v, "dateTime"), zone) ?? ParseTime(Str(v, "date_time"), zone) ?? ParseTime(Str(v, "date"), zone)) is { } t) return t;
+                var named = NamedZone(Str(v, "timeZone"));
+                if ((ParseTime(Str(v, "dateTime"), zone, named) ?? ParseTime(Str(v, "date_time"), zone, named) ?? ParseTime(Str(v, "date"), zone)) is { } t) return t;
             }
             else if (ParseTime(Str(v), zone) is { } t) return t;
         }
         return null;
     }
 
-    private static (DateTimeOffset, bool)? ParseTime(string? s, TimeZoneInfo zone)
+    /// <summary>A Windows or IANA zone id from a start/end object (Google's and Graph's "timeZone"), or null.</summary>
+    private static TimeZoneInfo? NamedZone(string? id)
+    {
+        if (id is not { Length: > 0 and <= 64 }) return null;
+        try { return TimeZoneInfo.TryFindSystemTimeZoneById(id, out var z) ? z : null; }
+        catch (Exception e) when (e is ArgumentException or InvalidTimeZoneException or System.Security.SecurityException) { return null; }
+    }
+
+    /// <summary>
+    /// A date-only value is all-day from midnight in <paramref name="zone"/>; a date-time without an offset is read in
+    /// <paramref name="named"/> when given, else as UTC.
+    /// </summary>
+    private static (DateTimeOffset, bool)? ParseTime(string? s, TimeZoneInfo zone, TimeZoneInfo? named = null)
     {
         if (s is null) return null;
         s = s.Trim();
@@ -184,6 +230,9 @@ public static class CalendarEvents
         {
             if (DateTime.TryParseExact(s, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var day))
                 return (new DateTimeOffset(day, zone.GetUtcOffset(day)), true);
+            if (named is not null && DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var wall)
+                && wall.Kind == DateTimeKind.Unspecified)
+                return (new DateTimeOffset(wall, named.GetUtcOffset(wall)), false);
             if (DateTimeOffset.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var at)) return (at, false);
         }
         catch (ArgumentException) { } // a midnight that falls outside DateTimeOffset's range in this zone
