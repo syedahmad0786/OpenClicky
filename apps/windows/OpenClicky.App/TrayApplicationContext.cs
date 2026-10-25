@@ -103,7 +103,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
                     ? new LocalWhisperSttClient(NewSttMic(), _whisperRuntime, talk, log: Log)
                     : new LocalSpeechSttClient()
                 : ProviderFactory.CreateSttClient(_settings, _secrets),
-            () => _demoTalk ? new OfflineTalkClient() : ProviderFactory.CreateTalkClient(_settings, _secrets, Log),
+            () => _demoTalk ? (_demoTalkClient ?? new OfflineTalkClient()) : ProviderFactory.CreateTalkClient(_settings, _secrets, Log),
             _tts,
             () => _settings,
             RunAgentAsync,
@@ -310,7 +310,6 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             Log("hint: set OpenRouter API key or Continue with ChatGPT in Settings (or use debug transcript)");
         }
 
-        MaybeShowFirstRunTip();
         RefreshConnection();
         // The notch replaces the startup window; StartShellAsync falls back to the classic window on failure.
         _ = StartShellAsync();
@@ -656,9 +655,12 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         finally { ShowClassic(); }
     }
 
-    private async Task TrySandboxDemoAsync()
+    private Task TrySandboxDemoAsync() => RunSandboxDemoAsync(showClassic: true);
+
+    /// <summary>The offline action demo in the test window; true when the test window shows the verified result.</summary>
+    private async Task<bool> RunSandboxDemoAsync(bool showClassic)
     {
-        if (_talk.State != CompanionVoiceState.Idle) return;
+        if (_talk.State != CompanionVoiceState.Idle) return false;
         _sandbox?.Dispose();
         _sandbox = new OpenClicky.Sandbox.SandboxForm();
         AppTheme.Apply(_sandbox);
@@ -670,19 +672,8 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         _sandboxDemo = true;
         _home.SetConnection("Offline action demo · only the test window");
         try { await _talk.SubmitTextAsync("openclicky agent click the green button then type hello in the test window", remember: false); }
-        finally { _sandboxDemo = false; RefreshConnection(); ShowClassic(); }
-    }
-
-    private void MaybeShowFirstRunTip()
-    {
-        if (_settings.FirstRunCompleted)
-        {
-            return;
-        }
-
-        _settings.FirstRunCompleted = true;
-        SettingsStore.Save(_settings);
-
+        finally { _sandboxDemo = false; RefreshConnection(); if (showClassic) ShowClassic(); }
+        return _sandbox?.HasVerifiedResult == true;
     }
 
     private Task RunAgentAsync(string task, CancellationToken cancellationToken) => StartAgentTask(task, null);

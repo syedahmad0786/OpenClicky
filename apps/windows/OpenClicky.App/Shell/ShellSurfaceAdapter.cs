@@ -16,7 +16,7 @@ internal sealed class ShellSurfaceAdapter : IShellSurface
     [
         "talk.toggle", "update.check", "update.install", "app.quit", "notch.tab", "notch.open", "text.submit",
         "general.set", "job.open", "job.stop", "job.dismiss", "job.steer", "job.followUp", "job.retry", "file.open", "file.reveal", "card.action",
-        "card.dismiss", "link.open", "settings.section", "settings.patch", "settings.action", "drawing.action",
+        "card.dismiss", "link.open", "settings.section", "settings.patch", "settings.action", "drawing.action", "onboarding",
     ];
 
     private readonly System.Windows.Forms.Timer _follow = new() { Interval = 500 };

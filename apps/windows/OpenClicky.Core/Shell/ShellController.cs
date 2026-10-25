@@ -38,6 +38,7 @@ public sealed class ShellController : IDisposable
     private ShellNotch _notch = new(NotchTab.Home, false, ShellContract.DefaultSection);
     private string? _featuredJobId;
     private ShellUpdate? _update;
+    private OnboardingView? _onboarding;
     private bool _pushPending;
 
     /// <param name="schedulePush">Runs the given push later on the UI thread; called at most once per pending push.</param>
@@ -135,6 +136,13 @@ public sealed class ShellController : IDisposable
     public void SetUpdate(ShellUpdate update)
     {
         _update = update;
+        RequestPush();
+    }
+
+    /// <summary>The first-run tour to show (null: none runs).</summary>
+    public void SetOnboarding(OnboardingView? view)
+    {
+        _onboarding = view;
         RequestPush();
     }
 
@@ -280,7 +288,7 @@ public sealed class ShellController : IDisposable
                 Update = _update,
                 Cards = _cards.Select(c => c.Card).ToList(),
             };
-            _last = ShellStateBuilder.Build(inputs);
+            _last = ShellStateBuilder.Build(inputs) with { Onboarding = _onboarding };
             _surface.Post(JsonSerializer.Serialize(new { kind = "shell.state", state = _last }, ShellContract.Options));
             return true;
         }
@@ -366,6 +374,7 @@ public sealed class ShellController : IDisposable
                 if (_last?.Chat.Rows.Any(r => r.DrawingId == id) != true) { _host.Trace("shell drawing action refused: not in the current state"); break; }
                 _host.DrawingAction(id!, intent.GetString("action")!);
                 break;
+            case "onboarding": _host.OnboardingAction(intent.GetString("action")!); break;
             case "card.dismiss":
                 var dismissed = intent.GetString("cardId")!;
                 var wasShown = _cards.Any(c => c.Card.Id == dismissed);

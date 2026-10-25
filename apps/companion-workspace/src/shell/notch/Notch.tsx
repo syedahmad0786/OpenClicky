@@ -3,6 +3,7 @@ import { listenToHost, postPage } from "../bridge";
 import { NotchCards } from "../cards/NotchCards";
 import type { NotchTab, ShellState } from "../contract";
 import { JobDeck } from "../deck/JobDeck";
+import { Onboarding } from "../onboarding/Onboarding";
 import { cx } from "../ui/cx";
 import { Peek } from "./Peek";
 import "./notch.css";
@@ -113,6 +114,8 @@ export function Notch({ state }: { state: ShellState }) {
         </div>
         {phase === "open" && tab === "home" ? <JobDeck jobs={state.jobs} featuredId={state.featured?.id ?? null} /> : null}
       </div>
+      {/* Under the 920x720 Settings panel the card would be off-screen or lose its region on a laptop; it returns when Settings closes. */}
+      {expanded && tab === "settings" ? null : <Onboarding state={state} />}
       <NotchCards cards={state.cards} active={phase !== "closing"} onPointerEnter={onCardsEnter} onPointerLeave={onCardsLeave} />
     </div>
   );

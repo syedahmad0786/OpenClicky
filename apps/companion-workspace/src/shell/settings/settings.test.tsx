@@ -91,6 +91,16 @@ it("General: the update button is disabled and labelled while checking and while
   expect(posts("update.install")).toEqual([]);
 });
 
+it("General page Start tour posts onboarding start, then closes the notch", () => {
+  host();
+  render(<SettingsPanel state={make("general")} />);
+  expect(screen.getByText("Welcome tour")).toBeInTheDocument();
+  expect(screen.getByText("Replay the welcome tour")).toBeInTheDocument();
+  expect(screen.getByText("Walk through talking, drawing, dictation and the practice run again.")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Start tour" }));
+  expect(postMessage.mock.calls.map((c) => c[0])).toEqual([{ kind: "onboarding", action: "start" }, { kind: "notch.open", open: false }]);
+});
+
 it("Account (ChatGPT): sign in / out, model pickers patch, refresh, usage, quit", () => {
   const posts = host();
   const { rerender } = render(<SettingsPanel state={make("account")} />);

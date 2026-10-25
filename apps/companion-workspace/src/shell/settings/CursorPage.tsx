@@ -2,7 +2,7 @@ import type { ShellState } from "../contract";
 import { ACCENTS, Group, Row, Tile, Toggle } from "../ui";
 import { Page, patch } from "./common";
 
-function GlowingCursor({ colour }: { colour: string }) {
+export function GlowingCursor({ colour }: { colour: string }) {
   return (
     <svg className="settings-cursor-icon" width="30" height="30" viewBox="0 0 24 24" aria-hidden="true" focusable="false"
       style={{ filter: `drop-shadow(0 0 5px ${colour}) drop-shadow(0 0 10px ${colour})` }}>

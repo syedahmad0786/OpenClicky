@@ -22,8 +22,26 @@ RE depth: **S** = static evidence is enough · **L** = needs a live view-only lo
 | A8 | Tray menu | Open Settings · Pause/Resume · Report a bug · Request a feature · What's new · Check for updates · Quit | Partial (different items) | S |
 | A9 | General behaviour | Show in taskbar; show in screen recordings (capture exclusion); launch at login; pause (ignore shortcuts) | Missing | S |
 | A10 | Updates | Hourly check, "Install & Relaunch", install on quit, "What's new" | Missing | S |
-| A11 | Onboarding | Intro (welcome, colour pick), permission cards (mic, screen), hands-on tour (mic check, voice hello, draw demo, circle-to-ask, drive demo, text mode, dictation, finale) | Missing | S+L |
+| A11 | Onboarding | Intro (welcome, colour pick), permission cards (mic, screen), hands-on tour (mic check, voice hello, draw demo, circle-to-ask, drive demo, text mode, dictation, finale) | Built (sub-project H, 25 Oct). A 12-step tour card sits under the notch on first run and is replayed from Settings → General. Every step can be skipped, and nothing runs until you click. The permission cards explain what leaves the PC and open `ms-settings:` pages; they change nothing. The draw demo is an offline canned reply. The drive demo is the offline sandbox practice run, always Confirm-each with the C12 consent card, and the access setting is never touched. Native check pending the user's list below. Evidence: `OnboardingFlowTests`, `OnboardingContractTests`, `OnboardingDrawDemoTests`; vitest `onboarding/Onboarding.test.tsx` and `settings.test.tsx`; render check of the dev shell page (commits 5bc3abd..508bd43) | S+L |
+| A11-S1 | Onboarding extras | Discovery-source chips, skill selection, squad packs, hatch flight, intro video, tour music | Skip: marketing/telemetry, or art and sound we would invent wholesale; the spec's intro is welcome + colour | — |
+| A11-S2 | Onboarding sign-in, speaker check, interview, email draft, paywall | Sign-in step, "set volume to 50%", interview that builds personal agents, email-draft step, onboarding paywall | Skip. Sign-in stays in Settings → Account and is never automated; voice hello links there. The volume change would alter a Windows setting for the user. The interview, email draft and paywall are not in the spec. | — |
+| A11-S3 | Tour navigation | Clickable progress dots, resume mid-tour after a restart | Skip: the dots show progress only; a tour quit half-way starts again next launch (Skip is one click) | — |
 | A12 | Accounts/plans/paywall/referral/telemetry | Google sign-in via Supabase, Stripe plans, usage leases, Invite & Earn, PostHog, Sentry | Skip — OpenClicky keeps ChatGPT sign-in, no billing, no telemetry | — |
+
+**A11 native acceptance: pending.** A11 moves to Native-accepted after the user runs these checks. They need a real microphone, voice, hotkeys and the drive confirmations:
+
+1. With a fresh settings folder, or after Settings → General → Start tour, the tour card appears under the notch. Skip tour hides it, and it does not come back on restart.
+2. The colour pick changes the companion cursor colour at once.
+3. The microphone card's button opens Windows' microphone page. After toggling desktop-app access there, Check again updates the line.
+4. Mic check: Test microphone moves the bars and ticks "I can hear you."
+5. Voice hello: hold Ctrl+Alt and say your name. The status cycles and the reply is spoken, and the step ticks (also with conversation history off).
+6. Draw demo: Show me draws a circle, an arrow and a note, and Esc wipes them.
+7. Circle-to-ask: hold the talk keys, circle something and ask; the answer is about it.
+8. Drive demo with Settings → Access set to Auto: the consent card appears, then a confirm for every step in the test window, and afterwards Access is still Auto. Skip during the run stops it.
+9. Text mode: double-tap Ctrl opens the text box and the step ticks.
+10. Dictation: in Notepad, hold Ctrl+Win and speak. The text appears and the step ticks.
+11. Finale: Show me Home opens Home.
+12. On a 1366×768 laptop, or a 1080p screen at 125%, Start tour from Settings → General closes Settings and shows the card in full.
 
 ## 2. Voice, talk and companion (sub-projects B, C)
 

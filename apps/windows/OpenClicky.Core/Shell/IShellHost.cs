@@ -42,6 +42,8 @@ public interface IShellHost
     void CardDismissed(string cardId) { }
     /// <summary>A button on a saved-drawing chat row; <paramref name="id"/> is a drawing the last pushed state offered and <paramref name="action"/> one of ShellIntentParser.DrawingActions.</summary>
     void DrawingAction(string id, string action);
+    /// <summary>An allow-listed first-run tour action from the page (<see cref="OnboardingContract.Actions"/>).</summary>
+    void OnboardingAction(string action) { }
 }
 
 /// <summary>The page surface (a WebView2 window in the app, a fake in tests).</summary>
