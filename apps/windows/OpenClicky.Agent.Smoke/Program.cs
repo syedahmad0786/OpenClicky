@@ -351,10 +351,15 @@ internal static class Program
         if (delivery.Kind != DictationDeliveryKind.Inserted || copied is not null || value != expected)
         { Console.Error.WriteLine($"FAIL: expected Inserted and the control to read '{expected}', got {delivery.Kind} / '{value}'"); return 32; }
 
-        // Clipboard fallback: no field. Keep the user's clipboard text safe; skip rather than clobber non-text content.
-        var (hadText, saved, hasOther) = OnSta(() => (Clipboard.ContainsText(), Clipboard.ContainsText() ? Clipboard.GetText() : null,
-            !Clipboard.ContainsText() && (Clipboard.GetDataObject()?.GetFormats().Length ?? 0) > 0));
-        if (hasOther) { Console.WriteLine("dictation_flow_clipboard=SKIPPED (the clipboard holds non-text content that would not be restored)"); return 0; }
+        // Clipboard fallback: no field. Only proceed when the clipboard is empty or holds nothing beyond plain text (and its
+        // locale): SetText(saved) restores only that, so any other format (HTML, RTF, image, files) would be lost; skip then.
+        var (hadText, saved, hasOther) = OnSta(() =>
+        {
+            var formats = Clipboard.GetDataObject()?.GetFormats(false) ?? [];
+            var other = formats.Any(f => f is not (nameof(DataFormats.Text) or nameof(DataFormats.UnicodeText) or "OEMText" or nameof(DataFormats.Locale)));
+            return (Clipboard.ContainsText(), Clipboard.ContainsText() ? Clipboard.GetText() : null, other);
+        });
+        if (hasOther) { Console.WriteLine("dictation_flow_clipboard=SKIPPED (the clipboard holds more than plain text, which would not be restored)"); return 0; }
         try
         {
             var fallback = await DictationFlow.DeliverAsync(raw, null, new FakeCleaner(cleaned), options, t => OnSta(() => { Clipboard.SetText(t); return 0; }), CancellationToken.None).ConfigureAwait(true);
