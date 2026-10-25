@@ -88,6 +88,7 @@ public static class WorkIndex
         WorkJobStates.Completed or "done" => "done",
         WorkJobStates.Failed => "failed",
         WorkJobStates.Stopped => "stopped",
+        WorkJobStates.NeedsYou => "needs you", // found by the E13 store check: it used to read "working"
         _ => "working",
     };
 
