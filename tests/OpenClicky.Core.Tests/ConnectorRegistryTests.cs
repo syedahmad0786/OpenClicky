@@ -152,6 +152,28 @@ public sealed class ConnectorRegistryTests : IDisposable
     }
 
     [Fact]
+    public void ReusedKeyIsNotTheSameRow()
+    {
+        var registry = Registry();
+        var old = registry.Add(Spec("Acme", auth: ConnectorAuth.Browser));
+        Assert.True(ConnectorRegistry.IsCurrent(registry.List(), old));
+        registry.Remove(old.Key);
+        Thread.Sleep(2); // a re-add gets a later creation time
+        var fresh = registry.Add(Spec("Acme", auth: ConnectorAuth.ApiKey, secret: new ConnectorSecret("https://mcp.example.test/mcp", "x-api-key", "new-key")));
+        Assert.Equal(old.Key, fresh.Key);
+
+        Assert.False(ConnectorRegistry.IsCurrent(registry.List(), old));
+        Assert.True(ConnectorRegistry.IsCurrent(registry.List(), fresh));
+        Assert.False(ConnectorRegistry.IsCurrent([], fresh));
+
+        registry.SaveSecret(old, new ConnectorSecret("https://mcp.example.test/mcp", null, null) { OAuthClientId = "stale" }); // a late sign-in
+        Assert.Equal("new-key", registry.Secret(fresh.Key)!.HeaderValue);
+        Assert.Null(registry.Secret(fresh.Key)!.OAuthClientId);
+        registry.SaveSecret(fresh, new ConnectorSecret("https://mcp.example.test/mcp", "x-api-key", "rotated"));
+        Assert.Equal("rotated", registry.Secret(fresh.Key)!.HeaderValue);
+    }
+
+    [Fact]
     public void SecretsOnlyInSecretStore()
     {
         var secret = new ConnectorSecret("https://mcp.example.test/u/123?k=1", "X-Auth", "s3cret-h")

@@ -24,6 +24,8 @@ internal sealed partial class TrayApplicationContext
     private readonly Lazy<McpOAuth> _connectorRefresh = new(() => new McpOAuth());
     /// <summary>The key whose browser sign-in is running (one at a time: the callback port is fixed). UI thread only.</summary>
     private string? _connectorSigningIn;
+    /// <summary>Cancels the running sign-in (removing its row does), which frees the callback port and the busy flag. UI thread only.</summary>
+    private CancellationTokenSource? _connectorSignInCancel;
 
     private void ConnectorAction(string action, string? arg)
     {
@@ -173,9 +175,16 @@ internal sealed partial class TrayApplicationContext
 
     /// <summary>
     /// Browser sign-in for one key: the user signs in on the server's own page in their default browser. A failed or
-    /// cancelled first sign-in of a catalog account removes that row; any other row stays, needing sign-in.
+    /// cancelled first sign-in of a catalog account removes that row; any other row stays, needing sign-in. A flow whose
+    /// row was removed meanwhile (the key may already belong to a newer row) writes nothing and says nothing.
     /// </summary>
     private async Task SignInConnectorAsync(string? key, bool firstSignIn)
+    {
+        try { await SignInConnectorCoreAsync(key, firstSignIn); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { ConnectorFlowFailed(ex); }
+    }
+
+    private async Task SignInConnectorCoreAsync(string? key, bool firstSignIn)
     {
         if (SignInBusy()) return;
         if (_connectors.List().FirstOrDefault(c => c.Key == key) is not { Auth: ConnectorAuth.Browser } info
@@ -185,35 +194,40 @@ internal sealed partial class TrayApplicationContext
             RequestShellPush();
             return;
         }
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+        limit.CancelAfter(TimeSpan.FromMinutes(5));
         _connectorSigningIn = info.Key;
+        _connectorSignInCancel = limit;
         RequestShellPush();
         _shell?.AddToast("Finish connecting in your browser.");
         var signedIn = false;
         try
         {
-            using var limit = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
-            limit.CancelAfter(TimeSpan.FromMinutes(5));
             using var oauth = new McpOAuth();
             var tokens = await Task.Run(() => oauth.SignInAsync(new Uri(secret.Url), secret.OAuthClientId, limit.Token));
-            _connectors.SaveSecret(info.Key, secret with { OAuth = tokens });
+            if (!Current(info)) return;
+            _connectors.SaveSecret(info, secret with { OAuth = tokens });
             _connectors.SetSignedIn(info.Key, true);
             _connectorTokens.TryRemove(info.Key, out _);
             signedIn = true;
         }
         catch (McpOAuthException ex)
         {
+            if (!Current(info)) return;
             _shell?.AddToast(ex.Message);
             Forget();
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             Log("connector_signin_error=" + ex.GetType().Name);
+            if (!Current(info)) return;
             _shell?.AddToast("Sign-in failed: " + SettingsActionArgs.UserMessage(ex));
             Forget();
         }
         finally
         {
             _connectorSigningIn = null;
+            _connectorSignInCancel = null;
             RequestShellPush();
         }
         if (signedIn) await VerifyConnectorAsync(info.Key, announce: true);
@@ -231,9 +245,19 @@ internal sealed partial class TrayApplicationContext
 
     /// <summary>
     /// A real initialize + tools/list (30 s), opened exactly as for a job. Toasts "{Name}: {message}" only when the user
-    /// started it (Test, add, sign-in); a page-open check stays quiet.
+    /// started it (Test, add, sign-in); a page-open check stays quiet. A check that outlived its row is dropped.
     /// </summary>
     private async Task VerifyConnectorAsync(string? key, bool announce)
+    {
+        try { await VerifyConnectorCoreAsync(key, announce); }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            if (key is not null && _connectorChecks.TryGetValue(key, out var check) && check.Status == ConnectorStatus.Checking) _connectorChecks.Remove(key);
+            ConnectorFlowFailed(ex);
+        }
+    }
+
+    private async Task VerifyConnectorCoreAsync(string? key, bool announce)
     {
         if (key is null) return;
         if (key == ObsidianKey)
@@ -271,14 +295,22 @@ internal sealed partial class TrayApplicationContext
             var message = SettingsActionArgs.UserMessage(ex);
             check = new ConnectorCheck(ConnectorStatus.Error, null, message[..Math.Min(message.Length, 300)]);
         }
-        // A check that finishes after its connector was removed must not leave a stale entry behind.
-        if (_connectors.List().Any(c => c.Key == info.Key))
-        {
-            _connectorChecks[info.Key] = check;
-            if (check.Status == ConnectorStatus.Reconnect) { _connectors.SetSignedIn(info.Key, false); _connectorTokens.TryRemove(info.Key, out _); }
-        }
-        else _connectorChecks.Remove(info.Key);
+        // Removing the row already dropped its entry; the key may belong to a newer row with its own check by now.
+        if (!Current(info)) return;
+        _connectorChecks[info.Key] = check;
+        if (check.Status == ConnectorStatus.Reconnect) { _connectors.SetSignedIn(info.Key, false); _connectorTokens.TryRemove(info.Key, out _); }
         if (announce) _shell?.AddToast($"{info.DisplayName}: {check.Message}");
+        RequestShellPush();
+    }
+
+    /// <summary>True while this very row (not a newer one that reused its key) is still in the registry.</summary>
+    private bool Current(ConnectorInfo info) => ConnectorRegistry.IsCurrent(_connectors.List(), info);
+
+    /// <summary>A sign-in or check that failed outside its own handling (say, the database or secret store threw): as the settings action handler.</summary>
+    private void ConnectorFlowFailed(Exception ex)
+    {
+        Log("connector_flow_error=" + ex.GetType().Name);
+        _shell?.AddToast("That did not work: " + SettingsActionArgs.UserMessage(ex));
         RequestShellPush();
     }
 
@@ -303,6 +335,7 @@ internal sealed partial class TrayApplicationContext
             return;
         }
         if (_connectors.List().FirstOrDefault(c => c.Key == key) is not { } info) { RequestShellPush(); return; }
+        if (info.Key == _connectorSigningIn) _connectorSignInCancel?.Cancel(); // its flow sees the row gone and stays quiet
         _connectors.Remove(info.Key);
         _connectorChecks.Remove(info.Key);
         _connectorTokens.TryRemove(info.Key, out _);
@@ -317,17 +350,22 @@ internal sealed partial class TrayApplicationContext
     private Task<IReadOnlyList<McpConnector>> OpenConnectorsAsync(CancellationToken token) => Task.Run<IReadOnlyList<McpConnector>>(() =>
     {
         var list = new List<McpConnector>();
+        IReadOnlyList<ConnectorInfo> rows = [];
+        try { rows = _connectors.List(); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Log("connector_load_error=" + ex.GetType().Name); }
         try
         {
-            foreach (var info in _connectors.List())
+            // One connector that fails to load must not cost the job the others or the vault.
+            foreach (var info in rows)
             {
                 token.ThrowIfCancellationRequested();
-                if (OpenConnector(info) is { } connector) list.Add(connector);
+                try { if (OpenConnector(info) is { } connector) list.Add(connector); }
+                catch (Exception ex) when (ex is not OutOfMemoryException) { Log("connector_load_error=" + ex.GetType().Name); }
             }
-            if (_settings.ObsidianVaultPath is { Length: > 0 } vault && ObsidianVaultConnector.IsVault(vault)) list.Add(new ObsidianVaultConnector(vault));
+            token.ThrowIfCancellationRequested();
         }
         catch (OperationCanceledException) { foreach (var connector in list) connector.Dispose(); throw; }
-        catch (Exception ex) when (ex is not OutOfMemoryException) { Log("connector_load_error=" + ex.GetType().Name); }
+        if (_settings.ObsidianVaultPath is { Length: > 0 } vault && ObsidianVaultConnector.IsVault(vault)) list.Add(new ObsidianVaultConnector(vault));
         return list;
     }, token);
 
@@ -338,26 +376,32 @@ internal sealed partial class TrayApplicationContext
         if (info.Kind == ConnectorKind.Local) return new StdioMcpConnector(info.Key, info.DisplayName, secret) { Label = info.Label };
         if (info.Auth != ConnectorAuth.Browser) return new RemoteMcpConnector(info.Key, info.DisplayName, secret) { Label = info.Label };
         if (!info.SignedIn || secret.OAuth is not { } tokens) return null;
-        var source = _connectorTokens.GetOrAdd(info.Key, key => new McpTokenSource(tokens, _connectorRefresh.Value,
-            fresh => _connectors.SaveSecret(key, secret with { OAuth = fresh })));
+        // Rotated tokens are saved only while this source is still the cached one (a new sign-in, a Reconnect or a remove
+        // drops it) and only into this very row, so a long job never writes old tokens over a newer sign-in or connector.
+        McpTokenSource? created = null;
+        created = new McpTokenSource(tokens, _connectorRefresh.Value, fresh =>
+        {
+            if (_connectorTokens.TryGetValue(info.Key, out var live) && ReferenceEquals(live, created)) _connectors.SaveSecret(info, secret with { OAuth = fresh });
+        });
+        var source = _connectorTokens.GetOrAdd(info.Key, created);
         return new RemoteMcpConnector(info.Key, info.DisplayName, secret, bearer: async ct =>
         {
             try { return await source.GetAsync(ct).ConfigureAwait(false); }
             catch (McpOAuthException ex) when (ex.Failure == McpOAuthFailure.RefreshRejected)
             {
                 // The page shows Reconnect required and later jobs skip this account; this job sees a connector error.
-                OnUi(() => MarkReconnect(info.Key, ex.Message));
+                OnUi(() => MarkReconnect(info, source, ex.Message));
                 throw;
             }
         }) { Label = info.Label };
     }
 
-    private void MarkReconnect(string key, string message)
+    private void MarkReconnect(ConnectorInfo info, McpTokenSource source, string message)
     {
-        _connectorTokens.TryRemove(key, out _);
-        if (!_connectors.List().Any(c => c.Key == key)) return;
-        _connectors.SetSignedIn(key, false);
-        _connectorChecks[key] = new ConnectorCheck(ConnectorStatus.Reconnect, null, message);
+        // Only this source's own cache entry: a newer sign-in's source, and the row it belongs to, stay as they are.
+        if (!_connectorTokens.TryRemove(KeyValuePair.Create(info.Key, source)) || !Current(info)) return;
+        _connectors.SetSignedIn(info.Key, false);
+        _connectorChecks[info.Key] = new ConnectorCheck(ConnectorStatus.Reconnect, null, message);
         RequestShellPush();
     }
 

@@ -147,6 +147,24 @@ public sealed class ConnectorRegistry
         }
     }
 
+    /// <summary>
+    /// As <see cref="SaveSecret(string, ConnectorSecret)"/>, but only while <paramref name="row"/> itself is still there: a
+    /// flow that outlived its connector must not write into a newer one that reused the key.
+    /// </summary>
+    public void SaveSecret(ConnectorInfo row, ConnectorSecret secret)
+    {
+        lock (_sync)
+        {
+            using var connection = Open();
+            if (!IsCurrent(Read(connection), row)) return;
+            _secrets.Set(SecretName(row.Key), JsonSerializer.Serialize(secret));
+        }
+    }
+
+    /// <summary>True when <paramref name="rows"/> still hold this very row: same key and same creation time (keys are reused after a remove).</summary>
+    public static bool IsCurrent(IEnumerable<ConnectorInfo> rows, ConnectorInfo row) =>
+        rows.Any(r => r.Key == row.Key && r.CreatedAt == row.CreatedAt);
+
     /// <summary>Renames the account label; null or blank clears it.</summary>
     public void SetLabel(string key, string? label)
     {
