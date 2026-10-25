@@ -43,6 +43,7 @@ public sealed class ObsidianVaultConnector(string vaultPath) : McpConnector("obs
     public override Task<RemoteMcpCallResult> CallToolAsync(string name, JsonElement arguments, CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
+        if (!IsVault(_root)) return Task.FromResult(Fail("The Obsidian vault folder is missing or is no longer a vault."));
         try
         {
             return Task.FromResult(name switch
@@ -86,15 +87,19 @@ public sealed class ObsidianVaultConnector(string vaultPath) : McpConnector("obs
             var relative = Relative(file);
             if (Path.GetFileName(file).Contains(query, StringComparison.OrdinalIgnoreCase))
                 results.Add(new { path = relative, line = 0, text = Path.GetFileName(file) });
-            if (new FileInfo(file).Length > MaxSearchFileBytes) continue;
-            var number = 0;
-            foreach (var line in File.ReadLines(file))
+            try
             {
-                number++;
-                if (results.Count >= MaxSearchResults) break;
-                if (line.Contains(query, StringComparison.OrdinalIgnoreCase))
-                    results.Add(new { path = relative, line = number, text = line.Trim()[..Math.Min(line.Trim().Length, MaxSnippet)] });
+                if (new FileInfo(file).Length > MaxSearchFileBytes) continue;
+                var number = 0;
+                foreach (var line in File.ReadLines(file))
+                {
+                    number++;
+                    if (results.Count >= MaxSearchResults) break;
+                    if (line.Contains(query, StringComparison.OrdinalIgnoreCase))
+                        results.Add(new { path = relative, line = number, text = line.Trim()[..Math.Min(line.Trim().Length, MaxSnippet)] });
+                }
             }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { } // locked or vanished mid-scan: skip this file
         }
         return Ok(new { results });
     }
@@ -159,7 +164,8 @@ public sealed class ObsidianVaultConnector(string vaultPath) : McpConnector("obs
     {
         if (string.IsNullOrEmpty(relative) || relative.Length > MaxPathChars || relative.Contains(':') || Path.IsPathRooted(relative)) return null;
         var parts = relative.Replace('\\', '/').Split('/');
-        if (parts.Length > MaxSegments || parts.Any(part => part.Length == 0 || part.StartsWith('.') || part.Trim() != part || part.EndsWith('.')
+        // '~' refuses 8.3 short names (OBSIDI~1 is .obsidian on NTFS), which would slip past the dot-folder rule.
+        if (parts.Length > MaxSegments || parts.Any(part => part.Length == 0 || part.StartsWith('.') || part.Contains('~') || part.Trim() != part || part.EndsWith('.')
                 || part.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || ReservedNames.Contains(part.Split('.')[0])))
             return null;
         if (note && !parts[^1].EndsWith(".md", StringComparison.OrdinalIgnoreCase)) return null;

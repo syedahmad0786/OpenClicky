@@ -121,6 +121,7 @@ public sealed class ObsidianVaultConnectorTests : IDisposable
         {
             "../x.md", @"C:\x.md", "/x.md", ".obsidian/app.json", ".obsidian/x.md", "a/.hidden/x.md", "image.png", "x.txt",
             "a/../b.md", "a/b/c/d/e/f/g/h/i.md", "con.md", "a:b.md", "", "a//b.md", @"..\x.md", "x.md.", "x.md ",
+            "OBSIDI~1/x.md", "OBSIDI~1/plugins/README.md", "Daily/2026-1~1.md",
         }.Select(p => new object[] { p });
 
     [Theory]
@@ -139,6 +140,51 @@ public sealed class ObsidianVaultConnectorTests : IDisposable
         Assert.Equal(before, Snapshot());
         Assert.Equal(contents, File.ReadAllText(Path.Combine(_root, "x.md")));
         Assert.Equal("{}", File.ReadAllText(Path.Combine(_vault, ".obsidian", "app.json")));
+    }
+
+    [Fact]
+    public async Task RefusesShortNamesIntoDotFolders()
+    {
+        Directory.CreateDirectory(Path.Combine(_vault, ".obsidian", "plugins"));
+        File.WriteAllText(Path.Combine(_vault, ".obsidian", "plugins", "README.md"), "plugin secrets");
+        // Where the volume makes 8.3 names, OBSIDI~1 really is .obsidian; either way the "~" path must be refused.
+        var read = await Call("read_note", new { path = "OBSIDI~1/plugins/README.md" });
+        Assert.True(read.IsError);
+        Assert.DoesNotContain("plugin secrets", read.Text);
+        var write = await Call("write_note", new { path = "OBSIDI~1/plugins/README.md", content = "changed" });
+        Assert.True(write.IsError);
+        Assert.Equal("plugin secrets", File.ReadAllText(Path.Combine(_vault, ".obsidian", "plugins", "README.md")));
+        Assert.True((await Call("list_notes", new { folder = "OBSIDI~1" })).IsError);
+    }
+
+    [Fact]
+    public async Task MissingVaultIsRefusedWithoutPath()
+    {
+        using var connector = new ObsidianVaultConnector(Path.Combine(_root, "gone"));
+        var arg = JsonSerializer.SerializeToElement(new { });
+        foreach (var tool in new[] { "list_notes", "search_notes", "read_note", "write_note" })
+        {
+            var result = await connector.CallToolAsync(tool, arg, CancellationToken.None);
+            Assert.True(result.IsError);
+            Assert.Equal("The Obsidian vault folder is missing or is no longer a vault.", result.Text);
+        }
+        Assert.False(Directory.Exists(Path.Combine(_root, "gone")));
+
+        Directory.Delete(Path.Combine(_vault, ".obsidian"), recursive: true); // a folder that stopped being a vault
+        Assert.True((await Call("list_notes", new { })).IsError);
+    }
+
+    [Fact]
+    public async Task SearchSkipsLockedFiles()
+    {
+        File.WriteAllText(Path.Combine(_vault, "Locked.md"), "needle in a locked note");
+        File.WriteAllText(Path.Combine(_vault, "Open.md"), "needle in an open note");
+        using var held = new FileStream(Path.Combine(_vault, "Locked.md"), FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        var found = await Call("search_notes", new { query = "needle" });
+        Assert.False(found.IsError);
+        var paths = found.Json.GetProperty("results").EnumerateArray().Select(r => r.GetProperty("path").GetString()).ToArray();
+        Assert.Contains("Open.md", paths);
+        Assert.DoesNotContain("Locked.md", paths);
     }
 
     [Fact]
