@@ -103,6 +103,8 @@ public sealed class AppSettings
     public bool ShakeToDetach { get; set; } = true;
     /// <summary>Folder agents work in; empty = the app default.</summary>
     public string? AgentFolder { get; set; }
+    /// <summary>The Obsidian vault folder (contains .obsidian) agents may read and write notes in; null = no vault connected.</summary>
+    public string? ObsidianVaultPath { get; set; }
     public bool SpeakJobAnnouncements { get; set; } = true;
     public bool CursorJobUpdates { get; set; } = true;
 
