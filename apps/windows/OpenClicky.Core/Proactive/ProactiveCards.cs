@@ -51,8 +51,9 @@ public static class ProactiveCards
         MeetingPrefix + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(eventId)))[..16].ToLowerInvariant();
 
     /// <summary>
-    /// Makes untrusted text safe for a card: control characters and bidi overrides removed, whitespace runs
-    /// (including newlines and tabs) become one space, trimmed, cut to <paramref name="max"/> without splitting a surrogate pair.
+    /// Makes untrusted text safe for a card: removes control characters (<see cref="char.IsControl(char)"/>), the bidi
+    /// embeddings and overrides U+202A–U+202E and the bidi isolates U+2066–U+2069; whitespace runs (including newlines and
+    /// tabs) become one space; trims, and cuts to <paramref name="max"/> without splitting a surrogate pair.
     /// </summary>
     public static string Clean(string? text, int max)
     {
@@ -61,7 +62,7 @@ public static class ProactiveCards
         foreach (var c in text)
         {
             if (char.IsWhiteSpace(c)) { if (sb.Length > 0 && sb[^1] != ' ') sb.Append(' '); }
-            else if (!char.IsControl(c) && c is not (>= '‪' and <= '‮') and not (>= '⁦' and <= '⁩')) sb.Append(c);
+            else if (!char.IsControl(c) && c is not (>= '\u202A' and <= '\u202E') and not (>= '\u2066' and <= '\u2069')) sb.Append(c);
             if (sb.Length > max) break; // ponytail: stops early; a cleaned string never needs more than max + 1 chars
         }
         var s = sb.ToString().TrimEnd();

@@ -73,8 +73,8 @@ public sealed class ProactiveCoordinator(IProactiveCardSink sink, IQuietSignal q
         if (!settings.Suggestions) _suggestionId = null;
         if (!settings.IntegrationNudges) _nudge = null;
 
-        // 2. No notch shell or nothing on: nothing shown.
-        if (!inputs.ShellActive || !settings.AnyOn) { Reconcile(); return; }
+        // 2. No notch shell or nothing on: nothing shown, and the nudge is not kept (as in quiet).
+        if (!inputs.ShellActive || !settings.AnyOn) { _nudge = null; Reconcile(); return; }
 
         // 3. Calendar (fetches run even while quiet).
         Calendar(settings, now);

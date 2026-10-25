@@ -31,14 +31,14 @@ internal sealed partial class TrayApplicationContext
             ProactiveStore.Load(), state => ProactiveStore.Save(state), Log);
         _proactiveTimer.Tick += (_, _) =>
         {
-            try { _proactive.Tick(ProactiveInputs()); }
+            try { _proactive.Tick(BuildProactiveInputs()); }
             catch (Exception ex) when (ex is not OutOfMemoryException) { Log("proactive_tick_error=" + ex.GetType().Name); }
         };
         _proactiveTimer.Start();
         _home.Disposed += (_, _) => _proactiveTimer.Dispose();
     }
 
-    private ProactiveInputs ProactiveInputs()
+    private ProactiveInputs BuildProactiveInputs()
     {
         var settings = _settings.Proactive ?? new();
         var now = DateTimeOffset.Now;

@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace OpenClicky.Core.Proactive;
 
 /// <summary>
@@ -12,5 +14,5 @@ public sealed class ProactiveSettings
     public bool MeetingCountdown { get; set; }
     public string? CalendarConnector { get; set; }
 
-    public bool AnyOn => MorningBrief || Suggestions || IntegrationNudges || MeetingCountdown;
+    [JsonIgnore] public bool AnyOn => MorningBrief || Suggestions || IntegrationNudges || MeetingCountdown;
 }
