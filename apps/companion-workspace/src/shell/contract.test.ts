@@ -84,6 +84,31 @@ describe("shell contract", () => {
     expect(parseShellState(speed(3))).toBeNull();
   });
 
+  it("parses the browser card view and rejects bad chrome values and extra keys", () => {
+    const integrations = (patch: object) => ({ ...fixture, settings: { ...fixture.settings, integrations: { ...fixture.settings.integrations, ...patch } } });
+    const browser = (patch: object) => integrations({ browser: { ...fixture.settings.integrations.browser, ...patch } });
+    const parsed = parseShellState(fixture)!;
+    expect(parsed.settings.integrations.browser.browsers[0].profiles.map((p) => p.dir)).toEqual(["Default", "Profile 2"]);
+    for (const chrome of ["working", "noBrowser"]) expect(parseShellState(integrations({ chrome }))).not.toBeNull();
+    expect(parseShellState(integrations({ chrome: "sleeping" }))).toBeNull();
+    expect(parseShellState(browser({ extra: 1 }))).toBeNull();
+    expect(parseShellState(browser({ browsers: [{ id: "chrome", name: "Chrome", profiles: [], extra: 1 }] }))).toBeNull();
+    expect(parseShellState(browser({ instances: [{ id: "p", label: "Work", selected: true, extra: 1 }] }))).toBeNull();
+    expect(parseShellState(browser({ instances: [{ id: "p", label: "Work", selected: true }] }))).not.toBeNull();
+    expect(parseShellState(browser({ browserId: "chrome", profileDir: "Default" }))).not.toBeNull();
+    const { browser: _browser, ...noBrowser } = fixture.settings.integrations;
+    expect(parseShellState({ ...fixture, settings: { ...fixture.settings, integrations: noBrowser } })).toBeNull();
+    const many = (n: number) => Array.from({ length: n }, (_, i) => ({ id: "b" + i, name: "B", profiles: [] }));
+    expect(parseShellState(browser({ browsers: many(16) }))).not.toBeNull();
+    expect(parseShellState(browser({ browsers: many(17) }))).toBeNull();
+    const profiles = (n: number) => [{ id: "chrome", name: "Chrome", profiles: Array.from({ length: n }, (_, i) => ({ dir: "P" + i, name: "P" })) }];
+    expect(parseShellState(browser({ browsers: profiles(32) }))).not.toBeNull();
+    expect(parseShellState(browser({ browsers: profiles(33) }))).toBeNull();
+    const instances = (n: number) => Array.from({ length: n }, (_, i) => ({ id: "i" + i, label: "L", selected: i === 0 }));
+    expect(parseShellState(browser({ instances: instances(8) }))).not.toBeNull();
+    expect(parseShellState(browser({ instances: instances(9) }))).toBeNull();
+  });
+
   it("knows every sidebar section and settings action", () => {
     expect(settingsSections).toHaveLength(16);
     expect(settingsActions).toHaveLength(29);

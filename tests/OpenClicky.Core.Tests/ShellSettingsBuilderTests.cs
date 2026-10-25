@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using OpenClicky.Core.Browser;
 using OpenClicky.Core.Settings;
 using OpenClicky.Core.Shell;
 
@@ -297,6 +298,35 @@ public class ShellSettingsBuilderTests
         Assert.Equal(json, ShellContract.Serialize(ShellContract.Deserialize(json)!));
         Assert.Equal(64, state.Settings.Voice.Voices.Count);
         Assert.True(json.Length < ShellStateBuilder.MaxStateChars);
+    }
+
+    [Fact]
+    public void BrowserCardPassesThroughCapped()
+    {
+        string Long(int n) => new('z', n);
+        var card = new BrowserCardView("edge", "Profile 2",
+            [new BrowserOptionView("edge", "Edge", [new BrowserProfileView("Default", "Ahmad"), new BrowserProfileView("Profile 2", "Work")])],
+            [new BrowserInstanceView("p1", "Work", true), new BrowserInstanceView("p2", "Home", false)], @"C:\ext");
+        var view = Build(r: SettingsRuntime.Empty with { Browser = card });
+        Assert.Equal(card.Browsers[0].Profiles, view.Integrations.Browser.Browsers[0].Profiles);
+        Assert.Equal(("edge", "Profile 2", @"C:\ext"), (view.Integrations.Browser.BrowserId, view.Integrations.Browser.ProfileDir, view.Integrations.Browser.ExtensionFolder));
+        Assert.Equal([true, false], view.Integrations.Browser.Instances.Select(i => i.Selected));
+        Assert.Same(BrowserCardView.Empty, Build().Integrations.Browser);
+
+        var huge = new BrowserCardView(Long(100), Long(500),
+            [.. Enumerable.Range(0, 40).Select(i => new BrowserOptionView(i == 0 ? "" : "b" + i, Long(500),
+                [.. Enumerable.Range(0, 100).Select(p => new BrowserProfileView(p == 0 ? "" : Long(500), Long(500)))]))],
+            [.. Enumerable.Range(0, 20).Select(i => new BrowserInstanceView(i == 0 ? "" : Long(500), Long(500), i == 3))], Long(9_000));
+        var clamped = Build(r: SettingsRuntime.Empty with { Browser = huge }).Integrations.Browser;
+        Assert.Equal(32, clamped.BrowserId!.Length);
+        Assert.Equal(260, clamped.ProfileDir!.Length);
+        Assert.Equal(16, clamped.Browsers.Count);
+        Assert.DoesNotContain(clamped.Browsers, b => b.Id.Length == 0 || b.Id.Length > 32 || b.Name.Length > 80);
+        Assert.All(clamped.Browsers, b => { Assert.Equal(32, b.Profiles.Count); Assert.All(b.Profiles, p => Assert.True(p.Dir.Length is > 0 and <= 260 && p.Name.Length <= 160)); });
+        Assert.Equal(8, clamped.Instances.Count);
+        Assert.Contains(clamped.Instances, i => i.Selected); // the selected one survives the cap
+        Assert.All(clamped.Instances, i => Assert.True(i.Id.Length is > 0 and <= 64 && i.Label.Length <= 160));
+        Assert.Equal(4_096, clamped.ExtensionFolder.Length);
     }
 
     [Fact]

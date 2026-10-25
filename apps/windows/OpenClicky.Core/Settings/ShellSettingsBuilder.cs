@@ -1,3 +1,4 @@
+using OpenClicky.Core.Browser;
 using OpenClicky.Core.Shell;
 
 namespace OpenClicky.Core.Settings;
@@ -27,6 +28,8 @@ public sealed record SettingsRuntime
     public WhisperState Multilingual { get; init; } = WhisperState.Missing;
     public double MultilingualProgress { get; init; }
     public ChromeState Chrome { get; init; } = ChromeState.NotInstalled;
+    /// <summary>Detected browsers, profiles and connected instances for the browser card.</summary>
+    public BrowserCardView Browser { get; init; } = BrowserCardView.Empty;
     public IReadOnlyList<ConnectorView> Connectors { get; init; } = [];
     public IReadOnlyList<RoutineView> Routines { get; init; } = [];
     /// <summary>Windows privacy consent states (documents, pictures, contacts, calendar, microphone, camera, location).</summary>
@@ -38,7 +41,8 @@ public sealed record SettingsRuntime
 /// <summary>Maps AppSettings plus <see cref="SettingsRuntime"/> to the contract's <see cref="SettingsView"/>, and clamps any view to the contract caps.</summary>
 public static class ShellSettingsBuilder
 {
-    public const int MaxModels = 64, MaxVoices = 64, MaxDevices = 32, MaxLanguages = 128, MaxConnectors = 64, MaxReach = 16, MaxRoutines = 100, MaxHotkeyKeys = 6;
+    public const int MaxModels = 64, MaxVoices = 64, MaxDevices = 32, MaxLanguages = 128, MaxConnectors = 64, MaxReach = 16, MaxRoutines = 100, MaxHotkeyKeys = 6,
+        MaxBrowsers = 16, MaxBrowserProfiles = 32, MaxBrowserInstances = 8;
     private const string UnavailableMicrophone = "Unavailable microphone";
     private const string UnavailableOutput = "Unavailable speaker";
 
@@ -66,7 +70,7 @@ public static class ShellSettingsBuilder
                 HotkeyBinding.OrDefault(s.DictateHotkey, HotkeyBinding.DefaultDictate).ToView(),
                 HotkeyBinding.OrDefault(s.HandsFreeHotkey, HotkeyBinding.DefaultHandsFree).ToView()),
             new SettingsCursor(SettingsCatalog.SnapAccent(s.AccentColor), s.CursorHidden, s.ScreenHighlight, s.ShakeToDetach),
-            new SettingsIntegrations(runtime.Chrome, runtime.Connectors),
+            new SettingsIntegrations(runtime.Chrome, runtime.Connectors) { Browser = runtime.Browser },
             new SettingsAgents(
                 string.IsNullOrWhiteSpace(s.AgentFolder) ? runtime.DefaultAgentFolder : s.AgentFolder,
                 string.IsNullOrWhiteSpace(s.AgentFolder), s.SpeakJobAnnouncements, s.CursorJobUpdates, runtime.Reach),
@@ -149,7 +153,8 @@ public static class ShellSettingsBuilder
             new SettingsCursor(ShellStateBuilder.IsHex(cursor.Colour) ? cursor.Colour!.ToUpperInvariant() : ShellStateBuilder.DefaultAccent,
                 cursor.Hidden, cursor.ScreenHighlight, cursor.ShakeToDetach),
             new SettingsIntegrations(integrations.Chrome, WithId(integrations.Connectors, c => c.Key, MaxConnectors)
-                .Select(c => new ConnectorView(Cut(c.Key, 160), Cut(c.Name, 80), Cut(c.Host, 255), c.Status, c.ToolCount is < 0 ? null : c.ToolCount)).ToList()),
+                .Select(c => new ConnectorView(Cut(c.Key, 160), Cut(c.Name, 80), Cut(c.Host, 255), c.Status, c.ToolCount is < 0 ? null : c.ToolCount)).ToList())
+            { Browser = ClampBrowser(integrations.Browser) },
             new SettingsAgents(Cut(agents.Folder, 4_096), agents.FolderIsDefault, agents.SpeakAnnouncements, agents.CursorUpdates,
                 WithId(agents.Reach, r => r.Id, MaxReach)
                     .Select(r => new ReachItem(Cut(r.Id, 160), Cut(r.Label, 160), r.State)).ToList()),
@@ -167,6 +172,20 @@ public static class ShellSettingsBuilder
             var keys = (hotkey?.Keys ?? []).Take(MaxHotkeyKeys).Select(k => Cut(k ?? "", 24)).Where(k => k.Length > 0).ToList();
             return keys.Count == 0 ? fallback.ToView() : new Hotkey(keys, hotkey!.Trigger);
         }
+    }
+
+    /// <summary>Browser card caps: 16 browsers, 32 profiles each, 8 instances (the selected one never dropped); ids must be non-empty.</summary>
+    private static BrowserCardView ClampBrowser(BrowserCardView? card)
+    {
+        if (card is null || ReferenceEquals(card, BrowserCardView.Empty)) return BrowserCardView.Empty;
+        var instances = (card.Instances ?? []).Where(i => !string.IsNullOrEmpty(i.Id)).ToList();
+        if (instances.Count > MaxBrowserInstances) instances = [.. instances.OrderByDescending(i => i.Selected).Take(MaxBrowserInstances)];
+        return new BrowserCardView(
+            CutOrNull(card.BrowserId, 32), CutOrNull(card.ProfileDir, 260),
+            WithId(card.Browsers, b => b.Id, MaxBrowsers).Select(b => new BrowserOptionView(Cut(b.Id, 32), Cut(b.Name, 80),
+                WithId(b.Profiles, p => p.Dir, MaxBrowserProfiles).Select(p => new BrowserProfileView(Cut(p.Dir, 260), Cut(p.Name, 160))).ToList())).ToList(),
+            instances.Select(i => new BrowserInstanceView(Cut(i.Id, 64), Cut(i.Label, 160), i.Selected)).ToList(),
+            Cut(card.ExtensionFolder, 4_096));
     }
 
     /// <summary>The entry whose id is <paramref name="selected"/> first (if present), then the rest in order, so a cap never drops the selection.</summary>

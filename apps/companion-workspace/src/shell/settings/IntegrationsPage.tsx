@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ShellState } from "../contract";
 import { Badge, Group, PillButton, Row, SearchField, Segmented } from "../ui";
+import { BrowserCard } from "./BrowserCard";
 import { act, ConfirmRow, Page } from "./common";
 
 type Connector = ShellState["settings"]["integrations"]["connectors"][number];
@@ -29,23 +30,6 @@ function validUrl(raw: string) {
     if (!u.hostname || u.username || u.password) return false;
     return u.protocol === "https:" || (u.protocol === "http:" && LOCAL_HOSTS.has(u.hostname));
   } catch { return false; }
-}
-
-function BrowserCard({ chrome }: { chrome: ShellState["settings"]["integrations"]["chrome"] }) {
-  return (
-    <Group title="Browser">
-      <Row title="Chrome" description="Works with Chrome.">
-        {chrome === "notInstalled" ? <PillButton variant="primary" onClick={() => act("chrome.setup")}>Set up Chrome</PillButton> : null}
-        {chrome === "waiting" ? <Badge tone="warn">Waiting for the extension…</Badge> : null}
-        {chrome === "connected" ? <Badge>Connected</Badge> : null}
-      </Row>
-      {chrome === "connected" ? (
-        <Row title="Disconnect Chrome" tone="danger">
-          <PillButton size="sm" variant="danger" aria-label="Disconnect Chrome" onClick={() => act("chrome.setup", "disconnect")}>Disconnect</PillButton>
-        </Row>
-      ) : null}
-    </Group>
-  );
 }
 
 function ConnectorRow({ c, removing, onRemoving }: { c: Connector; removing: boolean; onRemoving: (on: boolean) => void }) {
@@ -133,7 +117,7 @@ function AddConnector({ connectors, toasts, onClose }: { connectors: Connector[]
 }
 
 export function IntegrationsPage({ state }: { state: ShellState }) {
-  const { chrome, connectors } = state.settings.integrations;
+  const { chrome, browser, connectors } = state.settings.integrations;
   const [query, setQuery] = useState("");
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<string | null>(null);
@@ -143,7 +127,7 @@ export function IntegrationsPage({ state }: { state: ShellState }) {
   const shown = q ? connectors.filter((c) => c.name.toLowerCase().includes(q) || c.host.toLowerCase().includes(q)) : connectors;
   return (
     <Page title="Integrations" subtitle="Apps and services your agents can use.">
-      <BrowserCard chrome={chrome} />
+      <BrowserCard chrome={chrome} browser={browser} />
       <div className="settings-toolbar">
         <div className="settings-toolbar__search"><SearchField label="Search connectors" value={query} onChange={setQuery} /></div>
         {adding ? null : <PillButton onClick={() => setAdding(true)}>Add custom connector</PillButton>}

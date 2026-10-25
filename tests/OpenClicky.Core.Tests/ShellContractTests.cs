@@ -207,6 +207,10 @@ public class ShellContractTests
         Assert.Equal(WhisperState.Missing, s.Dictation.Multilingual);
         Assert.Equal(HotkeyTrigger.DoubleTap, s.Shortcuts.HandsFree.Trigger);
         Assert.Equal(ChromeState.Waiting, s.Integrations.Chrome);
+        Assert.Null(s.Integrations.Browser.BrowserId);
+        Assert.Equal(["Default", "Profile 2"], s.Integrations.Browser.Browsers.Single().Profiles.Select(p => p.Dir));
+        Assert.Empty(s.Integrations.Browser.Instances);
+        Assert.EndsWith("browser-extension", s.Integrations.Browser.ExtensionFolder);
         Assert.Equal([ConnectorStatus.Connected, ConnectorStatus.NeedsSignIn], s.Integrations.Connectors.Select(c => c.Status));
         Assert.Null(s.Integrations.Connectors[1].ToolCount);
         Assert.Equal([ReachState.Allowed, ReachState.Unknown], s.Agents.Reach.Select(r => r.State));

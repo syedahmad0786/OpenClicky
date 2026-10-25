@@ -144,7 +144,13 @@
       "connectors": [
         { "key": "notion", "name": "Notion", "host": "mcp.notion.com", "status": "connected", "toolCount": 12 },
         { "key": "slack", "name": "Slack", "host": "mcp.slack.com", "status": "needsSignIn", "toolCount": null }
-      ]
+      ],
+      "browser": {
+        "browserId": null, "profileDir": null,
+        "browsers": [{ "id": "chrome", "name": "Chrome", "profiles": [{ "dir": "Default", "name": "Ahmad" }, { "dir": "Profile 2", "name": "Work" }] }],
+        "instances": [],
+        "extensionFolder": "C:\\Users\\demo\\AppData\\Local\\OpenClicky\\browser-extension"
+      }
     },
     "agents": {
       "folder": "C:\\Users\\demo\\OpenClicky\\Agents", "folderIsDefault": true, "speakAnnouncements": true, "cursorUpdates": true,
