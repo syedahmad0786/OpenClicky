@@ -46,7 +46,7 @@ export function ProactivePage({ state }: { state: ShellState }) {
           </select>
         </Row>
       </Group>
-      <p className="settings-page__subtitle">Proactive cards wait while you're on a call, presenting or in a full-screen app.</p>
+      <p className="settings-note">Proactive cards wait while you're on a call, presenting or in a full-screen app.</p>
     </Page>
   );
 }

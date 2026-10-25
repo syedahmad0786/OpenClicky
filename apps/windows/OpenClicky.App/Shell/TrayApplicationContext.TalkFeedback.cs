@@ -183,7 +183,7 @@ internal sealed partial class TrayApplicationContext
         }
     }
 
-    /// <summary>Closing the consent card is a "not now"; closing the hands-free card is a Stop; closing any other card changes nothing.</summary>
+    /// <summary>Closing the consent card is a "not now"; closing the hands-free card is a Stop; closing a proactive card drops it (a meeting is not shown again, a suggestion is removed); closing any other card changes nothing.</summary>
     void IShellHost.CardDismissed(string cardId)
     {
         ProactiveCardDismissed(cardId);

@@ -6,8 +6,11 @@ using OpenClicky.Core.Proactive;
 namespace OpenClicky.App.Proactive;
 
 /// <summary>
-/// Quiet while Windows says a full-screen app, a presentation or quiet hours is on, or while another app is recording the
-/// microphone (a call). Reasons are fixed strings, never an app name, path or title. Read fresh each call; nothing is cached.
+/// Quiet while the shell notification state reports a full-screen app (QUNS_BUSY 2, QUNS_RUNNING_D3D_FULL_SCREEN 3, QUNS_APP 7),
+/// a presentation (QUNS_PRESENTATION_MODE 4) or the shell's quiet time after a new user's first sign-in (QUNS_QUIET_TIME 6),
+/// or while another app is recording the microphone (a call).
+/// Windows Focus / Do Not Disturb is not one of these states, so it is not detected here. Reasons are fixed strings, never an
+/// app name, path or title. Read fresh each call; nothing is cached.
 /// </summary>
 // ponytail: stand-in heuristic; sub-project E's QuietState replaces this at merge.
 internal sealed class WindowsQuietSignal(Action<string> log) : IQuietSignal
@@ -25,7 +28,7 @@ internal sealed class WindowsQuietSignal(Action<string> log) : IQuietSignal
             return state switch
             {
                 // The notch surface covers its monitor while it takes input: our own window is never "full screen" (as in ForegroundFullscreen).
-                2 or 3 => ForegroundWindowInfo.IsCurrentProcessForeground() ? null : "Full screen",
+                2 or 3 or 7 => ForegroundWindowInfo.IsCurrentProcessForeground() ? null : "Full screen",
                 4 => "Presenting",
                 6 => "Quiet hours",
                 _ => null,
