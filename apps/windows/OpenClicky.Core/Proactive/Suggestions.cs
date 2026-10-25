@@ -88,7 +88,8 @@ public static class SuggestionPrompt
             }
             return result;
         }
-        catch (JsonException) { return []; }
+        // GetString throws InvalidOperationException on an escaped lone surrogate; Parse throws ArgumentException on a raw one.
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or ArgumentException) { return []; }
     }
 
     private static string Field(JsonElement e, string name, int max) =>
@@ -115,9 +116,10 @@ public static class SuggestionSchedule
         s.Pending = [.. fresh];
     }
 
-    /// <summary>Retry after 5, 15, 60, then every 180 minutes.</summary>
+    /// <summary>Retry after 5, 15, 60, then every 180 minutes; a new day starts again at 5.</summary>
     public static void Failed(SuggestionState s, DateTimeOffset localNow)
     {
+        if (s.NextAttempt is { } last && MorningBrief.DayKey(last) != MorningBrief.DayKey(localNow)) s.Failures = 0;
         s.Failures++;
         s.NextAttempt = localNow.AddMinutes(BackoffMinutes[Math.Clamp(s.Failures - 1, 0, BackoffMinutes.Length - 1)]);
     }

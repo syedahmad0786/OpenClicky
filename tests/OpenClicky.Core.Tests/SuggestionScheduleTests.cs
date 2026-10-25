@@ -47,6 +47,16 @@ public class SuggestionScheduleTests
     }
 
     [Fact]
+    public void BackoffRestartsNextDay()
+    {
+        var s = new SuggestionState();
+        for (var i = 0; i < 4; i++) SuggestionSchedule.Failed(s, At(19));
+        Assert.Equal((4, At(19).AddMinutes(180)), (s.Failures, s.NextAttempt!.Value));
+        SuggestionSchedule.Failed(s, At(9, 0, 26));
+        Assert.Equal((1, At(9, 5, 26)), (s.Failures, s.NextAttempt!.Value));
+    }
+
+    [Fact]
     public void DeclineKeepsNewestTwenty()
     {
         var s = new SuggestionState();
