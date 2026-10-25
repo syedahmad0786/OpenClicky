@@ -886,10 +886,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             }
             if (!_sandboxDemo && _settings.AuthProvider == AuthProvider.ChatGPT)
             {
-                var browser = _chromePipe is { IsConnected: true } pipe && _chromeConfig is { } configuration
-                    ? new ChromeBridgeSession(new TaskChromeHost(new ChromeBridgeHost(pipe), _taskControl),
-                        new ChromeApprovalBroker(_confirm, _taskControl), access, configuration.AllowedOrigins,
-                        AgentDenyList.ParseExtraFragments(_settings.AgentDenyListExtra)) : null;
+                ChromeBridgeSession? browser = null; // G9 wires the browser bridge
                 var connectors = OpenConnectors();
                 OpenCodeTaskResult result;
                 try

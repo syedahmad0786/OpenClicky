@@ -96,6 +96,11 @@ public static class AgentDenyList
         return null;
     }
 
+    /// <summary>The defaults then the user's extra fragments, trimmed and lower-case (for the browser extension's check).</summary>
+    public static IReadOnlyList<string> Fragments(IEnumerable<string>? extra) =>
+        DefaultTitleFragments.Concat(extra ?? []).Where(f => !string.IsNullOrWhiteSpace(f))
+            .Select(f => f.Trim().ToLowerInvariant()).Distinct().ToArray();
+
     public static IReadOnlyList<string> ParseExtraFragments(string? csv) =>
         string.IsNullOrWhiteSpace(csv)
             ? Array.Empty<string>()

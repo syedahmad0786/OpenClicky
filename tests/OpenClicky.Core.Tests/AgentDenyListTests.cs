@@ -38,4 +38,14 @@ public class AgentDenyListTests
         Assert.Contains("payroll", parts);
         Assert.Contains("hr portal", parts);
     }
+
+    [Fact]
+    public void FragmentsAreDefaultsThenTrimmedLowerExtras()
+    {
+        var all = AgentDenyList.Fragments(["  Payroll ", "", "PayPal"]);
+        Assert.Equal("1password", all[0]);
+        Assert.Equal("payroll", all[^1]);
+        Assert.Single(all, f => f == "paypal");
+        Assert.All(all, f => Assert.Equal(f.Trim().ToLowerInvariant(), f));
+    }
 }

@@ -7,55 +7,233 @@ namespace OpenClicky.Core.Tests;
 
 public sealed class ChromeBridgeSessionTests
 {
+    private static readonly BrowserTaskIdentity Identity = new("task-1", "job-7", "Research trip", "green");
+
     [Fact]
-    public async Task ExcludedOriginIsRejectedBeforeObservationRead()
+    public async Task PreviewRefusesOpen()
     {
-        var host = new FakeHost { Context = Context(origin: "https://blocked.example/") };
-        var session = Session(host, approved: true);
+        var (session, bridge, broker) = Create(AgentAccessMode.Preview);
 
-        var result = await session.CallAsync("browser_observe", Args(), default);
+        var snapshot = await session.CallAsync("browser", Args(new { op = "snapshot" }), default);
+        var open = await session.CallAsync("browser", Args(new { op = "open", url = "https://example.com/", rationale = "Look it up" }), default);
+        var save = await session.CallAsync("browser", Args(new { op = "screenshot", save = true }), default);
 
-        Assert.True(result.IsError);
-        Assert.Equal(0, host.ObserveCalls);
+        Assert.False(snapshot.IsError);
+        Assert.True(open.IsError);
+        Assert.Equal("Preview mode: the browser is read-only for this job.", open.Content[0].Text);
+        Assert.True(save.IsError);
+        Assert.Equal(["snapshot"], bridge.Commands.Select(c => c.Op));
+        Assert.Equal(0, broker.Calls);
     }
 
     [Fact]
-    public async Task ApprovedLinkRequiresCurrentObservedNavigationAndKnownLink()
+    public async Task ConfirmEachAsksForClickNotForSnapshot()
     {
-        var host = new FakeHost();
-        var broker = new FakeBroker(true);
-        var session = new ChromeBridgeSession(host, broker, AgentAccessMode.ConfirmEach, ["https://allowed.example/"]);
-        var observed = await session.CallAsync("browser_observe", Args(), default);
+        var (session, bridge, broker) = Create(AgentAccessMode.ConfirmEach);
 
-        Assert.False(observed.IsError);
-        var result = await session.CallAsync("browser_follow_link", Args(new
+        await session.CallAsync("browser", Args(new { op = "snapshot" }), default);
+        await session.CallAsync("browser", Args(new { op = "close", tabId = 3 }), default);
+        Assert.Equal(0, broker.Calls);
+        var click = await session.CallAsync("browser", Args(new { op = "click", tabId = 3, @ref = "e4", rationale = "Open the menu" }), default);
+
+        Assert.False(click.IsError);
+        Assert.Equal(1, broker.Calls);
+        Assert.Equal("browser.click", broker.Last!.ToolName);
+        Assert.Equal("Open the menu", broker.Last.Rationale);
+        Assert.Equal("e4", broker.Last.Arguments["ref"]);
+        Assert.Equal("3", broker.Last.Arguments["tabId"]);
+        Assert.Equal(["snapshot", "close", "click"], bridge.Commands.Select(c => c.Op));
+    }
+
+    [Fact]
+    public async Task ConfirmEachAsksOncePerBatch()
+    {
+        var (session, bridge, broker) = Create(AgentAccessMode.ConfirmEach);
+
+        var result = await session.CallAsync("browser", Args(new
         {
-            observation_id = "observation-1", navigation_revision = "7", link_id = "e1", rationale = "Open the observed help link"
+            op = "batch", rationale = "Search for cats",
+            steps = new object[] { new { op = "fill", @ref = "e3", text = "cats" }, new { op = "press", key = "Enter" } },
         }), default);
 
         Assert.False(result.IsError);
         Assert.Equal(1, broker.Calls);
-        Assert.Equal("browser_follow_link", host.LastAction?.Name);
-        Assert.Equal("https://allowed.example/help", host.Observation.Links["e1"]);
+        Assert.Equal("browser.batch", broker.Last!.ToolName);
+        Assert.Contains(broker.Last.Arguments.Values, v => v.Contains("fill") && v.Contains("cats"));
+        Assert.Contains(broker.Last.Arguments.Values, v => v.Contains("press") && v.Contains("Enter"));
+        Assert.Equal(TimeSpan.FromSeconds(45), bridge.Timeouts.Single());
     }
 
     [Fact]
-    public async Task NavigationChangePreventsApprovedAction()
+    public async Task AutoAlwaysAsksForJavascriptAndUpload()
     {
-        var host = new FakeHost();
-        var session = Session(host, approved: true);
-        await session.CallAsync("browser_observe", Args(), default);
-        host.Context = host.Context with { NavigationRevision = 8 };
-
-        var result = await session.CallAsync("browser_click", Args(new
+        var file = Path.Combine(Path.GetTempPath(), "openclicky-session-" + Guid.NewGuid().ToString("N") + ".txt");
+        File.WriteAllText(file, "hello");
+        try
         {
-            observation_id = "observation-1", navigation_revision = "7", element_id = "e2"
+            var (session, _, broker) = Create(AgentAccessMode.Auto);
+
+            await session.CallAsync("browser", Args(new { op = "scroll", direction = "down" }), default);
+            await session.CallAsync("browser", Args(new { op = "back", rationale = "Return to the list" }), default);
+            Assert.Equal(0, broker.Calls);
+            await session.CallAsync("browser", Args(new { op = "javascript", code = "document.title", rationale = "Read the title" }), default);
+            await session.CallAsync("browser", Args(new { op = "upload", @ref = "e2", paths = new[] { file }, rationale = "Attach the notes" }), default);
+            await session.CallAsync("browser", Args(new
+            {
+                op = "batch", rationale = "Attach the notes",
+                steps = new object[] { new { op = "upload", @ref = "e2", paths = new[] { file } } },
+            }), default);
+
+            Assert.Equal(["browser.javascript", "browser.upload", "browser.batch"], broker.Requests.Select(r => r.ToolName));
+        }
+        finally { File.Delete(file); }
+    }
+
+    [Fact]
+    public async Task UploadPolicyRunsBeforeAsking()
+    {
+        var (session, bridge, broker) = Create(AgentAccessMode.FullAccess);
+
+        var result = await session.CallAsync("browser", Args(new
+        {
+            op = "batch", rationale = "Attach",
+            steps = new object[] { new { op = "upload", @ref = "e2", paths = new[] { "relative.txt" } } },
         }), default);
 
         Assert.True(result.IsError);
-        Assert.Null(host.LastAction);
+        Assert.Empty(bridge.Commands);
+        Assert.Equal(0, broker.Calls);
     }
 
+    [Fact]
+    public async Task FullAsksNothing()
+    {
+        var (session, bridge, broker) = Create(AgentAccessMode.FullAccess);
+
+        await session.CallAsync("browser", Args(new { op = "click", @ref = "e4", rationale = "Submit the form" }), default);
+        await session.CallAsync("browser", Args(new { op = "javascript", code = "1", rationale = "Check" }), default);
+
+        Assert.Equal(0, broker.Calls);
+        Assert.Equal(2, bridge.Commands.Count);
+    }
+
+    [Fact]
+    public async Task DeclineEndsBrowserWork()
+    {
+        var (session, bridge, broker) = Create(AgentAccessMode.ConfirmEach, approve: false);
+
+        var declined = await session.CallAsync("browser", Args(new { op = "click", @ref = "e4", rationale = "Open" }), default);
+        var after = await session.CallAsync("browser", Args(new { op = "snapshot" }), default);
+
+        Assert.True(declined.IsError);
+        Assert.Equal("You declined that browser action.", declined.Content[0].Text);
+        Assert.True(session.WasDeclined);
+        Assert.True(after.IsError);
+        Assert.Equal("This job's browser work ended when you declined an action.", after.Content[0].Text);
+        Assert.Empty(bridge.Commands);
+    }
+
+    [Fact]
+    public async Task IdentityDenyAndSayReachTheCommand()
+    {
+        var (session, bridge, _) = Create(AgentAccessMode.FullAccess);
+
+        await session.CallAsync("browser", Args(new { op = "open", url = "https://example.com/", say = "Opening the docs", rationale = "Read the docs" }), default);
+        await session.CallAsync("browser", Args(new { op = "wait_for", text = "Done", timeout = 5 }), default);
+
+        var command = bridge.Commands[0];
+        Assert.Equal(("open", "task-1", "job-7", "Research trip", "green"), (command.Op, command.Task, command.Owner, command.GroupTitle, command.Color));
+        Assert.Equal(["paypal", "my-bank"], command.Deny);
+        Assert.Equal("Opening the docs", command.Say);
+        Assert.Equal("https://example.com/", command.Args.GetProperty("url").GetString());
+        Assert.False(command.Args.TryGetProperty("op", out _));
+        Assert.False(command.Args.TryGetProperty("rationale", out _));
+        Assert.False(command.Args.TryGetProperty("say", out _));
+        Assert.Equal([TimeSpan.FromSeconds(25), TimeSpan.FromSeconds(20)], bridge.Timeouts);
+    }
+
+    [Fact]
+    public async Task ScreenshotImageAndSave()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "openclicky-shots-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var bytes = new byte[] { 0xFF, 0xD8, 0xFF, 0xD9 };
+            var (session, _, _) = Create(AgentAccessMode.ConfirmEach, outputFolder: folder,
+                reply: _ => new BrowserReply(true, "Screenshot of the visible page.", Convert.ToBase64String(bytes), "image/jpeg"));
+
+            var plain = await session.CallAsync("browser", Args(new { op = "screenshot" }), default);
+            var saved = await session.CallAsync("browser", Args(new { op = "screenshot", save = true }), default);
+
+            Assert.False(plain.IsError);
+            Assert.Equal(new DesktopToolContent("image", null, Convert.ToBase64String(bytes), "image/jpeg"), plain.Content[1]);
+            var file = Assert.Single(Directory.GetFiles(folder));
+            Assert.Matches(@"^screenshot-\d{8}-\d{6}\.jpg$", Path.GetFileName(file));
+            Assert.Equal(bytes, File.ReadAllBytes(file));
+            Assert.Contains($"Saved to the job's output folder as {Path.GetFileName(file)}.", saved.Content[0].Text);
+
+            var (noFolder, _, _) = Create(AgentAccessMode.ConfirmEach,
+                reply: _ => new BrowserReply(true, "Screenshot.", Convert.ToBase64String(bytes), "image/jpeg"));
+            var unsaved = await noFolder.CallAsync("browser", Args(new { op = "screenshot", save = true }), default);
+            Assert.Contains("This job has no output folder, so the screenshot was not saved.", unsaved.Content[0].Text);
+        }
+        finally { if (Directory.Exists(folder)) Directory.Delete(folder, true); }
+    }
+
+    [Fact]
+    public async Task FailedActionMarksFailure()
+    {
+        var (session, _, _) = Create(AgentAccessMode.FullAccess, reply: c => new BrowserReply(false, "That element is gone. Take a new snapshot."));
+
+        var read = await session.CallAsync("browser", Args(new { op = "snapshot" }), default);
+        Assert.True(read.IsError);
+        Assert.False(session.HasFailedApprovedAction);
+        var click = await session.CallAsync("browser", Args(new { op = "click", @ref = "e4", rationale = "Open" }), default);
+
+        Assert.True(click.IsError);
+        Assert.Equal("That element is gone. Take a new snapshot.", click.Content[0].Text);
+        Assert.True(session.HasFailedApprovedAction);
+    }
+
+    [Fact]
+    public async Task ModelCannotSendLifecycleOps()
+    {
+        var (session, bridge, _) = Create(AgentAccessMode.FullAccess);
+
+        var end = await session.CallAsync("browser", Args(new { op = "end", tidy = true }), default);
+        var sweep = await session.CallAsync("browser", Args(new { op = "sweep" }), default);
+        var unknown = await session.CallAsync("browser_click", Args(new { op = "click" }), default);
+
+        Assert.True(end.IsError);
+        Assert.True(sweep.IsError);
+        Assert.True(unknown.IsError);
+        Assert.Empty(bridge.Commands);
+    }
+
+    [Fact]
+    public async Task EndSendsTidyOnce()
+    {
+        var (session, bridge, _) = Create(AgentAccessMode.ConfirmEach);
+        Assert.Equal(1, bridge.Tracked);
+
+        await session.EndAsync(tidy: true, default);
+        await session.EndAsync(tidy: true, default);
+
+        var end = Assert.Single(bridge.Commands);
+        Assert.Equal(("end", "task-1"), (end.Op, end.Task));
+        Assert.True(end.Args.GetProperty("tidy").GetBoolean());
+        Assert.Equal(0, bridge.Tracked);
+    }
+
+    [Fact]
+    public void ToolNamesMapFromMcp()
+    {
+        Assert.True(ChromeBridgeSession.TryMapToolName("openclicky_browser", out var mapped));
+        Assert.Equal("browser", mapped);
+        Assert.False(ChromeBridgeSession.TryMapToolName("openclicky_browser_click", out _));
+    }
+
+    // Legacy content-script transport; G9 removes these with ChromeBridgeHost.
     [Fact]
     public async Task NativeProtocolRejectsOversizedMessageBeforeAllocation()
     {
@@ -130,25 +308,33 @@ public sealed class ChromeBridgeSessionTests
         finally { File.Delete(path); }
     }
 
-    private static ChromeBridgeSession Session(FakeHost host, bool approved) =>
-        new(host, new FakeBroker(approved), AgentAccessMode.ConfirmEach, ["https://allowed.example/"]);
-    private static BrowserContext Context(string origin = "https://allowed.example/") => new("tab-4", "top", 7, origin, "Allowed page");
-    private static JsonElement Args(object? value = null) => JsonSerializer.SerializeToElement(value ?? new { });
+    private static (ChromeBridgeSession, FakeBridge, FakeBroker) Create(AgentAccessMode access, bool approve = true,
+        string? outputFolder = null, Func<BrowserCommand, BrowserReply>? reply = null)
+    {
+        var bridge = new FakeBridge(reply ?? (c => new BrowserReply(true, "done")));
+        var broker = new FakeBroker(approve);
+        return (new ChromeBridgeSession(bridge, broker, access, Identity, ["paypal", "my-bank"], outputFolder), bridge, broker);
+    }
+
+    private static JsonElement Args(object value) => JsonSerializer.SerializeToElement(value);
+
+    private sealed class FakeBridge(Func<BrowserCommand, BrowserReply> reply) : IBrowserBridge
+    {
+        public List<BrowserCommand> Commands { get; } = [];
+        public List<TimeSpan> Timeouts { get; } = [];
+        public int Tracked;
+        public bool IsConnected => true;
+        public Task<BrowserReply> SendAsync(BrowserCommand command, TimeSpan timeout, CancellationToken token)
+        { Commands.Add(command); Timeouts.Add(timeout); return Task.FromResult(reply(command)); }
+        public IDisposable TrackTask(string task) { Tracked++; return new Untrack(this); }
+        private sealed class Untrack(FakeBridge owner) : IDisposable { public void Dispose() => owner.Tracked--; }
+    }
 
     private sealed class FakeBroker(bool approved) : IChromeActionBroker
     {
-        public int Calls { get; private set; }
-        public Task<bool> ApproveAsync(ActionRequest request, CancellationToken token) { Calls++; return Task.FromResult(approved); }
-    }
-
-    private sealed class FakeHost : IChromeBridgeHost
-    {
-        public BrowserContext Context { get; set; } = ChromeBridgeSessionTests.Context();
-        public BrowserObservation Observation => new("observation-1", Context, "synthetic fixture", new Dictionary<string, string> { ["e1"] = "https://allowed.example/help" });
-        public int ObserveCalls { get; private set; }
-        public BrowserAction? LastAction { get; private set; }
-        public Task<BrowserContext> GetCurrentContextAsync(CancellationToken token) => Task.FromResult(Context);
-        public Task<BrowserObservation> ObserveAsync(CancellationToken token) { ObserveCalls++; return Task.FromResult(Observation); }
-        public Task<BrowserActionResult> ExecuteAsync(BrowserAction action, CancellationToken token) { LastAction = action; return Task.FromResult(new BrowserActionResult(true, "done")); }
+        public List<ActionRequest> Requests { get; } = [];
+        public int Calls => Requests.Count;
+        public ActionRequest? Last => Requests.LastOrDefault();
+        public Task<bool> ApproveAsync(ActionRequest request, CancellationToken token) { Requests.Add(request); return Task.FromResult(approved); }
     }
 }
