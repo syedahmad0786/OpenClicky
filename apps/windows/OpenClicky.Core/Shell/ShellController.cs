@@ -106,6 +106,16 @@ public sealed class ShellController : IDisposable
         RequestPush();
     }
 
+    /// <summary>Shows a job's card on Home with the notch open (the page's job.open, and a job-update card's Open).</summary>
+    public void OpenJob(string id)
+    {
+        _featuredJobId = id;
+        _dismissed.Remove(id);
+        _host.OpenJob(id);
+        SetNotch(_notch with { Tab = NotchTab.Home, Open = true });
+        RequestPush();
+    }
+
     /// <summary>The microphone test level (0–1) for the settings page; dropped when the surface is not up.</summary>
     public void PostMicLevel(double level)
     {
@@ -328,13 +338,7 @@ public sealed class ShellController : IDisposable
                 _host.SetGeneral(intent.GetString("key")!, intent.GetBool("value") == true);
                 RequestPush();
                 break;
-            case "job.open":
-                _featuredJobId = id;
-                _dismissed.Remove(id!);
-                _host.OpenJob(id!);
-                SetNotch(_notch with { Tab = NotchTab.Home, Open = true });
-                RequestPush();
-                break;
+            case "job.open": OpenJob(id!); break;
             case "job.stop": _host.StopJob(id!); break;
             case "job.steer": _host.SteerJob(id!, intent.GetString("text")!.Trim()); break;
             case "job.followUp": _host.FollowUpJob(id!, intent.GetString("text")!.Trim()); break;

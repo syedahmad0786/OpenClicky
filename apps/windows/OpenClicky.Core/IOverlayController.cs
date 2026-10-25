@@ -10,6 +10,9 @@ public interface IOverlayController : IDisposable
     void ShowProcessing();
     void ShowResponding(string spokenText);
     void ShowTranscript(string text) { }
+
+    /// <summary>A short job update beside the companion (about 4 s, then it fades). Skipped while a talk turn shows its own bubble.</summary>
+    void ShowUpdate(string text) { }
     void ShowAnnotations(IReadOnlyList<VirtualAnnotation> marks) { }
 
     /// <param name="spokenText">

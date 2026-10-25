@@ -218,7 +218,30 @@ internal sealed partial class TrayApplicationContext
         if (routineId is not null) KeepAwake(true);
         _home.RefreshWork();
         RequestShellPush();
+        AnnounceJob(JobEvent.Started, run.Job.Title, run.Job.Id);
         return true;
+    }
+
+    /// <summary>UI thread: says a job event as its settings and the user's focus allow (see <see cref="JobAnnouncer"/>). The card always shows.
+    /// The title is untrusted and the announcement is never logged. A job that needs the user (E8) calls this with <see cref="JobEvent.NeedsYou"/>.</summary>
+    private void AnnounceJob(JobEvent e, string title, string jobId)
+    {
+        try
+        {
+            var talkBusy = _talk.State != CompanionVoiceState.Idle || _tts.IsSpeaking;
+            var said = JobAnnouncer.For(e, title, jobId, _settings.SpeakJobAnnouncements, _settings.CursorJobUpdates, QuietDetector.Current(), talkBusy);
+            if (said.Card is { } card) _shell?.AddCard(card);
+            else _shell?.RemoveCard(JobAnnouncer.CardId(jobId)); // a new run or a stop: the last run's card is out of date
+            if (said.Bubble is { } bubble) _overlay.ShowUpdate(bubble);
+            if (said.Speak is { } line) _ = SpeakAnnouncementAsync(line);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Log("job_announce_error=" + ex.GetType().Name); }
+    }
+
+    private async Task SpeakAnnouncementAsync(string line)
+    {
+        try { await _tts.SpeakAsync(line).ConfigureAwait(false); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Log("job_announce_speech_error=" + ex.GetType().Name); }
     }
 
     /// <summary>UI thread, after <see cref="JobAdmission.TryStartOrEnqueue"/> queued the job: it waits its turn, its card saying so.
@@ -311,12 +334,15 @@ internal sealed partial class TrayApplicationContext
         }
         catch (Exception ex) when (ex is not OutOfMemoryException) { Log("job_record_error=" + ex.GetType().Name); }
         IndexWork();
+        var shownTitle = work.FromTalk && result?.Title is { } named ? named : work.Job.Title;
         OnUi(() =>
         {
             if (work.RoutineId is not null) KeepAwake(false);
             _home.RefreshWork();
             _jobOutputs.Remove(work.Job.Id);
             RequestShellPush();
+            AnnounceJob(status == AgentProgressStates.Completed ? JobEvent.Done : status == AgentProgressStates.Failed ? JobEvent.Failed : JobEvent.Stopped,
+                shownTitle, work.Job.Id);
         });
     }
 

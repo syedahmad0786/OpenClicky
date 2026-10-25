@@ -4,6 +4,7 @@ using OpenClicky.Core.CompanionCursor;
 using OpenClicky.Core.Dictation;
 using OpenClicky.Core.Shell;
 using OpenClicky.Core.Speech;
+using OpenClicky.Core.Work;
 using OpenClicky.Input;
 
 namespace OpenClicky.App;
@@ -174,6 +175,10 @@ internal sealed partial class TrayApplicationContext
                 NotchSettings.Patch(DictationCards.TidyNoticeOffKey, System.Text.Json.JsonSerializer.SerializeToElement(false));
                 return false;
             case (DictationCards.TidyNoticeId, DictationCards.OkAction):
+                return false;
+            // A finished, failed or waiting job's card: Open is the page's job.open.
+            case (var id, JobAnnouncer.OpenAction) when id.StartsWith(JobAnnouncer.CardIdPrefix, StringComparison.Ordinal):
+                _shell?.OpenJob(id[JobAnnouncer.CardIdPrefix.Length..]);
                 return false;
             default:
                 Log("shell: card action not handled: " + actionId);

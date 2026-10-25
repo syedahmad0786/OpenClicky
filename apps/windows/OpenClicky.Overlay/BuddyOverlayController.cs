@@ -284,6 +284,14 @@ public sealed class BuddyOverlayController : IOverlayController
         if (_mode == Mode.Listening) SetLine(text, instant: true);
     });
 
+    public void ShowUpdate(string text) => Post(() =>
+    {
+        // Only the resting companion: a talk turn (listening, thinking, replying, pointing) has its own bubble.
+        if (_mode != Mode.Idle || _pointTarget is not null || string.IsNullOrWhiteSpace(text)) return;
+        SetLine(text, false);
+        Show();
+    });
+
     public void ShowAnnotations(IReadOnlyList<VirtualAnnotation> marks) => Post(() =>
     {
         _marks = marks.ToArray();

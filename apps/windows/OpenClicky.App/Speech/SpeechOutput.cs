@@ -89,6 +89,9 @@ internal sealed class SpeechOutput : ITtsClient
         catch (Exception ex) when (ex is not OutOfMemoryException) { _log("speech_test_sound_error=" + ex.GetType().Name); _toast("The test sound could not play on this device."); }
     }
 
+    /// <summary>A reply, preview or test sound is playing or waiting for the one before it.</summary>
+    public bool IsSpeaking => _playing.CurrentCount == 0;
+
     /// <summary>Cuts playback now; a sentence waiting for its gap or being synthesized is dropped.</summary>
     public void Stop()
     {
