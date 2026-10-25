@@ -70,10 +70,13 @@ public sealed class RoutineRequestsTests
         Assert.Equal("Scheduled: Morning news — Every day at 08:30.", RoutineRequests.ScheduledToast(RoutineRequests.Extract(Block(Daily)).Request!));
 
     [Fact]
-    public void LongTaskIsCutAndLinesCollapse()
+    public void LongTaskIsCutWithAnEllipsisAndLinesCollapse()
     {
         var body = RoutineRequests.ConfirmCard("r", new("T\nitle", new string('a', 500) + "\nb", 60, null, 0)).Body!;
-        Assert.Equal("T itle · Every 1 h\n" + new string('a', 200), body);
+        Assert.Equal("T itle · Every 1 h\n" + new string('a', 200) + "…", body);
+        var exact = RoutineRequests.ConfirmCard("r", new("T", new string('a', 200), 60, null, 0)).Body!;
+        Assert.Equal("T · Every 1 h\n" + new string('a', 200), exact); // not cut, no ellipsis
+        Assert.Equal("T · Every 1 h\nshort task", RoutineRequests.ConfirmCard("r", new("T", "short\ntask", 60, null, 0)).Body);
     }
 
     [Fact]
@@ -94,5 +97,8 @@ public sealed class RoutineRequestsTests
 
     [Fact]
     public void TalkInstructionsAreExact() =>
-        Assert.StartsWith("If the user asks you to do something on a schedule", RoutineRequests.TalkInstructions);
+        Assert.Equal("If the user asks you to do something on a schedule (for example \"every weekday at 8:30\" or \"every two hours\"), "
+            + "do not do it now. Reply briefly that you can set it up, and add a fenced block tagged openclicky-routine holding one JSON object with "
+            + "\"title\", \"task\" (what to do each time, written as an instruction) and either \"every_minutes\" or \"at\" (HH:MM, 24-hour) with optional "
+            + "\"days\" (sun, mon, tue, wed, thu, fri, sat). The user confirms before anything is scheduled.", RoutineRequests.TalkInstructions);
 }

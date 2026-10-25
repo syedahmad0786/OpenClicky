@@ -178,6 +178,28 @@ public class CompanionWorkflowTests
     }
 
     [Fact]
+    public async Task WalkthroughStepNeverShowsOrSpeaksARoutineBlock()
+    {
+        var reply = "[GUIDE:wait] Click Save. [POINT:50,25:Save]\n```openclicky-routine\n{\"title\":\"t\",\"task\":\"x\",\"every_minutes\":60}\n```";
+        var shown = new List<string>();
+        var requests = 0;
+        using var talk = new TalkOrchestrator(new Hotkey(), new Overlay(), new Capture(), new Mic(), () => null,
+            () => new Talk((_, _) => Task.FromResult(reply)), new Tts(),
+            () => new AppSettings { PersistConversationHistory = false }, log: _ => { }, windowBounds: () => (0, 0, 200, 100));
+        talk.MessageReceived += (_, text) => shown.Add(text);
+        talk.AssistantResponseChanged += (text, _) => shown.Add(text);
+        talk.RoutineRequested += _ => requests++;
+
+        await talk.StartWalkthroughAsync("save the file");
+
+        Assert.NotEmpty(shown);
+        Assert.All(shown, text => Assert.DoesNotContain("openclicky-routine", text));
+        Assert.All(shown, text => Assert.DoesNotContain("every_minutes", text));
+        Assert.DoesNotContain("every_minutes", talk.Walkthrough.View.Instruction);
+        Assert.Equal(0, requests); // a walkthrough step never asks for a schedule
+    }
+
+    [Fact]
     public async Task WalkthroughStepClearsTheDrawingFirst()
     {
         var replies = new Queue<string>(["Here. [DRAW:dot id=old x=10 y=10] [POINT:none]", "[GUIDE:step] Click save. [DRAW:dot id=new x=20 y=20]"]);

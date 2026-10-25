@@ -1020,6 +1020,7 @@ public sealed class TalkOrchestrator : IDisposable
             var asksForAction = false;
             if (walkthrough is not null)
             {
+                raw = RoutineRequests.Strip(raw); // the step text the view keeps must not hold the block either
                 asksForAction = GuidedWalkthrough.AsksForAction(raw);
                 var accepted = Walkthrough.Accept(walkthrough, raw);
                 WalkthroughChanged?.Invoke(Walkthrough.View);
@@ -1027,8 +1028,8 @@ public sealed class TalkOrchestrator : IDisposable
                 raw = accepted;
             }
             // Figure blocks first, as in StreamingReplySpeech.Clean: their JSON never reaches a tag parser.
-            // A routine request comes out first: it is never spoken, shown or read as a visual (E11).
-            var (withoutRoutine, routine) = walkthrough is null ? RoutineRequests.Extract(raw) : (raw, (RoutineRequest?)null);
+            // A routine request comes out first: it is never spoken, shown or read as a visual (E11). A walkthrough step only strips it.
+            var (withoutRoutine, routine) = walkthrough is null ? RoutineRequests.Extract(raw) : (RoutineRequests.Strip(raw), (RoutineRequest?)null);
             var figured = FigureBlockParser.Parse(withoutRoutine);
             var requested = TalkActionParser.Parse(figured.Text);
             var replyAccess = _settings().AgentAccess;

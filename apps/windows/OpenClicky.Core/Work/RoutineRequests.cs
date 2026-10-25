@@ -50,7 +50,7 @@ public static class RoutineRequests
     /// <summary>The model's text is untrusted and was capped when read; here it is also put on one line and the task is cut to
     /// <see cref="MaxTaskOnCard"/>. No auto-dismiss: the card waits for the user.</summary>
     public static NotchCard ConfirmCard(string requestId, RoutineRequest r) => new(CardId(requestId), NotchCardKind.NeedsYou, "Schedule this?",
-        $"{OneLine(r.Title, WorkStore.MaxTitleLength)} · {Cadence(r)}\n{OneLine(r.Task, MaxTaskOnCard)}",
+        $"{OneLine(r.Title, WorkStore.MaxTitleLength)} · {Cadence(r)}\n{OneLine(r.Task, MaxTaskOnCard, ellipsis: true)}",
         [new(ScheduleAction, "Schedule", CardActionStyle.Primary), new(DismissAction, "Not now", CardActionStyle.Secondary)]);
 
     public static string ScheduledToast(RoutineRequest r) => $"Scheduled: {OneLine(r.Title, WorkStore.MaxTitleLength)} — {Cadence(r)}.";
@@ -61,10 +61,10 @@ public static class RoutineRequests
         : new(Guid.NewGuid().ToString("N"), jobId, r.WeekdayMask == 127 ? RoutineCadence.Daily : RoutineCadence.Weekly,
             r.AtMinuteOfDay ?? 0, r.WeekdayMask, 0, false, now);
 
-    private static string OneLine(string text, int max)
+    private static string OneLine(string text, int max, bool ellipsis = false)
     {
         var line = text.ReplaceLineEndings(" ").Trim();
-        return line.Length > max ? line[..max].TrimEnd() : line;
+        return line.Length > max ? line[..max].TrimEnd() + (ellipsis ? "…" : "") : line;
     }
 
     private static RoutineRequest? Read(string json)
