@@ -35,11 +35,13 @@ public class ProactiveCoordinatorTests
     private sealed class Calendar : ICalendarSource
     {
         public readonly List<(DateTimeOffset From, DateTimeOffset To)> Calls = [];
+        public readonly List<CancellationToken> Tokens = [];
         public readonly List<TaskCompletionSource<IReadOnlyList<UpcomingEvent>>> Pending = [];
         public IReadOnlyList<UpcomingEvent>? Events; // null: the task stays pending until the test completes it
         public Task<IReadOnlyList<UpcomingEvent>> EventsAsync(DateTimeOffset from, DateTimeOffset to, CancellationToken ct)
         {
             Calls.Add((from, to));
+            Tokens.Add(ct);
             if (Events is not null) return Task.FromResult(Events);
             var t = new TaskCompletionSource<IReadOnlyList<UpcomingEvent>>();
             Pending.Add(t);
@@ -163,12 +165,12 @@ public class ProactiveCoordinatorTests
         h.Tick(At(26, 8, 0));
         Assert.Equal(["cal"], h.CalendarKeys);
         Assert.Equal([(At(26, 5, 0), At(27, 0, 0))], h.Calendar.Calls);
-        h.Run(At(26, 8, 0, 2.5), At(26, 8, 1));
+        h.Run(At(26, 8, 0, 2.5), At(26, 8, 0, 57.5));
         Assert.Empty(h.Sink.Calls);
         Assert.Single(h.Calendar.Calls); // one fetch at a time
 
         h.Calendar.Pending[0].SetResult([Event("e1", At(26, 10, 0))]);
-        h.Tick(At(26, 8, 1, 2.5));
+        h.Tick(At(26, 8, 1));
         Assert.Equal("1 meeting today: Standup at 10:00.", h.Sink.Cards[ProactiveCards.BriefId].Body);
 
         // a failed first fetch also lets the brief through, with no meeting line, and logs only the exception type
@@ -193,6 +195,25 @@ public class ProactiveCoordinatorTests
     }
 
     [Fact]
+    public void HungCalendarFetchLetsBriefThroughAfterTimeout()
+    {
+        var h = new Harness(new() { MorningBrief = true, CalendarConnector = "cal" });
+        h.Run(At(26, 8, 0), At(26, 8, 0, 57.5)); // the fetch never completes
+        Assert.Empty(h.Sink.Calls);
+        Assert.Single(h.Calendar.Calls);
+
+        h.Tick(At(26, 8, 1)); // 60 s by the caller's clock: abandoned, the brief stops waiting
+        Assert.Equal("Nothing on your plate yet.", h.Sink.Cards[ProactiveCards.BriefId].Body);
+        Assert.Equal(["proactive_calendar_error=Timeout"], h.Logs);
+        Assert.True(h.Calendar.Tokens[0].IsCancellationRequested);
+
+        h.Run(At(26, 8, 1, 2.5), At(26, 8, 1, 57.5));
+        Assert.Single(h.Calendar.Calls); // retried after 60 s
+        h.Tick(At(26, 8, 2));
+        Assert.Equal(2, h.Calendar.Calls.Count);
+    }
+
+    [Fact]
     public void CountdownShowsUpdatesAndEnds()
     {
         var h = new Harness(new() { MeetingCountdown = true, CalendarConnector = "cal" });
@@ -212,7 +233,7 @@ public class ProactiveCoordinatorTests
             log.Where(l => l.Call.StartsWith("update:", StringComparison.Ordinal)).Select(l => l.Body));
         Assert.Equal((At(26, 10, 2), "remove:" + id), (log[^1].At, log[^1].Call));
         Assert.Equal(8, log.Count);
-        Assert.True(h.Calendar.Calls.Count is >= 2 and <= 3); // refreshed every 5 min, not every tick
+        Assert.Equal(2, h.Calendar.Calls.Count); // 09:55 and 10:00: refreshed every 5 min, not every tick
     }
 
     [Fact]

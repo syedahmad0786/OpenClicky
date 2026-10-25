@@ -30,7 +30,7 @@ public sealed class ProactiveCoordinator(IProactiveCardSink sink, IQuietSignal q
     ISuggestionSource suggestions, ProactiveState state, Action<ProactiveState> save, Action<string> log)
 {
     public static readonly TimeSpan CalendarRefresh = TimeSpan.FromMinutes(5), CalendarRetry = TimeSpan.FromSeconds(60),
-        CalendarAround = TimeSpan.FromHours(3), NudgeShownFor = TimeSpan.FromMilliseconds(ProactiveCards.NudgeMs), KeepDismissed = TimeSpan.FromDays(1);
+        CalendarAround = TimeSpan.FromHours(3), CalendarTimeout = TimeSpan.FromSeconds(60), NudgeShownFor = TimeSpan.FromMilliseconds(ProactiveCards.NudgeMs), KeepDismissed = TimeSpan.FromDays(1);
 
     private readonly NudgeTracker _tracker = new(state.Nudges);
     private readonly Dictionary<string, NotchCard> _shown = [];
@@ -42,6 +42,7 @@ public sealed class ProactiveCoordinator(IProactiveCardSink sink, IQuietSignal q
     private CancellationTokenSource? _fetchCts;
     private IReadOnlyList<UpcomingEvent>? _events;
     private DateTimeOffset? _lastFetchOk, _retryFetchAt;
+    private DateTimeOffset _fetchAt;
 
     // Wanted cards (kept through quiet; the nudge is not).
     private NotchCard? _brief, _meeting, _nudge;
@@ -175,16 +176,21 @@ public sealed class ProactiveCoordinator(IProactiveCardSink sink, IQuietSignal q
         if (key != _calendarKey)
         {
             _fetchCts?.Cancel();
+            _fetchCts?.Dispose();
             (_calendarKey, _fetch, _fetchCts, _events, _lastFetchOk, _retryFetchAt, _noCalendar, _fetchedOnce) = (key, null, null, null, null, null, false, false);
         }
         if (key is null) return;
 
-        if (_fetch is { IsCompleted: true } done)
+        // The connector's body read has no timeout of its own, so a fetch still running after 60 s by the caller's clock is abandoned.
+        if (_fetch is { } done && (done.IsCompleted || now - _fetchAt >= CalendarTimeout))
         {
+            var timedOut = !done.IsCompleted;
             _fetch = null;
+            if (timedOut) _fetchCts?.Cancel();
             _fetchCts?.Dispose();
             _fetchCts = null;
-            if (done.IsCompletedSuccessfully) (_events, _lastFetchOk, _retryFetchAt) = (done.Result, now, null);
+            if (timedOut) CalendarFailed(now, "Timeout");
+            else if (done.IsCompletedSuccessfully) (_events, _lastFetchOk, _retryFetchAt) = (done.Result, now, null);
             else CalendarFailed(now, ErrorName(done));
             _fetchedOnce = true;
         }
@@ -200,12 +206,15 @@ public sealed class ProactiveCoordinator(IProactiveCardSink sink, IQuietSignal q
             }
             _noCalendar = false;
             var endOfDay = new DateTimeOffset(now.Date.AddDays(1), now.Offset);
-            _fetchCts = new CancellationTokenSource();
+            _fetchCts = new CancellationTokenSource(CalendarTimeout);
+            _fetchAt = now;
             _fetch = source.EventsAsync(now - CalendarAround, endOfDay > now + CalendarAround ? endOfDay : now + CalendarAround, _fetchCts.Token);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _fetch = null;
+            _fetchCts?.Dispose();
+            _fetchCts = null;
             CalendarFailed(now, ex.GetType().Name);
             _fetchedOnce = true;
         }
