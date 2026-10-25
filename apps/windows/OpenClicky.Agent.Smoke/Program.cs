@@ -539,6 +539,10 @@ internal static class Program
             var background = own.PointToScreen(new Point(300, 160));
             // Non-vacuous: both points really are over this window (another app's topmost window there fails the smoke, not passes it).
             bool OnOwn(Point p) => GetAncestor(WindowFromPoint(new NativePoint { X = p.X, Y = p.Y }), 2) == own.Handle;
+            // A topmost window of another app (a chat window that re-asserts itself) can sit above ours: put ours back on top of the
+            // topmost band (no activation, no move) and re-check for a couple of seconds before calling the point covered.
+            for (var t = Environment.TickCount64 + 2000; !(OnOwn(centre) && OnOwn(background)) && Environment.TickCount64 < t;)
+            { SetWindowPos(own.Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010); Pump(100); } // HWND_TOPMOST; NOSIZE NOMOVE NOACTIVATE
             if (!OnOwn(centre) || !OnOwn(background))
             { Console.Error.WriteLine("FAIL: the own fixture window is covered by another window at its test points"); return 47; }
             // Non-vacuous: the point really is over this process's window (a child button), which the shared check refuses.

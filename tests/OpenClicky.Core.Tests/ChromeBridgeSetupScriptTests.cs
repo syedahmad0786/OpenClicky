@@ -22,7 +22,10 @@ public sealed class ChromeBridgeSetupScriptTests
             foreach (var argument in new[] { "-NoProfile", "-File", script, "-NativeHostPath", host, "-AllowedOrigins", "https://example.com/,http://127.0.0.1:3210/", "-GenerationOnly" })
                 start.ArgumentList.Add(argument);
             using var process = Process.Start(start)!;
-            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            // Cold powershell.exe startup under a loaded full-suite run can take well over 10 s; wait generously, and never leave it running.
+            using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(90));
+            try { await process.WaitForExitAsync(limit.Token); }
+            catch (OperationCanceledException) { process.Kill(entireProcessTree: true); throw new TimeoutException("setup-local.ps1 -GenerationOnly did not finish in 90 s"); }
             Assert.Equal(0, process.ExitCode);
 
             var output = Path.Combine(temp, "OpenClicky", "ChromeBridge");

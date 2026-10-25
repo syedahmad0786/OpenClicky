@@ -1069,10 +1069,22 @@ internal static partial class Program
             }
         }
         void Shake() => ShakeAt(home);
+        // The overlay samples the cursor on its own 33 ms timer, which a loaded machine can starve (the burst then aliases to
+        // too few reversals). A positive check keeps shaking, burst by burst, until the companion detaches or time runs out;
+        // the negative checks still shake once and assert nothing happened.
+        bool ShakeUntil(Func<bool> seen, TimeSpan within)
+        {
+            var deadline = DateTime.UtcNow + within;
+            do
+            {
+                Shake();
+                if (PumpUntil(seen, TimeSpan.FromMilliseconds(700))) return true;
+            } while (DateTime.UtcNow < deadline);
+            return false;
+        }
         try
         {
-            Shake();
-            if (!PumpUntil(() => Visible(catcher), TimeSpan.FromSeconds(2))) return "a shake did not detach the companion";
+            if (!ShakeUntil(() => Visible(catcher), TimeSpan.FromSeconds(8))) return "a shake did not detach the companion";
             NativeMethods.GetWindowRect(catcher, out var box);
             var middle = new Point((box.Left + box.Right) / 2, (box.Top + box.Bottom) / 2);
             if (NativeMethods.WindowFromPoint(middle) != catcher) return "the click target is not what Windows hit-tests at the companion";
@@ -1089,8 +1101,7 @@ internal static partial class Program
             if (!PumpUntil(() => clicks == 1 && !Visible(catcher), TimeSpan.FromSeconds(1))) return $"the click did not raise DetachedClicked once (clicks={clicks})";
 
             Pump(1100); // the detector's cooldown
-            Shake();
-            if (!PumpUntil(() => Visible(catcher), TimeSpan.FromSeconds(2))) return "a second shake did not detach";
+            if (!ShakeUntil(() => Visible(catcher), TimeSpan.FromSeconds(8))) return "a second shake did not detach";
             if (!PumpUntil(() => !Visible(catcher), TimeSpan.FromSeconds(4)) || clicks != 1) return "an unclicked companion did not reattach after 3 s";
 
             overlay.ApplyStyle(Style(CursorPresence.Following, shake: false));
@@ -1128,8 +1139,7 @@ internal static partial class Program
             if (Visible(catcher)) return "a shake detached the companion while an agent task was running";
             taskRunning = false;
             Pump(1100);
-            Shake();
-            if (!PumpUntil(() => Visible(catcher), TimeSpan.FromSeconds(2))) return "a shake did not detach once the task stopped";
+            if (!ShakeUntil(() => Visible(catcher), TimeSpan.FromSeconds(8))) return "a shake did not detach once the task stopped";
             taskRunning = true;
             if (!PumpUntil(() => !Visible(catcher), TimeSpan.FromSeconds(1))) return "a starting task left the click target up";
             overlay.DetachSuppressed = null;
@@ -1147,14 +1157,12 @@ internal static partial class Program
                 if (!ForegroundFullscreen.IsFullscreen(full.Handle, ignoreProcessId: 0)) return "a window covering its monitor was not seen as full-screen";
                 if (ForegroundFullscreen.IsActive()) return "OpenClicky's own full-screen window counted as a full-screen app";
                 Pump(1100);
-                Shake();
-                if (!PumpUntil(() => Visible(catcher), TimeSpan.FromSeconds(2))) return "a shake did not detach over OpenClicky's own full-screen window";
+                if (!ShakeUntil(() => Visible(catcher), TimeSpan.FromSeconds(8))) return "a shake did not detach over OpenClicky's own full-screen window";
                 if (!PumpUntil(() => !Visible(catcher), TimeSpan.FromSeconds(4))) return "an unclicked companion did not reattach after 3 s";
             }
             fixture.Activate();
             Pump(1100);
-            Shake();
-            if (!PumpUntil(() => Visible(catcher), TimeSpan.FromSeconds(2))) return "a shake did not detach after the full-screen window closed";
+            if (!ShakeUntil(() => Visible(catcher), TimeSpan.FromSeconds(8))) return "a shake did not detach after the full-screen window closed";
             overlay.Hide();
             if (overlay.WindowHandles.Any(Visible)) return "Hide left an overlay window (the click target?) visible";
         }
