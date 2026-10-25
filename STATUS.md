@@ -1,5 +1,12 @@
 # OpenClicky status
 
+## 2026-10-25 — HeyClicky parity (branch `heyclicky-parity`, not pushed)
+- Done and reviewed: sub-projects A (shell), S (settings), B (talk), C (companion), D (dictation, commits 2d9dc1e..906133d). Plans in `docs/superpowers/plans/`; per-plan ledgers in `.superpowers/sdd/`.
+- D adds: 50 languages + auto-detect with a downloadable multilingual Whisper (`ggml-base.bin`); field context over UIA; "Tidy up with AI" (on by default, one-time disclosure card; sends transcript + app/site + ±2,000 chars around the cursor to the model provider, audio stays local; off in the classic UI); clipboard fallback card; learned single-word dictionary corrections with Undo. Release 0 warnings; Core 1541/1541, Input 48/48; dictation smokes pass.
+- Waiting on Ahmad: C13 live acceptance (screenshots + 6 physical checks, deferred 25 Oct) and D's 7 user checks (listed in `docs/heyclicky-parity/feature-ledger.md`).
+- Known follow-up: dictating only the first dictionary word on its own is dropped as a Whisper prompt echo (`WhisperPrompt.IsEcho`).
+- Next: sub-project E (Work: jobs, routines, agent settings), then F, G, H, P.
+
 ## 2026-10-24 — phase two: companions, jobs, routines, connectors
 - Reverse-engineered HeyClicky 1.1.1 (static REA, clean room) into `docs/heyclicky-behavior-spec-2026-10-24.md`; committed the 12 Oct phase-one WIP as `eb4729b` on `codex/windows-product`.
 - Branch `phase-two/companions-jobs-routines`: WorkStore (companions, jobs, routines), `write_output` job tools, MCP connectors proxied by the broker, Work tab, Connections list, routine timer. Release build 0/0; Core 501/501, Input 25/25.
