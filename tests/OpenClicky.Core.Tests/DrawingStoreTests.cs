@@ -205,6 +205,25 @@ public sealed class DrawingStoreTests : IDisposable
     }
 
     [Fact]
+    public void ALongestLegalPathSurvivesSaveAndLoad()
+    {
+        var store = new DrawingStore(_folder);
+        var d = "M1 1" + string.Concat(Enumerable.Repeat(" C2 2 3 3 4 4", DrawCommandParser.MaxPathCommands - 1)); // 64 commands, 190 points: over the 32-point cap of the other shapes
+        store.Save(Drawing("long-path", T0, Line("A long curve.", $"[DRAW:path d=\"{d}\"]")));
+
+        var path = Assert.Single(store.Load("long-path")!.Lines[0].Ops);
+        Assert.Equal(DrawOpKind.Path, path.Kind);
+        Assert.Equal(1 + 3 * (DrawCommandParser.MaxPathCommands - 1), path.Points.Count);
+
+        // Still bounded: one command more than the parser can produce is refused when the file is read back.
+        var json = File.ReadAllText(Path.Combine(_folder, "long-path.json"));
+        var tooLong = json.Replace("\"id\":\"long-path\"", "\"id\":\"too-long\"").Replace(new string('C', DrawCommandParser.MaxPathCommands - 1), new string('C', DrawCommandParser.MaxPathCommands));
+        Assert.NotEqual(json, tooLong);
+        File.WriteAllText(Path.Combine(_folder, "too-long.json"), tooLong);
+        Assert.Null(store.Load("too-long"));
+    }
+
+    [Fact]
     public void LoadAndListSurviveNullsWhereTheModelHasNone()
     {
         var store = new DrawingStore(_folder);

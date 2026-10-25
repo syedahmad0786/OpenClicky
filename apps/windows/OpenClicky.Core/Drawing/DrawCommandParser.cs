@@ -14,6 +14,8 @@ public static class DrawCommandParser
     public const int MaxTags = 24;
     public const int MaxPoints = 32;
     public const int MaxPathCommands = 64;
+    /// <summary>Most points a path can carry: <see cref="MaxPathCommands"/> cubic (3-point) commands.</summary>
+    public const int MaxPathPoints = MaxPathCommands * 3;
     public const int MaxLabel = 60;
     public const int MaxText = 280;
     public const int MaxButtons = 3;

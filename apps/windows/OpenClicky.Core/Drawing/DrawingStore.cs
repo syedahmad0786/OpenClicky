@@ -203,7 +203,7 @@ public sealed partial class DrawingStore
 
     private static bool ValidOp(DrawOp op)
     {
-        if (op is null || !Enum.IsDefined(op.Kind) || op.Points is null || op.Args is null || op.Points.Count > DrawCommandParser.MaxPoints) return false;
+        if (op is null || !Enum.IsDefined(op.Kind) || op.Points is null || op.Args is null || op.Points.Count > DrawCommandParser.MaxPathPoints) return false; // the per-kind limit follows in ValidShape
         if (op.Id is not null && !OpIdPattern().IsMatch(op.Id)) return false;
         if (op.Text is not null && !IsSafeText(op.Text, MaxOpText)) return false;
         if (op.Color is not null && !ColorPattern().IsMatch(op.Color)) return false;
@@ -227,7 +227,7 @@ public sealed partial class DrawingStore
             DrawOpKind.Poly => (3, DrawCommandParser.MaxPoints),
             DrawOpKind.Curve => (4, 4),
             DrawOpKind.Tie or DrawOpKind.Timeline or DrawOpKind.Underline or DrawOpKind.Strike => (2, 2),
-            DrawOpKind.Path => (1, DrawCommandParser.MaxPoints),
+            DrawOpKind.Path => (1, DrawCommandParser.MaxPathPoints), // up to 64 commands, 3 points each
             DrawOpKind.Circle => (0, 1),
             DrawOpKind.Ring or DrawOpKind.Dot or DrawOpKind.Point or DrawOpKind.Text or DrawOpKind.Label or DrawOpKind.Cross or DrawOpKind.Check
                 or DrawOpKind.Star or DrawOpKind.Scroll or DrawOpKind.Badge or DrawOpKind.Button or DrawOpKind.Card or DrawOpKind.Sticky => (1, 1),
