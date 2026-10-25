@@ -254,7 +254,7 @@ public class SettingsServiceTests
     [Fact]
     public void RoutineViewsUseJobTitlesScheduleAndStatus()
     {
-        var job = new WorkJob("j1", "openclicky", "Morning brief", "p", Now, WorkJobStates.Ready);
+        var job = new WorkJob("j1", "openclicky", "Morning brief", "p", Now, WorkJobStates.Ready, "red", "");
         var running = job with { Id = "j2", Title = "Inbox", Status = WorkJobStates.Running };
         Routine[] routines =
         [

@@ -6,8 +6,8 @@ public class ShellStateBuilderTests
 {
     private static readonly DateTimeOffset Now = new(2026, 10, 24, 12, 0, 0, TimeSpan.Zero);
 
-    private static WorkJob Job(string id, string status, DateTimeOffset? lastRun = null) =>
-        new(id, "openclicky", "Job " + id, "Do " + id, Now.AddDays(-2), status, lastRun, "");
+    private static WorkJob Job(string id, string status, DateTimeOffset? lastRun = null, string colour = "red") =>
+        new(id, "openclicky", "Job " + id, "Do " + id, Now.AddDays(-2), status, colour, @"C:\jobs\" + id, lastRun, "");
 
     private static ShellInputs Inputs(IReadOnlyList<ShellJobInput>? jobs = null, IReadOnlyList<ConversationTurn>? chat = null) =>
         new(new AppSettings(), jobs ?? [], chat ?? [], [], ShellPhase.Idle, Now);
@@ -120,10 +120,20 @@ public class ShellStateBuilderTests
     [InlineData("stopped", false, JobState.Stopped)]
     [InlineData("ready", true, JobState.Queued)]
     [InlineData("ready", false, JobState.New)]
+    [InlineData("queued", false, JobState.Queued)]
+    [InlineData("needs-you", false, JobState.NeedsYou)]
     public void MapsJobStates(string status, bool dueRoutine, JobState expected)
     {
-        var state = ShellStateBuilder.Build(Inputs([new ShellJobInput(Job("x", status), [], [], HasDueRoutine: dueRoutine)]));
+        var state = ShellStateBuilder.Build(Inputs([new ShellJobInput(Job("x", status, colour: "yellow"), [], [], HasDueRoutine: dueRoutine)]));
         Assert.Equal(expected, state.Jobs.Single().State);
+        Assert.Equal(JobColour.Yellow, state.Jobs.Single().Colour);
+    }
+
+    [Fact]
+    public void UnknownColourFallsBackToTheIdHash()
+    {
+        var card = ShellStateBuilder.Build(Inputs([new ShellJobInput(Job("abc", "ready", colour: "purple"), [], [])])).Jobs.Single();
+        Assert.Equal(Work.JobColours.FromId("abc"), card.Colour.ToString().ToLowerInvariant());
     }
 
     [Fact]

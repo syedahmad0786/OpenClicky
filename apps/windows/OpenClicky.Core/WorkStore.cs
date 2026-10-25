@@ -1,14 +1,19 @@
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
+using OpenClicky.Core.Work;
 
 namespace OpenClicky.Core;
 
 public sealed record Companion(string Slug, string Name, string Role, DateTimeOffset CreatedAt, bool IsArchived = false);
 
+/// <summary>A saved job. <see cref="Colour"/> is a <see cref="JobColours"/> name; <see cref="FolderPath"/> is the job's own folder.
+/// <see cref="ResultJson"/> is the last structured result ("" when none); <see cref="UserStepJson"/> is the pending user step, if any.</summary>
 public sealed record WorkJob(string Id, string CompanionSlug, string Title, string Prompt, DateTimeOffset CreatedAt,
-    string Status, DateTimeOffset? LastRunAt = null, string Summary = "");
+    string Status, string Colour, string FolderPath, DateTimeOffset? LastRunAt = null, string Summary = "",
+    string ResultJson = "", string? UserStepJson = null);
 
 public enum RoutineCadence { Daily, Weekly, Interval }
 
@@ -17,10 +22,22 @@ public sealed record Routine(string Id, string JobId, RoutineCadence Cadence, in
     int IntervalMinutes, bool IsPaused, DateTimeOffset NextRunAt, DateTimeOffset? LastRunAt = null,
     string LastOutcome = "", int ConsecutiveFailures = 0);
 
+/// <summary>Stored job states. Completed, Failed and Stopped equal the matching <see cref="AgentProgressStates"/>.</summary>
 public static class WorkJobStates
 {
     public const string Ready = "ready";
+    public const string Queued = "queued";
     public const string Running = "running";
+    public const string NeedsYou = "needs-you";
+    public const string Completed = "completed";
+    public const string Failed = "failed";
+    public const string Stopped = "stopped";
+
+    public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.Ordinal)
+        { Ready, Queued, Running, NeedsYou, Completed, Failed, Stopped };
+
+    /// <summary>Waiting to run, running, or waiting on the user: never trimmed, and recovered after a restart.</summary>
+    public static bool IsActive(string status) => status is Queued or Running or NeedsYou;
 }
 
 /// <summary>Named companions, their background jobs and scheduled routines, stored beside other local data.</summary>
@@ -32,9 +49,13 @@ public sealed class WorkStore
     public const int MaxTitleLength = 120;
     public const int MaxPromptLength = 4_000;
     public const int MaxNotesBytes = 16_384;
+    public const int MaxJobs = 80;
+    public const string InterruptedSummary = "Interrupted when OpenClicky closed.";
+    public static readonly TimeSpan UserStepMaxAge = TimeSpan.FromDays(7);
     private static readonly Regex NonSlug = new("[^a-z0-9]+", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
     private readonly string _databasePath;
     private readonly object _sync = new();
+    private bool _migrated;
 
     public WorkStore(string? databasePath = null, string? rootDirectory = null)
     {
@@ -117,26 +138,19 @@ public sealed class WorkStore
         File.AppendAllText(NotesPath(slug), $"- {DateTimeOffset.Now:yyyy-MM-dd}: {note}{Environment.NewLine}", Encoding.UTF8);
     }
 
+    /// <summary>Newest first.</summary>
     public IReadOnlyList<WorkJob> Jobs(string? companionSlug = null)
     {
         lock (_sync)
         {
             using var connection = Open();
-            using var command = connection.CreateCommand();
-            command.CommandText = "SELECT id,companion_slug,title,prompt,created_at_utc,status,last_run_at_utc,summary FROM jobs"
-                + (companionSlug is null ? "" : " WHERE companion_slug=$slug") + " ORDER BY created_at_utc DESC";
-            if (companionSlug is not null) command.Parameters.AddWithValue("$slug", companionSlug);
-            using var reader = command.ExecuteReader();
-            var list = new List<WorkJob>();
-            while (reader.Read())
-                list.Add(new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
-                    Time(reader.GetString(4)), reader.GetString(5), reader.IsDBNull(6) ? null : Time(reader.GetString(6)), reader.GetString(7)));
-            return list;
+            return ReadJobs(connection, companionSlug);
         }
     }
 
     public WorkJob GetJob(string id) => Jobs().FirstOrDefault(j => j.Id == id) ?? throw new KeyNotFoundException("That job no longer exists.");
 
+    /// <summary>Saves a Ready job with the least-used colour and its own folder, then trims the list to <see cref="MaxJobs"/>.</summary>
     public WorkJob CreateJob(string companionSlug, string title, string prompt)
     {
         title = RequireText(title, MaxTitleLength, nameof(title));
@@ -146,13 +160,124 @@ public sealed class WorkStore
             using var connection = Open();
             EnsureDefaultCompanion(connection);
             if (!Exists(connection, "companions", "slug", companionSlug)) throw new KeyNotFoundException("That companion no longer exists.");
-            var job = new WorkJob(Guid.NewGuid().ToString("N"), companionSlug, title, prompt, DateTimeOffset.UtcNow, WorkJobStates.Ready);
-            Execute(connection, "INSERT INTO jobs(id,companion_slug,title,prompt,created_at_utc,status,last_run_at_utc,summary) VALUES($id,$slug,$title,$prompt,$at,$status,NULL,'')",
-                ("$id", job.Id), ("$slug", companionSlug), ("$title", title), ("$prompt", prompt), ("$at", Stamp(job.CreatedAt)), ("$status", job.Status));
+            var id = Guid.NewGuid().ToString("N");
+            var job = new WorkJob(id, companionSlug, title, prompt, DateTimeOffset.UtcNow, WorkJobStates.Ready,
+                JobColours.LeastUsed(ReadJobs(connection, null).Select(j => j.Colour)), DefaultJobFolder(companionSlug, id));
+            Execute(connection, "INSERT INTO jobs(id,companion_slug,title,prompt,created_at_utc,status,last_run_at_utc,summary,colour,folder) VALUES($id,$slug,$title,$prompt,$at,$status,NULL,'',$colour,$folder)",
+                ("$id", job.Id), ("$slug", companionSlug), ("$title", title), ("$prompt", prompt), ("$at", Stamp(job.CreatedAt)), ("$status", job.Status),
+                ("$colour", job.Colour), ("$folder", job.FolderPath));
+            Trim(connection, job.Id);
             Directory.CreateDirectory(OutputFolder(job));
             Directory.CreateDirectory(Path.Combine(JobFolder(job), "tmp"));
             return job;
         }
+    }
+
+    /// <summary>Beyond <see cref="MaxJobs"/>, drops the oldest rows that are not active and have no routine (folders stay on disk, as with <see cref="DeleteJob"/>).</summary>
+    private static void Trim(SqliteConnection connection, string keepId)
+    {
+        using var count = connection.CreateCommand();
+        count.CommandText = "SELECT COUNT(*) FROM jobs";
+        var excess = Convert.ToInt32(count.ExecuteScalar(), CultureInfo.InvariantCulture) - MaxJobs;
+        if (excess <= 0) return;
+        Execute(connection, """
+            DELETE FROM jobs WHERE id IN (SELECT id FROM jobs
+                WHERE id<>$keep AND status NOT IN ($queued,$running,$needs) AND NOT EXISTS (SELECT 1 FROM routines WHERE routines.job_id=jobs.id)
+                ORDER BY created_at_utc, rowid LIMIT $excess)
+            """,
+            ("$keep", keepId), ("$queued", WorkJobStates.Queued), ("$running", WorkJobStates.Running), ("$needs", WorkJobStates.NeedsYou), ("$excess", excess));
+    }
+
+    /// <summary>Sets one of <see cref="WorkJobStates"/>; <paramref name="at"/> becomes the job's last activity time.</summary>
+    public void SetJobState(string jobId, string status, DateTimeOffset at)
+    {
+        if (!WorkJobStates.All.Contains(status)) throw new ArgumentException("Unknown job state.", nameof(status));
+        lock (_sync)
+        {
+            using var connection = Open();
+            Execute(connection, "UPDATE jobs SET status=$status, last_run_at_utc=$at WHERE id=$id", ("$status", status), ("$at", Stamp(at)), ("$id", jobId));
+        }
+    }
+
+    public void SetJobResult(string jobId, string resultJson)
+    {
+        ArgumentNullException.ThrowIfNull(resultJson);
+        lock (_sync)
+        {
+            using var connection = Open();
+            Execute(connection, "UPDATE jobs SET result_json=$json WHERE id=$id", ("$json", resultJson), ("$id", jobId));
+        }
+    }
+
+    /// <summary>Stores the step the job is waiting on the user for; null clears it.</summary>
+    public void SetUserStep(string jobId, string? userStepJson)
+    {
+        lock (_sync)
+        {
+            using var connection = Open();
+            Execute(connection, "UPDATE jobs SET user_step_json=$json WHERE id=$id", ("$json", userStepJson ?? ""), ("$id", jobId));
+        }
+    }
+
+    /// <summary>
+    /// After a restart nothing is running: queued and running jobs become Stopped, and so do needs-you jobs whose step is
+    /// <see cref="UserStepMaxAge"/> or older (a step's age comes from its "askedAt", else from when the job started waiting).
+    /// Returns the jobs it changed.
+    /// </summary>
+    public IReadOnlyList<WorkJob> RecoverInterrupted(DateTimeOffset now)
+    {
+        lock (_sync)
+        {
+            using var connection = Open();
+            var changed = ReadJobs(connection, null)
+                .Where(j => j.Status is WorkJobStates.Queued or WorkJobStates.Running
+                    || (j.Status == WorkJobStates.NeedsYou && now - StepAskedAt(j) >= UserStepMaxAge))
+                .Select(j => j with { Status = WorkJobStates.Stopped, Summary = InterruptedSummary, UserStepJson = null })
+                .ToList();
+            foreach (var job in changed)
+                Execute(connection, "UPDATE jobs SET status=$status, summary=$summary, user_step_json='' WHERE id=$id",
+                    ("$status", job.Status), ("$summary", job.Summary), ("$id", job.Id));
+            return changed;
+        }
+    }
+
+    private static DateTimeOffset StepAskedAt(WorkJob job)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(job.UserStepJson ?? "");
+            if (document.RootElement.ValueKind == JsonValueKind.Object)
+                foreach (var property in document.RootElement.EnumerateObject())
+                    if (property.Name.Equals("askedAt", StringComparison.OrdinalIgnoreCase) && property.Value.ValueKind == JsonValueKind.String
+                        && property.Value.TryGetDateTimeOffset(out var asked))
+                        return asked;
+        }
+        catch (JsonException) { }
+        return job.LastRunAt ?? job.CreatedAt;
+    }
+
+    /// <summary>Rewrites &lt;root&gt;\WORK.md: every job newest first, and each job's latest run.</summary>
+    public void WriteIndex()
+    {
+        lock (_sync)
+        {
+            var jobs = Jobs();
+            var path = Path.Combine(RootDirectory, "WORK.md");
+            Directory.CreateDirectory(RootDirectory);
+            var text = WorkIndex.Render(File.Exists(path) ? File.ReadAllText(path, Encoding.UTF8) : "",
+                jobs.Select(j => new WorkIndexJob(j.Title, Path.GetRelativePath(RootDirectory, JobFolder(j)), j.Status)).ToList(),
+                jobs.Where(j => j.LastRunAt is not null).Select(j => new WorkIndexRun(j.LastRunAt!.Value, j.Status, j.Summary)).ToList());
+            File.WriteAllText(path, text, Encoding.UTF8);
+        }
+    }
+
+    /// <summary>Before a new run: the job's note.md becomes .openclicky\previous-note.md (replacing an older one).</summary>
+    public void RetireNote(WorkJob job)
+    {
+        var note = Path.Combine(JobFolder(job), "note.md");
+        if (!File.Exists(note)) return;
+        var hidden = Directory.CreateDirectory(Path.Combine(JobFolder(job), ".openclicky")).FullName;
+        File.Move(note, Path.Combine(hidden, "previous-note.md"), overwrite: true);
     }
 
     /// <summary>Records a run outcome. <paramref name="status"/> is a task progress state or <see cref="WorkJobStates"/>.</summary>
@@ -187,7 +312,8 @@ public sealed class WorkStore
         File.AppendAllText(Path.Combine(folder, "runs.md"), entry.Length > 20_000 ? entry[..20_000] + Environment.NewLine : entry, Encoding.UTF8);
     }
 
-    public string JobFolder(WorkJob job) => SafeChild(Path.Combine(CompanionFolder(job.CompanionSlug), "jobs"), RequireSlug(job.Id));
+    public string JobFolder(WorkJob job) => job.FolderPath.Length > 0 ? job.FolderPath : DefaultJobFolder(job.CompanionSlug, job.Id);
+    private string DefaultJobFolder(string companionSlug, string jobId) => SafeChild(Path.Combine(CompanionFolder(companionSlug), "jobs"), RequireSlug(jobId));
     public string OutputFolder(WorkJob job) => Path.Combine(JobFolder(job), "output");
 
     public IReadOnlyList<string> Outputs(WorkJob job)
@@ -309,7 +435,55 @@ public sealed class WorkStore
                 next_run_at_utc TEXT NOT NULL, last_run_at_utc TEXT NULL, last_outcome TEXT NOT NULL DEFAULT '', consecutive_failures INTEGER NOT NULL DEFAULT 0);
             """;
         command.ExecuteNonQuery();
+        if (!_migrated) { Migrate(connection); _migrated = true; } // callers hold _sync
         return connection;
+    }
+
+    /// <summary>Adds the job columns introduced with colours and folders, then gives older rows the colour the id hash used to
+    /// show and the folder they always had, so existing cards look and behave the same.</summary>
+    private void Migrate(SqliteConnection connection)
+    {
+        var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        using (var info = connection.CreateCommand())
+        {
+            info.CommandText = "PRAGMA table_info(jobs)";
+            using var reader = info.ExecuteReader();
+            while (reader.Read()) columns.Add(reader.GetString(1));
+        }
+        foreach (var column in new[] { "colour", "folder", "result_json", "user_step_json" })
+            if (!columns.Contains(column)) Execute(connection, $"ALTER TABLE jobs ADD COLUMN {column} TEXT NOT NULL DEFAULT ''");
+
+        var pending = new List<(string Id, string Slug, string Colour, string Folder)>();
+        using (var select = connection.CreateCommand())
+        {
+            select.CommandText = "SELECT id,companion_slug,colour,folder FROM jobs WHERE colour='' OR folder=''";
+            using var reader = select.ExecuteReader();
+            while (reader.Read()) pending.Add((reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3)));
+        }
+        foreach (var (id, slug, colour, folder) in pending)
+        {
+            string path;
+            try { path = folder.Length > 0 ? folder : DefaultJobFolder(slug, id); }
+            catch (ArgumentException) { path = ""; } // a malformed legacy id keeps resolving (and failing) as before
+            Execute(connection, "UPDATE jobs SET colour=$colour, folder=$folder WHERE id=$id",
+                ("$colour", colour.Length > 0 ? colour : JobColours.FromId(id)), ("$folder", path), ("$id", id));
+        }
+    }
+
+    private static List<WorkJob> ReadJobs(SqliteConnection connection, string? companionSlug)
+    {
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT id,companion_slug,title,prompt,created_at_utc,status,last_run_at_utc,summary,colour,folder,result_json,user_step_json FROM jobs"
+            + (companionSlug is null ? "" : " WHERE companion_slug=$slug") + " ORDER BY created_at_utc DESC, rowid DESC";
+        if (companionSlug is not null) command.Parameters.AddWithValue("$slug", companionSlug);
+        using var reader = command.ExecuteReader();
+        var list = new List<WorkJob>();
+        while (reader.Read())
+            list.Add(new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetString(3),
+                Time(reader.GetString(4)), reader.GetString(5), reader.GetString(8), reader.GetString(9),
+                reader.IsDBNull(6) ? null : Time(reader.GetString(6)), reader.GetString(7),
+                reader.GetString(10), reader.GetString(11) is { Length: > 0 } step ? step : null));
+        return list;
     }
 
     private static bool Exists(SqliteConnection connection, string table, string column, string value)
@@ -434,6 +608,7 @@ public static class JobPrompt
         text.AppendLine(outputs.Count == 0
             ? "The job's output folder is empty."
             : "Files already in the job's output folder: " + string.Join(", ", outputs.Take(50)) + ".");
+        text.AppendLine(@"Your working note is note.md in your job folder: keep it short and current with what is done and what is left. The note from the previous run, if there was one, is .openclicky\previous-note.md.");
         text.AppendLine("Save each finished deliverable with write_output using a relative file name. Only save what was asked for.");
         text.Append("Finish with a short factual result. Its first sentence is shown to the user.");
         return text.ToString();

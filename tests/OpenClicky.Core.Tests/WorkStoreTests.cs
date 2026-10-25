@@ -1,4 +1,6 @@
+using Microsoft.Data.Sqlite;
 using OpenClicky.Core;
+using OpenClicky.Core.Work;
 
 namespace OpenClicky.Core.Tests;
 
@@ -108,7 +110,7 @@ public class WorkStoreTests
     public void JobPrompt_CarriesRoleNotesFollowUpAndOutputs()
     {
         var companion = new Companion("writer", "Writer", "Writes briefs.", DateTimeOffset.UtcNow);
-        var job = new WorkJob("1", "writer", "Brief", "Write it.", DateTimeOffset.UtcNow, WorkJobStates.Ready, Summary: "Wrote v1.");
+        var job = new WorkJob("1", "writer", "Brief", "Write it.", DateTimeOffset.UtcNow, WorkJobStates.Ready, "red", @"C:\jobs\1", Summary: "Wrote v1.");
         var prompt = JobPrompt.Build(companion, "# Writer\n- likes CSV", job, ["v1.md"], followUp: "Shorter please", scheduled: true);
         Assert.Contains("Writes briefs.", prompt);
         Assert.Contains("likes CSV", prompt);
@@ -116,9 +118,164 @@ public class WorkStoreTests
         Assert.Contains("Shorter please", prompt);
         Assert.Contains("v1.md", prompt);
         Assert.Contains("schedule", prompt);
+        Assert.Contains("note.md", prompt);
         Assert.Equal("Done, saved brief.md.", JobPrompt.FirstSentence("Done, saved brief.md. It has three sections."));
         Assert.Equal("No ending", JobPrompt.FirstSentence("No ending"));
     }
+
+    private static void InTempStore(Action<WorkStore, string> test)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "openclicky-work-" + Guid.NewGuid().ToString("N"));
+        try { test(new WorkStore(Path.Combine(root, "openclicky.db"), Path.Combine(root, "companions")), root); }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void CreateJobTakesLeastUsedColourAndFolder() => InTempStore((store, root) =>
+    {
+        var jobs = Enumerable.Range(0, 5).Select(i => store.CreateJob(WorkStore.DefaultCompanionSlug, "Job " + i, "p")).ToList();
+        Assert.Equal(["red", "blue", "yellow", "green", "red"], jobs.Select(j => j.Colour));
+        Assert.Equal(["red", "blue", "yellow", "green", "red"], jobs.Select(j => store.GetJob(j.Id).Colour));
+        var expected = Path.Combine(root, "companions", WorkStore.DefaultCompanionSlug, "jobs", jobs[0].Id);
+        Assert.Equal(expected, jobs[0].FolderPath);
+        Assert.Equal(expected, store.GetJob(jobs[0].Id).FolderPath);
+        Assert.Equal(expected, store.JobFolder(jobs[0]));
+        Assert.True(Directory.Exists(Path.Combine(expected, "output")));
+    });
+
+    [Fact]
+    public void MigratesOldRowsWithHashColourAndDefaultFolder() => InTempStore((_, root) =>
+    {
+        Directory.CreateDirectory(root);
+        var db = Path.Combine(root, "openclicky.db");
+        using (var connection = new SqliteConnection($"Data Source={db};Pooling=False"))
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                CREATE TABLE companions(slug TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT NOT NULL, created_at_utc TEXT NOT NULL, is_archived INTEGER NOT NULL DEFAULT 0);
+                CREATE TABLE jobs(id TEXT PRIMARY KEY, companion_slug TEXT NOT NULL REFERENCES companions(slug), title TEXT NOT NULL, prompt TEXT NOT NULL,
+                    created_at_utc TEXT NOT NULL, status TEXT NOT NULL, last_run_at_utc TEXT NULL, summary TEXT NOT NULL DEFAULT '');
+                INSERT INTO companions VALUES('openclicky','OpenClicky','Main','2026-10-01T00:00:00.0000000+00:00',0);
+                INSERT INTO jobs VALUES('0a1b2c','openclicky','Old job','p','2026-10-01T00:00:00.0000000+00:00','completed',NULL,'Did it.');
+                INSERT INTO jobs VALUES('9f8e7d','openclicky','Older job','p','2026-09-01T00:00:00.0000000+00:00','running',NULL,'');
+                """;
+            command.ExecuteNonQuery();
+        }
+
+        var store = new WorkStore(db, Path.Combine(root, "companions"));
+        var jobs = store.Jobs();
+        Assert.Equal(2, jobs.Count);
+        foreach (var job in jobs)
+        {
+            Assert.Equal(JobColours.FromId(job.Id), job.Colour);
+            Assert.Equal(Path.Combine(root, "companions", "openclicky", "jobs", job.Id), job.FolderPath);
+        }
+        Assert.Equal("Did it.", store.GetJob("0a1b2c").Summary);
+        store.SetJobResult("0a1b2c", """{"reply":"x"}""");
+        Assert.Equal("""{"reply":"x"}""", store.GetJob("0a1b2c").ResultJson);
+        Assert.Equal(JobColours.FromId("0a1b2c"), new WorkStore(db, Path.Combine(root, "companions")).GetJob("0a1b2c").Colour);
+    });
+
+    [Fact]
+    public void CapTrimsOldestFinishedWithoutRoutine() => InTempStore((store, _) =>
+    {
+        var at = DateTimeOffset.UtcNow;
+        var slug = WorkStore.DefaultCompanionSlug;
+        var withRoutine = store.CreateJob(slug, "Routine job", "p");
+        store.AddRoutine(withRoutine.Id, RoutineCadence.Daily, 9 * 60, 0, 0, at, Utc);
+        store.SetJobState(withRoutine.Id, WorkJobStates.Completed, at);
+        var running = store.CreateJob(slug, "Running", "p");
+        store.SetJobState(running.Id, WorkJobStates.Running, at);
+        var queued = store.CreateJob(slug, "Queued", "p");
+        store.SetJobState(queued.Id, WorkJobStates.Queued, at);
+        var waiting = store.CreateJob(slug, "Needs you", "p");
+        store.SetJobState(waiting.Id, WorkJobStates.NeedsYou, at);
+        var finished = store.CreateJob(slug, "Finished", "p");
+        store.SetJobState(finished.Id, WorkJobStates.Completed, at);
+        var next = store.CreateJob(slug, "Next oldest", "p");
+        while (store.Jobs().Count < WorkStore.MaxJobs) store.CreateJob(slug, "Filler", "p");
+
+        var newest = store.CreateJob(slug, "Job 81", "p");
+
+        var ids = store.Jobs().Select(j => j.Id).ToHashSet();
+        Assert.Equal(WorkStore.MaxJobs, ids.Count);
+        Assert.DoesNotContain(finished.Id, ids);
+        Assert.Subset(ids, new HashSet<string> { withRoutine.Id, running.Id, queued.Id, waiting.Id, next.Id, newest.Id });
+        Assert.True(Directory.Exists(finished.FolderPath)); // rows only; the folder stays on disk
+    });
+
+    [Fact]
+    public void RecoverInterruptedMarksWorkingAndQueued() => InTempStore((store, _) =>
+    {
+        var now = DateTimeOffset.UtcNow;
+        var slug = WorkStore.DefaultCompanionSlug;
+        var running = store.CreateJob(slug, "Running", "p");
+        store.SetJobState(running.Id, WorkJobStates.Running, now.AddMinutes(-5));
+        var queued = store.CreateJob(slug, "Queued", "p");
+        store.SetJobState(queued.Id, WorkJobStates.Queued, now.AddMinutes(-5));
+        var done = store.CreateJob(slug, "Done", "p");
+        store.RecordJobRun(done.Id, WorkJobStates.Completed, "Wrote it.", now.AddHours(-1));
+        var ready = store.CreateJob(slug, "Ready", "p");
+
+        var changed = store.RecoverInterrupted(now);
+
+        Assert.Equal(new[] { queued.Id, running.Id }.Order(), changed.Select(j => j.Id).Order());
+        Assert.All(changed, j => { Assert.Equal(WorkJobStates.Stopped, j.Status); Assert.Equal("Interrupted when OpenClicky closed.", j.Summary); });
+        Assert.Equal(WorkJobStates.Stopped, store.GetJob(running.Id).Status);
+        Assert.Equal(("completed", "Wrote it."), (store.GetJob(done.Id).Status, store.GetJob(done.Id).Summary));
+        Assert.Equal(WorkJobStates.Ready, store.GetJob(ready.Id).Status);
+        Assert.Empty(store.RecoverInterrupted(now));
+        Assert.Throws<ArgumentException>(() => store.SetJobState(ready.Id, "working", now));
+    });
+
+    [Fact]
+    public void RecoverKeepsRecentUserStep() => InTempStore((store, _) =>
+    {
+        var now = new DateTimeOffset(2026, 10, 25, 12, 0, 0, TimeSpan.Zero);
+        var slug = WorkStore.DefaultCompanionSlug;
+        WorkJob Waiting(string title, TimeSpan age, string step)
+        {
+            var job = store.CreateJob(slug, title, "p");
+            store.SetJobState(job.Id, WorkJobStates.NeedsYou, now - age);
+            store.SetUserStep(job.Id, step);
+            return job;
+        }
+        string Step(TimeSpan age) => $$"""{"step":"Sign in","askedAt":"{{(now - age).ToString("O", System.Globalization.CultureInfo.InvariantCulture)}}"}""";
+        var recent = Waiting("Six days", TimeSpan.FromDays(6), Step(TimeSpan.FromDays(6)));
+        var stale = Waiting("Eight days", TimeSpan.FromDays(8), Step(TimeSpan.FromDays(8)));
+        var noStamp = Waiting("No stamp", TimeSpan.FromDays(8), "{}"); // falls back to when the job started waiting
+        var recentState = Waiting("Old state, new step", TimeSpan.FromDays(8), Step(TimeSpan.FromDays(1)));
+
+        var changed = store.RecoverInterrupted(now);
+
+        Assert.Equal(new[] { stale.Id, noStamp.Id }.Order(), changed.Select(j => j.Id).Order());
+        Assert.Equal(WorkJobStates.NeedsYou, store.GetJob(recent.Id).Status);
+        Assert.Equal(WorkJobStates.NeedsYou, store.GetJob(recentState.Id).Status);
+        Assert.Equal(Step(TimeSpan.FromDays(6)), store.GetJob(recent.Id).UserStepJson);
+        var stopped = store.GetJob(stale.Id);
+        Assert.Equal((WorkJobStates.Stopped, "Interrupted when OpenClicky closed.", (string?)null), (stopped.Status, stopped.Summary, stopped.UserStepJson));
+        store.SetUserStep(recent.Id, null);
+        Assert.Null(store.GetJob(recent.Id).UserStepJson);
+    });
+
+    [Fact]
+    public void RetireNoteMovesNoteToPreviousNote() => InTempStore((store, _) =>
+    {
+        var job = store.CreateJob(WorkStore.DefaultCompanionSlug, "Noted", "p");
+        store.RetireNote(job); // nothing to move yet
+        var previous = Path.Combine(job.FolderPath, ".openclicky", "previous-note.md");
+        File.WriteAllText(Path.Combine(job.FolderPath, "note.md"), "first");
+        store.RetireNote(job);
+        File.WriteAllText(Path.Combine(job.FolderPath, "note.md"), "second");
+        store.RetireNote(job);
+        Assert.False(File.Exists(Path.Combine(job.FolderPath, "note.md")));
+        Assert.Equal("second", File.ReadAllText(previous));
+    });
 
     private static Routine Routine(RoutineCadence cadence, int minute = 0, int mask = 0, int interval = 0) =>
         new("r", "j", cadence, minute, mask, interval, false, DateTimeOffset.UnixEpoch);

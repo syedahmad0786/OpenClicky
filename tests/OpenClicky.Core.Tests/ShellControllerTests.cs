@@ -15,7 +15,7 @@ public class ShellControllerTests
         public bool ThrowOnCollect { get; set; }
         public List<(string Id, string Title, DateTimeOffset CreatedAt)> Drawings { get; } = [];
         public ShellInputs CollectInputs() => ThrowOnCollect ? throw new InvalidOperationException("data source down") : new(new AppSettings(),
-            [new ShellJobInput(new WorkJob("j1", "openclicky", "Report", "p", DateTimeOffset.UtcNow, "completed", DateTimeOffset.UtcNow), Files, [])],
+            [new ShellJobInput(new WorkJob("j1", "openclicky", "Report", "p", DateTimeOffset.UtcNow, "completed", "red", "", DateTimeOffset.UtcNow), Files, [])],
             [], [], ShellPhase.Idle, DateTimeOffset.UtcNow) { Drawings = Drawings };
         public void ToggleTalk() => Calls.Add("talk");
         public void SubmitText(string text) => Calls.Add("submit:" + text);

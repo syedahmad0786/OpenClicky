@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.RegularExpressions;
 
 using OpenClicky.Core.Settings;
+using OpenClicky.Core.Work;
 
 namespace OpenClicky.Core.Shell;
 
@@ -44,8 +45,8 @@ public sealed record ShellInputs(
 
 /// <summary>
 /// Maps app data to the shell contract and enforces its caps (jobs 80, chat rows 200, cards 6, bullets 4,
-/// files 6, card actions 3, document 200,000 chars). Job states: running→working, completed→done,
-/// failed→failed, stopped→stopped, ready→queued when a routine is due, otherwise new.
+/// files 6, card actions 3, document 200,000 chars). Job states: running→working, queued→queued, needs-you→needs you,
+/// completed→done, failed→failed, stopped→stopped, ready→queued when a routine is due, otherwise new.
 /// </summary>
 public static class ShellStateBuilder
 {
@@ -96,9 +97,11 @@ public static class ShellStateBuilder
             var state = job.Status switch
             {
                 WorkJobStates.Running => JobState.Working,
-                AgentProgressStates.Completed => JobState.Done,
-                AgentProgressStates.Failed => JobState.Failed,
-                AgentProgressStates.Stopped => JobState.Stopped,
+                WorkJobStates.Queued => JobState.Queued,
+                WorkJobStates.NeedsYou => JobState.NeedsYou,
+                WorkJobStates.Completed => JobState.Done,
+                WorkJobStates.Failed => JobState.Failed,
+                WorkJobStates.Stopped => JobState.Stopped,
                 WorkJobStates.Ready when input.HasDueRoutine => JobState.Queued,
                 _ => JobState.New,
             };
@@ -106,7 +109,7 @@ public static class ShellStateBuilder
                 Cut(job.Id, 160),
                 Cut(string.IsNullOrWhiteSpace(job.Title) ? "Job" : job.Title.Trim(), 160),
                 state,
-                Colour(job.Id),
+                Colour(job),
                 string.IsNullOrWhiteSpace(job.Summary) ? null : Cut(job.Summary, 2_000),
                 null,
                 input.Bullets.Take(MaxBullets).Select(b => Cut(b, 400)).ToList(),
@@ -184,13 +187,9 @@ public static class ShellStateBuilder
     internal static IReadOnlyList<string> Keys(HotkeyChord chord) =>
         chord.DisplayName.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Take(6).Select(k => Cut(k, 24)).ToList();
 
-    /// <summary>Stable across runs (FNV-1a); string.GetHashCode is randomised per process.</summary>
-    public static JobColour Colour(string id)
-    {
-        var hash = 2166136261u;
-        foreach (var c in id) hash = unchecked((hash ^ c) * 16777619u);
-        return Colours[hash % (uint)Colours.Length];
-    }
+    /// <summary>The job's stored colour; a missing or unknown name falls back to the colour its id hash gave before colours were stored.</summary>
+    public static JobColour Colour(WorkJob job) =>
+        Colours[JobColours.IndexOf(job.Colour) is var i and >= 0 ? i : JobColours.IndexOf(JobColours.FromId(job.Id))];
 
     public static JobFileKind FileKind(string path) => Path.GetExtension(path).ToLowerInvariant() switch
     {

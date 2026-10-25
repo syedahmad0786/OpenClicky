@@ -245,6 +245,10 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         };
         visualGuard.Start();
         _home.Disposed += (_, _) => visualGuard.Dispose();
+        // Nothing survives a restart: jobs left queued or running (and stale needs-you steps) become Stopped.
+        try { _work.RecoverInterrupted(DateTimeOffset.UtcNow); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Log("job_recover_error=" + ex.GetType().Name); }
+        IndexWork();
         _routineTimer.Tick += (_, _) => { RunDueRoutine(); RequestShellPush(); };
         _routineTimer.Start();
         _home.Disposed += (_, _) => _routineTimer.Dispose();
@@ -753,11 +757,15 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             ClassicMessage("A task is already open. Let it finish or stop it before running a job.");
             return false;
         }
-        _work.RecordJobRun(run.Job.Id, WorkJobStates.Running, run.Job.Summary, DateTimeOffset.UtcNow);
+        try { _work.RetireNote(run.Job); } // the agent starts a fresh note.md; the last one stays readable
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log("job_note_error=" + ex.GetType().Name); }
+        _work.SetJobState(run.Job.Id, WorkJobStates.Running, DateTimeOffset.UtcNow);
+        IndexWork();
         _ = StartAgentTask(prompt, run);
         if (!ReferenceEquals(_activeJob, run))
         {
             _work.RecordJobRun(run.Job.Id, run.Job.Status, run.Job.Summary, run.Job.LastRunAt ?? run.Job.CreatedAt);
+            IndexWork();
             return false;
         }
         if (routineId is not null) KeepAwake(true);
@@ -789,6 +797,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
                     DateTimeOffset.UtcNow, TimeZoneInfo.Local));
         }
         catch (Exception ex) when (ex is not OutOfMemoryException) { Log("job_record_error=" + ex.GetType().Name); }
+        IndexWork();
         OnUi(() =>
         {
             if (work.RoutineId is not null) KeepAwake(false);
@@ -796,6 +805,13 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             _jobOutputs.Remove(work.Job.Id);
             RequestShellPush();
         });
+    }
+
+    /// <summary>Rewrites WORK.md after a job store write; a locked or unwritable file never blocks the job.</summary>
+    private void IndexWork()
+    {
+        try { _work.WriteIndex(); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Log("work_index_error=" + ex.GetType().Name); }
     }
 
     private IReadOnlyList<RemoteMcpConnector> OpenConnectors()

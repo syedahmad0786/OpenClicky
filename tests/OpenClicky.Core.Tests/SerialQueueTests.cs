@@ -14,7 +14,7 @@ public class SerialQueueTests
         for (var i = 0; i < 5; i++)
         {
             var n = i;
-            queue.Enqueue(async () =>
+            _ = queue.Enqueue(async () =>
             {
                 if (Interlocked.Increment(ref running) > 1) overlapped = true;
                 lock (log) log.Add("start" + n);
@@ -34,8 +34,8 @@ public class SerialQueueTests
         var queue = new SerialQueue();
         var ran = false;
         var failed = queue.Enqueue(() => throw new InvalidOperationException("boom"));
-        queue.Enqueue(() => Task.FromCanceled(new CancellationToken(true)));
-        queue.Enqueue(() => { ran = true; return Task.CompletedTask; });
+        _ = queue.Enqueue(() => Task.FromCanceled(new CancellationToken(true)));
+        _ = queue.Enqueue(() => { ran = true; return Task.CompletedTask; });
         await queue.WhenIdle().WaitAsync(TimeSpan.FromSeconds(10)); // never faults
         Assert.True(ran);
         await Assert.ThrowsAsync<InvalidOperationException>(() => failed);
