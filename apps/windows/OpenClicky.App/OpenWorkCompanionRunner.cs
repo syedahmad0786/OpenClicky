@@ -11,7 +11,7 @@ internal static class OpenWorkCompanionRunner
     public static async Task<OpenCodeTaskResult> RunAsync(string task, AppSettings settings, ISecretStore secrets,
         IDesktopToolHost host, AgentAccessMode access, Action<AgentProgress> progress,
         CancellationToken token, string? runtimeDirectory = null, string? workspaceDirectory = null, ChromeBridgeSession? browser = null,
-        JobOutputTools? jobFiles = null, IReadOnlyList<RemoteMcpConnector>? connectors = null, Action<OpenCodeToolCall>? toolUsed = null,
+        JobOutputTools? jobFiles = null, IReadOnlyList<McpConnector>? connectors = null, Action<OpenCodeToolCall>? toolUsed = null,
         DesktopLease? lease = null, string? leaseHolder = null, Action<bool>? waitingForScreen = null,
         Action<OpenWorkServerService>? serverStarted = null)
     {

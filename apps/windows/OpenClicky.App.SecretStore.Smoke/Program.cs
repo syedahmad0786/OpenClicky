@@ -47,6 +47,7 @@ if (args.Contains("--companion-shape"))
 }
 if (args.Contains("--reopen-signal")) return CheckReopenSignal();
 if (args.Contains("--dictation-ui-state")) return DictationPanelCheck.Run();
+if (args.Contains("--connectors")) return await ConnectorsCheck.RunAsync();
 if (args.Contains("--clipboard-shelf")) return ClipboardShelfFormCheck.Run();
 if (args.Contains("--clipboard-sequence")) return ClipboardSequenceCheck.Run();
 if (args.Contains("--automatic-dictation")) return AutomaticDictationCheck.Run();

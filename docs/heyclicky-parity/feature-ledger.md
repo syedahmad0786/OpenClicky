@@ -133,14 +133,33 @@ Automated acceptance (25 Oct, no sign-in): Release build with 0 warnings; Core 1
 
 | ID | Feature | HeyClicky behaviour | OpenClicky today | RE |
 |---|---|---|---|---|
-| F1 | Integrations page | Search, Connected / Available sections, logos, status chips (Connected, Partial, Reconnect required, Unavailable, Error), Connect/Configure/Disconnect/Reconnect | Partial (connector list) | S+L |
-| F2 | Multi-account | Several labelled accounts per app (Work/Personal/Other), "add another account", expired → Reconnect; per-task account choice rules | Missing | S |
-| F3 | Managed catalog | Server catalog via Composio | Skip HeyClicky's backend; offer the user's own Composio MCP URL/key + a built-in list of public MCP servers | S |
-| F4 | Custom MCP | Remote URL or local command; auth Sign in with browser / API key / None; advanced client ID, headers, env (encrypted); OAuth discovery + dynamic registration + PKCE + resource + loopback callback + refresh; verify via initialize + tools/list; 9 sign-in states | Partial (remote URL + header token) | S |
-| F5 | Obsidian | Local vault folder as a skill, no account | Missing | S |
+| F1 | Integrations page | Search, Connected / Available sections, logos, status chips (Connected, Partial, Reconnect required, Unavailable, Error), Connect/Configure/Disconnect/Reconnect | Built — Integrations page with search, Connected and Available sections, status chips (Connected, Checking, Needs sign-in, Reconnect required, Key rejected, Error), Connect/Reconnect/Remove, and a "what leaves this PC" notice; statuses come from a real `initialize` + `tools/list` when the page opens; native look check pending. Evidence: `ConnectorStatusRulesTests`, `ConnectorCatalogTests`, `ShellContractTests`, `ShellSettingsBuilderTests`, vitest `integrations.test.tsx`, `contract.test.ts`; SecretStore.Smoke `--connectors` (commits a35e466..b304459) | S+L |
+| F2 | Multi-account | Several labelled accounts per app (Work/Personal/Other), "add another account", expired → Reconnect; per-task account choice rules | Built — up to 5 labelled accounts per app (Work, Personal, Other…), "Add another account", own sign-in, Reconnect and Remove per row, a renamable label, and the account label shown to the agent; native check pending. Evidence: `ConnectorRegistryTests`, `ConnectorFieldsTests`, `ConnectorRequestTests`, `ShellSettingsBuilderTests`, vitest `integrations.test.tsx` | S |
+| F3 | Managed catalog | Server catalog via Composio | Built — a built-in list of public MCP servers (sign-in, token and no-account apps) plus the user's own Composio MCP address and key; never HeyClicky's backend (see F-S1); native check pending. Evidence: `ConnectorCatalogTests`, `ConnectorRequestTests`, vitest `integrations.test.tsx` | S |
+| F4 | Custom MCP | Remote URL or local command; auth Sign in with browser / API key / None; advanced client ID, headers, env (encrypted); OAuth discovery + dynamic registration + PKCE + resource + loopback callback + refresh; verify via initialize + tools/list; 9 sign-in states | Built — custom remote URL or local command over stdio; browser sign-in (discovery, dynamic client registration, PKCE S256, `resource`, loopback callback, refresh with "Reconnect required"), API key or none; extra headers and environment variables kept encrypted; checked by `initialize` + `tools/list`; native check against a real account pending. Evidence: `RemoteMcpConnectorTests`, `StdioMcpConnectorTests`, `ConnectorVerifierTests`, `McpOAuthTests`, `McpTokenSourceTests`, `ConnectorFieldsTests`; SecretStore.Smoke `--connectors` ran sign-in, verify, forced refresh, refused refresh, a real secret-store round-trip and a powershell.exe stdio server on loopback (all PASS) | S |
+| F5 | Obsidian | Local vault folder as a skill, no account | Built — a local vault folder (must hold `.obsidian`) as an in-process connector with list, search, read and write tools through the same access rules; escapes, hidden folders and junctions refused; native check pending. Evidence: `ObsidianVaultConnectorTests`, `ConnectorRegistryTests`; SecretStore.Smoke `--connectors` (vault list, search, read, five refused escapes, one valid write) | S |
+| F-S1 | HeyClicky's managed catalog through its backend and Composio broker (`/agent/integrations…`, Composio session) | Server catalog via Composio | Skip — never call HeyClicky's backend. Users bring their own Composio MCP URL and key, or connect a public server directly (F3) | — |
+| F-S2 | Account name, avatar and "Organization" flag on account rows | Shows who is signed in | Skip — generic MCP has no identity call. Rows show the label, host and "Added" date instead | — |
+| F-S3 | Editing a saved custom connector | Edit in place | Skip — secrets are write-only by design: remove and add again. Labels can be renamed | — |
+| F-S4 | Runtime-side sign-in (Codex `mcpServer/oauth/login`) | The runtime signs in to the server | Skip — OpenClicky proxies every connector itself, so app-side OAuth is the only path | — |
+| F-S5 | One-line capability description derived from tool names | Short summary under each app | Skip — agents call `connector_tools` for the real list; add it only if the tool description gets too long | — |
+| F-S6 | Logo images per app | Logos on every row | Skip — no logos are bundled or fetched; rows use the name, with no third-party art | — |
+| F-S7 | Integration nudges | Suggests connecting an app during a task | Skip here — belongs to sub-project P (spec §P) | — |
 | G1 | Browser card | Chrome/Brave/Edge/Arc/Vivaldi detection, profile picker, Install for me / I'll install it, Connected/Working, Disconnect | Partial (setup form) | S |
 | G2 | Browser agent | MV3 extension using the debugging protocol: 24 operations (tabs, open, close, snapshot, extract, click, fill, type, press, scroll, wait_for, back, screenshot, click_at, hover_at, drag_at, javascript, upload, download, dialog, keep, batch …); page diffs; stable element refs; refuses password typing | Partial (observe/click/type/follow-link via native messaging) | S |
 | G3 | Tab groups | One coloured group per Clicky in a shared work window; user tabs claimed only when changed and handed back; unkept tabs close at turn end | Missing | S |
+
+**Native-accepted: pending.** F1–F5 move to Native-accepted after the user runs these nine checks (they need a real account, browser and eyes). The automated loopback run (`OpenClicky.App.SecretStore.Smoke.exe --connectors`) already passed; it uses a fake server and a fake browser step, so it proves our side of the protocol, not a real provider:
+
+1. Settings → Integrations: Connected / Available sections, search, and the "what leaves this PC" notice look right in dark and light themes.
+2. Connect Linear (or Notion): the browser opens the provider's own sign-in; after signing in, the row shows "Connected" with a tool count.
+3. "Add another … account", label it Personal, sign in with a second account: two rows, labels shown; an agent task "list my Linear issues" says which account each came from.
+4. Add GitHub with a personal access token: Connected; paste a wrong token: "Key rejected".
+5. Add DeepWiki (no account): Connected.
+6. Add a local command (for example `npx -y @modelcontextprotocol/server-everything`): Connected with its tools.
+7. Set up Composio with your own MCP address and key: Connected.
+8. Choose an Obsidian vault; ask an agent to find a note; ask it to create a note: Confirm-each asks before writing.
+9. Revoke the OpenClicky app in a provider's settings, then open Integrations: "Reconnect required"; Reconnect fixes it.
 
 ## 6. OpenClicky extras kept (Extra)
 

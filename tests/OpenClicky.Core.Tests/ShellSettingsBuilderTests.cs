@@ -311,4 +311,36 @@ public class ShellSettingsBuilderTests
         Assert.True(state.Settings.Cursor.Hidden);
         Assert.Equal(ChromeState.Connected, state.Settings.Integrations.Chrome);
     }
+
+    [Fact]
+    public void ConnectorViewCarriesNoSecretFields()
+    {
+        var view = Build(r: SettingsRuntime.Empty with
+        {
+            Connectors = [new ConnectorView("notion", "Notion", "mcp.notion.com", ConnectorStatus.Connected, 12)
+                { App = "notion", Label = new string('L', 80), Kind = ConnectorViewKind.Remote, Auth = ConnectorViewAuth.Browser, Since = "2026-10-20T09:00:00Z" }],
+        });
+        var json = JsonSerializer.SerializeToNode(view.Integrations, ShellContract.Options)!["connectors"]![0]!.AsObject();
+        Assert.Equal(["key", "name", "host", "status", "toolCount", "app", "label", "kind", "auth", "since"], json.Select(p => p.Key));
+        Assert.Equal(30, view.Integrations.Connectors[0].Label!.Length);
+    }
+
+    [Fact]
+    public void CatalogDefaultsToTheBuiltInAppsAndIsClamped()
+    {
+        var def = Build().Integrations.Catalog;
+        Assert.Equal(ConnectorCatalog.Apps.Select(a => a.Id), def.Select(c => c.Id));
+        Assert.Equal(CatalogSetup.Folder, def.Single(c => c.Id == "obsidian").Setup);
+
+        var huge = SettingsView.Default with
+        {
+            Integrations = SettingsView.Default.Integrations with
+            {
+                Catalog = [.. Enumerable.Range(0, 50).Select(i => new CatalogView("a" + i, new string('n', 200), new string('d', 500), CatalogSetup.SignIn, true))],
+            },
+        };
+        var clamped = ShellSettingsBuilder.Clamp(huge).Integrations.Catalog;
+        Assert.Equal(32, clamped.Count);
+        Assert.All(clamped, c => Assert.True(c.Name.Length == 80 && c.Description.Length == 200));
+    }
 }

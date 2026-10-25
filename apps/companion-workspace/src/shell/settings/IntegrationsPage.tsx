@@ -1,35 +1,29 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useRef, useState } from "react";
 import type { ShellState } from "../contract";
+import type { CatalogItem, Connector } from "../connectorsContract";
 import { Badge, Group, PillButton, Row, SearchField, Segmented } from "../ui";
 import { act, ConfirmRow, Page } from "./common";
-
-type Connector = ShellState["settings"]["integrations"]["connectors"][number];
-type Auth = "browser" | "apiKey" | "none";
+import { ConnectorEditor, labelError, type EditorPreset } from "./ConnectorEditor";
 
 const STATUS = {
   connected: { tone: "ok", text: "Connected" },
   checking: { tone: "muted", text: "Checking…" },
-  error: { tone: "danger", text: "Error" },
+  configured: { tone: "muted", text: "Not checked" },
+  signingIn: { tone: "muted", text: "Signing in…" },
   needsSignIn: { tone: "warn", text: "Needs sign-in" },
+  reconnect: { tone: "warn", text: "Reconnect required" },
+  tokenRejected: { tone: "danger", text: "Key rejected" },
+  error: { tone: "danger", text: "Error" },
 } as const;
 
-const AUTH_OPTIONS = [
-  { value: "browser", label: "Sign in with browser" },
-  { value: "apiKey", label: "API key" },
-  { value: "none", label: "None" },
-] as const;
-
-const MAX_ARG = 512; // the host rejects a connector.add arg longer than this
-const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
-/** https:// anywhere, http:// only for this PC; no whitespace, backslashes, #fragments or user:password@ tricks (as ConnectorRegistry.ValidateUrl). */
-function validUrl(raw: string) {
-  if (!raw || /[\s\\#]/.test(raw)) return false;
-  try {
-    const u = new URL(raw);
-    if (!u.hostname || u.username || u.password) return false;
-    return u.protocol === "https:" || (u.protocol === "http:" && LOCAL_HOSTS.has(u.hostname));
-  } catch { return false; }
+const MAX_ACCOUNTS = 5; // per catalog app (the host enforces it too)
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** "d MMM yyyy" in the user's time zone, with fixed English month names. */
+function addedOn(since: string) {
+  const d = new Date(since);
+  return `Added ${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
 }
+const titleOf = (c: Connector) => (c.label ? `${c.name} · ${c.label}` : c.name);
 
 function BrowserCard({ chrome }: { chrome: ShellState["settings"]["integrations"]["chrome"] }) {
   return (
@@ -48,112 +42,162 @@ function BrowserCard({ chrome }: { chrome: ShellState["settings"]["integrations"
   );
 }
 
-function ConnectorRow({ c, removing, onRemoving }: { c: Connector; removing: boolean; onRemoving: (on: boolean) => void }) {
-  const status = STATUS[c.status];
-  const trigger = useRef<HTMLButtonElement>(null);
+type LabelChoice = "work" | "personal" | "other";
+const LABEL_OPTIONS = [{ value: "work", label: "Work" }, { value: "personal", label: "Personal" }, { value: "other", label: "Other…" }] as const;
+const PRESET_LABELS = { work: "Work", personal: "Personal" } as const;
+
+/** Work / Personal / Other… (a typed label of up to 30 characters); used to add another account and to rename one. */
+function LabelPicker({ initial, saveLabel, onCancel, onSave }: { initial: string; saveLabel: string; onCancel: () => void; onSave: (label: string) => void }) {
+  const start: LabelChoice = initial === "Work" ? "work" : initial === "Personal" ? "personal" : "other";
+  const [choice, setChoice] = useState<LabelChoice>(start);
+  const [other, setOther] = useState(start === "other" ? initial : "");
+  const label = choice === "other" ? other.trim() : PRESET_LABELS[choice];
+  const error = choice === "other" ? labelError(other) : null;
   return (
     <>
-      <Row title={c.name}
+      <div className="settings-field">
+        <Segmented label="Account label" options={LABEL_OPTIONS} value={choice} onChange={setChoice} />
+        {choice === "other" ? (
+          <input className="settings-input" aria-label="Label" placeholder="Label" maxLength={30} value={other} onChange={(e) => setOther(e.target.value)} />
+        ) : null}
+        {error ? <span role="alert" className="settings-field__error">{error}</span> : null}
+      </div>
+      <div className="settings-actions">
+        <PillButton size="sm" variant="outline" onClick={onCancel}>Cancel</PillButton>
+        <PillButton size="sm" variant="primary" disabled={label.length === 0 || error !== null} onClick={() => onSave(label)}>{saveLabel}</PillButton>
+      </div>
+    </>
+  );
+}
+
+/** What is open under a row: its remove confirm, its rename picker, or an app's "add another account" picker. One at a time. */
+type Open = { kind: "remove" | "rename"; key: string } | { kind: "add"; app: string } | null;
+
+function ConnectorRow({ c, multiAccount, open, setOpen }: { c: Connector; multiAccount: boolean; open: Open; setOpen: (o: Open) => void }) {
+  const status = STATUS[c.status];
+  const trigger = useRef<HTMLButtonElement>(null);
+  const title = titleOf(c);
+  const vault = c.kind === "vault";
+  const signIn = c.auth === "browser" && (c.status === "needsSignIn" || c.status === "reconnect");
+  const signInText = c.status === "reconnect" ? "Reconnect" : "Sign in";
+  const removing = open?.kind === "remove" && open.key === c.key;
+  const renaming = open?.kind === "rename" && open.key === c.key;
+  return (
+    <>
+      <Row title={title}
         description={(
           <>
             <span>{c.host}</span>
             {c.toolCount === null ? null : <span className="settings-line">{c.toolCount === 1 ? "1 tool" : `${c.toolCount} tools`}</span>}
+            {c.since ? <span className="settings-line">{addedOn(c.since)}</span> : null}
+            {c.status === "signingIn" ? <span className="settings-line">Finish connecting in your browser.</span> : null}
           </>
         )}>
         <Badge tone={status.tone}>{status.text}</Badge>
-        <PillButton size="sm" aria-label={`Test ${c.name}`} onClick={() => act("connector.test", c.key)}>Test</PillButton>
-        <PillButton size="sm" variant="danger" ref={trigger} aria-label={`Remove ${c.name}`} onClick={() => onRemoving(true)}>Remove</PillButton>
+        {signIn ? <PillButton size="sm" variant="primary" aria-label={`${signInText} ${title}`} onClick={() => act("connector.signIn", c.key)}>{signInText}</PillButton> : null}
+        {c.status === "signingIn" || c.status === "checking" ? null
+          : <PillButton size="sm" aria-label={`Test ${title}`} onClick={() => act("connector.test", c.key)}>Test</PillButton>}
+        {multiAccount ? <PillButton size="sm" aria-label={`Rename ${title}`} onClick={() => setOpen({ kind: "rename", key: c.key })}>Rename</PillButton> : null}
+        <PillButton size="sm" variant="danger" ref={trigger} aria-label={`${vault ? "Disconnect" : "Remove"} ${title}`} onClick={() => setOpen({ kind: "remove", key: c.key })}>
+          {vault ? "Disconnect" : "Remove"}
+        </PillButton>
       </Row>
+      {renaming ? (
+        <LabelPicker initial={c.label ?? "Work"} saveLabel="Save" onCancel={() => setOpen(null)}
+          onSave={(label) => { setOpen(null); act("connector.label", JSON.stringify({ key: c.key, label })); }} />
+      ) : null}
       {removing ? (
-        <ConfirmRow title={`Remove ${c.name}? Agents will lose access to it.`} confirmLabel="Remove connector"
-          onKeep={() => { onRemoving(false); trigger.current?.focus(); }}
-          onConfirm={() => { onRemoving(false); act("connector.remove", c.key); }} />
+        <ConfirmRow title={vault ? "Disconnect Obsidian? Agents lose access to your notes from their next task." : `Remove ${title}? Agents lose access to it from their next task.`}
+          confirmLabel={vault ? "Disconnect" : "Remove connector"}
+          onKeep={() => { setOpen(null); trigger.current?.focus(); }}
+          onConfirm={() => { setOpen(null); act("connector.remove", c.key); }} />
       ) : null}
     </>
   );
 }
 
-const PENDING_MS = 8_000; // a cancelled key prompt sends no toast and adds nothing: let the user try again
-
-/**
- * Stays open after Add (typed values kept) until the host's next state holds a connector with that name; a toast
- * means the host refused or needs something, so the form unlocks for another try.
- */
-function AddConnector({ connectors, toasts, onClose }: { connectors: Connector[]; toasts: string[]; onClose: () => void }) {
-  const [name, setName] = useState("");
-  const [url, setUrl] = useState("");
-  const [auth, setAuth] = useState<Auth>("browser");
-  const [pending, setPending] = useState<{ keys: Set<string>; toasts: Set<string>; name: string } | null>(null);
-  useEffect(() => {
-    if (!pending) return;
-    if (connectors.some((c) => !pending.keys.has(c.key) && c.name.trim().toLowerCase() === pending.name.toLowerCase())) onClose();
-    else if (toasts.some((id) => !pending.toasts.has(id))) setPending(null);
-  }, [pending, connectors, toasts, onClose]);
-  useEffect(() => {
-    if (!pending) return;
-    const t = setTimeout(() => setPending(null), PENDING_MS);
-    return () => clearTimeout(t);
-  }, [pending]);
-  const cleanName = name.trim();
-  const cleanUrl = url.trim();
-  const arg = JSON.stringify({ name: cleanName, url: cleanUrl, auth });
-  const urlOk = validUrl(cleanUrl);
-  const tooLong = arg.length > MAX_ARG;
-  const canAdd = auth !== "browser" && cleanName.length > 0 && cleanName.length <= 60 && urlOk && !tooLong && !pending;
-  const add = () => {
-    setPending({ keys: new Set(connectors.map((c) => c.key)), toasts: new Set(toasts), name: cleanName });
-    act("connector.add", arg);
-  };
+function AvailableRow({ item, onSetUp }: { item: CatalogItem; onSetUp: (preset: EditorPreset) => void }) {
+  const add = () => act("connector.add", JSON.stringify({ app: item.id }));
   return (
-    <Group title="New connector">
-      <div className="settings-field">
-        <label className="settings-field__label" htmlFor="settings-connector-name">Name</label>
-        <input id="settings-connector-name" className="settings-input" maxLength={60} placeholder="Linear" value={name} onChange={(e) => setName(e.target.value)} />
-      </div>
-      <div className="settings-field">
-        <label className="settings-field__label" htmlFor="settings-connector-url">Server URL</label>
-        <input id="settings-connector-url" className="settings-input" maxLength={400} spellCheck={false} placeholder="https://mcp.example.com/mcp"
-          value={url} aria-invalid={cleanUrl !== "" && !urlOk} onChange={(e) => setUrl(e.target.value)} />
-        {cleanUrl !== "" && !urlOk
-          ? <span role="alert" className="settings-field__error">Use an address that starts with https:// (http:// only works for 127.0.0.1 or localhost).</span> : null}
-        {tooLong ? <span role="alert" className="settings-field__error">That name and address are too long together.</span> : null}
-      </div>
-      <div className="settings-field">
-        <span className="settings-field__label">Authentication</span>
-        <Segmented label="Authentication" options={AUTH_OPTIONS} value={auth} onChange={setAuth} />
-        {auth === "browser" ? <span className="settings-field__hint">Browser sign-in arrives with the connectors update.</span> : null}
-        {auth === "apiKey" ? <span className="settings-field__hint">OpenClicky asks for the key in a secure prompt after you add the connector.</span> : null}
-      </div>
-      <div className="settings-actions">
-        <PillButton size="sm" variant="outline" onClick={onClose}>Cancel</PillButton>
-        <PillButton size="sm" variant="primary" disabled={!canAdd} onClick={add}>{pending ? "Adding…" : "Add connector"}</PillButton>
-      </div>
-    </Group>
+    <Row title={item.name} description={item.description}>
+      {item.setup === "url" ? <PillButton size="sm" aria-label={`Set up ${item.name}`} onClick={() => onSetUp({ app: item.id, name: item.name })}>Set up</PillButton>
+        : item.setup === "folder" ? <PillButton size="sm" onClick={add}>Choose vault</PillButton>
+        : <PillButton size="sm" aria-label={`Connect ${item.name}`} onClick={add}>Connect</PillButton>}
+    </Row>
   );
 }
 
+const has = (text: string | null, q: string) => (text ?? "").toLowerCase().includes(q);
+
 export function IntegrationsPage({ state }: { state: ShellState }) {
-  const { chrome, connectors } = state.settings.integrations;
+  const { chrome, connectors, catalog } = state.settings.integrations;
   const [query, setQuery] = useState("");
-  const [adding, setAdding] = useState(false);
-  const [removing, setRemoving] = useState<string | null>(null);
-  const closeAdd = useCallback(() => setAdding(false), []);
+  const [editing, setEditing] = useState<{ preset: EditorPreset | null } | null>(null);
+  const [open, setOpen] = useState<Open>(null);
+  const closeEditor = useCallback(() => setEditing(null), []);
   const toasts = state.cards.filter((c) => c.kind === "toast").map((c) => c.id);
   const q = query.trim().toLowerCase();
-  const shown = q ? connectors.filter((c) => c.name.toLowerCase().includes(q) || c.host.toLowerCase().includes(q)) : connectors;
+
+  // Account rows of one app sit together, in the order the app first appears.
+  const shown = q ? connectors.filter((c) => has(c.name, q) || has(c.label, q) || has(c.host, q)) : connectors;
+  const groups: Connector[][] = [];
+  const byApp = new Map<string, Connector[]>();
+  for (const c of shown) {
+    if (!c.app) { groups.push([c]); continue; }
+    let group = byApp.get(c.app);
+    if (!group) { group = []; byApp.set(c.app, group); groups.push(group); }
+    group.push(c);
+  }
+  const connectedApps = new Set(connectors.map((c) => c.app));
+  const available = catalog.filter((i) => !connectedApps.has(i.id) && (!q || has(i.name, q) || has(i.description, q)));
+
+  const renderGroup = (group: Connector[]) => {
+    const app = group[0].app;
+    const item = app ? catalog.find((i) => i.id === app) : undefined;
+    const multi = item?.multiAccount === true;
+    const accounts = connectors.filter((c) => c.app === app);
+    const used = new Set(accounts.map((c) => c.label));
+    return (
+      <Fragment key={group[0].key}>
+        {group.map((c) => <ConnectorRow key={c.key} c={c} multiAccount={multi} open={open} setOpen={setOpen} />)}
+        {item && multi && accounts.length < MAX_ACCOUNTS ? (
+          open?.kind === "add" && open.app === item.id ? (
+            <LabelPicker initial={!used.has("Work") ? "Work" : !used.has("Personal") ? "Personal" : ""} saveLabel="Continue" onCancel={() => setOpen(null)}
+              onSave={(label) => { setOpen(null); act("connector.add", JSON.stringify({ app: item.id, label })); }} />
+          ) : (
+            <div className="settings-add-account">
+              <PillButton size="sm" variant="outline" onClick={() => setOpen({ kind: "add", app: item.id })}>{`Add another ${item.name} account`}</PillButton>
+            </div>
+          )
+        ) : null}
+      </Fragment>
+    );
+  };
+
   return (
     <Page title="Integrations" subtitle="Apps and services your agents can use.">
       <BrowserCard chrome={chrome} />
+      <p className="settings-note">When an agent uses an app, its request goes to that app, and what comes back goes to your model provider with the task. Keys and sign-ins stay encrypted on this PC.</p>
       <div className="settings-toolbar">
-        <div className="settings-toolbar__search"><SearchField label="Search connectors" value={query} onChange={setQuery} /></div>
-        {adding ? null : <PillButton onClick={() => setAdding(true)}>Add custom connector</PillButton>}
+        <div className="settings-toolbar__search"><SearchField label="Search integrations" value={query} onChange={setQuery} /></div>
+        {editing ? null : <PillButton onClick={() => setEditing({ preset: null })}>Add custom connector</PillButton>}
       </div>
-      {adding ? <AddConnector connectors={connectors} toasts={toasts} onClose={closeAdd} /> : null}
-      <Group title="Connected">
-        {shown.length === 0
-          ? <Row title={connectors.length === 0 ? "No connectors yet" : "No connectors match your search"} />
-          : shown.map((c) => <ConnectorRow key={c.key} c={c} removing={removing === c.key} onRemoving={(on) => setRemoving(on ? c.key : null)} />)}
-      </Group>
+      {editing ? <ConnectorEditor key={editing.preset?.app ?? ""} connectors={connectors} toasts={toasts} preset={editing.preset} onClose={closeEditor} /> : null}
+      {q && groups.length === 0 && available.length === 0 ? <p className="settings-empty">{`Nothing matches “${query.trim()}”.`}</p> : (
+        <>
+          {q && groups.length === 0 ? null : (
+            <Group title="Connected">
+              {groups.length === 0 ? <Row title="Nothing connected yet." /> : groups.map(renderGroup)}
+            </Group>
+          )}
+          {q && available.length === 0 ? null : (
+            <Group title="Available">
+              {available.length === 0 ? <Row title="Everything here is connected." />
+                : available.map((i) => <AvailableRow key={i.id} item={i} onSetUp={(preset) => setEditing({ preset })} />)}
+            </Group>
+          )}
+        </>
+      )}
     </Page>
   );
 }

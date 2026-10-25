@@ -724,17 +724,6 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         return demo ? run : Task.CompletedTask;
     }
 
-    private IReadOnlyList<RemoteMcpConnector> OpenConnectors()
-    {
-        var list = new List<RemoteMcpConnector>();
-        try
-        {
-            foreach (var info in _connectors.List())
-                if (_connectors.Secret(info.Key) is { } secret) list.Add(new RemoteMcpConnector(info.Key, info.DisplayName, secret));
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException) { Log("connector_load_error=" + ex.GetType().Name); }
-        return list;
-    }
 
     private async Task<bool> InitializeTaskRunAsync(string id, string task, AgentAccessMode access, CancellationToken token, string? jobId = null)
     {
@@ -810,7 +799,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
                     ? new ChromeBridgeSession(new TaskChromeHost(new ChromeBridgeHost(pipe), control, t => LeaseScreenAsync(me, t)),
                         new ChromeApprovalBroker(_confirm, control, t => LeaseScreenAsync(me, t)), access, configuration.AllowedOrigins,
                         AgentDenyList.ParseExtraFragments(_settings.AgentDenyListExtra)) : null;
-                var connectors = OpenConnectors();
+                var connectors = await OpenConnectorsAsync(token).ConfigureAwait(false);
                 OpenCodeTaskResult result;
                 try
                 {

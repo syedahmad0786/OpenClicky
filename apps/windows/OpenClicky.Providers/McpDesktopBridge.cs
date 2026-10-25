@@ -113,7 +113,9 @@ public sealed class McpDesktopBridge
         }
     }
 
-    private static object[] ToolDefinitions(DesktopToolSession session)
+    private const string MultiAccountRule = "Some apps have more than one account. When reading, search every account of that app unless the user named one, and say which account each result came from. To change an existing item, use the account it came from. To create or send something, use the account the user named or the one the context makes clear; if it is still unclear, ask the user once.";
+
+    internal static object[] ToolDefinitions(DesktopToolSession session)
     {
         var browserAvailable = session.BrowserToolsAvailable;
         var tools = new List<object>
@@ -140,8 +142,8 @@ public sealed class McpDesktopBridge
             tools.AddRange(JobOutputTools.Definitions((name, description, properties, required) => Tool(name, description, properties, required)));
         if (session.Connectors.Count > 0)
         {
-            var keys = string.Join(", ", session.Connectors.Select(c => $"{c.Key} ({c.DisplayName})"));
-            tools.Add(Tool("connector_tools", "List the tools of one connected account. Connected: " + keys + ".", new { connector = StringProperty() }, ["connector"]));
+            var keys = string.Join(", ", session.Connectors.Select(c => $"{c.Key} ({c.Title})"));
+            tools.Add(Tool("connector_tools", "List the tools of one connected account. Connected: " + keys + ". " + MultiAccountRule, new { connector = StringProperty() }, ["connector"]));
             tools.Add(Tool("connector_call", "Call one tool from connector_tools. arguments is a JSON object string matching its input_schema. Tools that are not read_only need the user's approval.",
                 new { connector = StringProperty(), tool = StringProperty(), arguments = StringProperty(), rationale = StringProperty() }, ["connector", "tool", "arguments", "rationale"]));
         }

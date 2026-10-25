@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { catalogSchema, connectorSchema } from "./connectorsContract";
 
 // Mirror of apps/windows/OpenClicky.Core/Shell/ShellContract.cs. Keep both in step;
 // tests/fixtures/shell-state.v1.json is parsed by both test suites.
@@ -26,7 +27,7 @@ export const settingsActions = [
   "signIn", "signOut", "refreshModels", "manageUsage", "secret.edit", "testMic", "downloadWhisper", "downloadWhisperMultilingual", "playTestSound",
   "previewVoice", "clearHistory", "exportMemory", "openNotes", "openClipboard", "openTasks", "chooseAgentFolder",
   "resetAgentFolder", "openPrivacySetting", "routine.run", "routine.pause", "routine.resume", "routine.delete",
-  "connector.add", "connector.test", "connector.remove", "chrome.setup", "recordHotkey", "resetHotkeys", "openLogs",
+  "connector.add", "connector.test", "connector.remove", "connector.signIn", "connector.label", "chrome.setup", "recordHotkey", "resetHotkeys", "openLogs",
 ] as const;
 // Mirror of apps/windows/OpenClicky.Core/Shell/OnboardingContract.cs; tests/fixtures/onboarding.v1.json lists both.
 export const onboardingSteps = [
@@ -125,13 +126,8 @@ const settingsViewSchema = z.object({
   cursor: z.object({ colour: hex, hidden: z.boolean(), screenHighlight: z.boolean(), shakeToDetach: z.boolean() }).strict(),
   integrations: z.object({
     chrome: z.enum(["notInstalled", "waiting", "connected"]),
-    connectors: z.array(z.object({
-      key: id,
-      name: text(80),
-      host: text(255),
-      status: z.enum(["connected", "checking", "error", "needsSignIn"]),
-      toolCount: z.number().int().min(0).nullable(),
-    }).strict()).max(64),
+    connectors: z.array(connectorSchema).max(64),
+    catalog: z.array(catalogSchema).max(32),
   }).strict(),
   agents: z.object({
     folder: text(4_096),

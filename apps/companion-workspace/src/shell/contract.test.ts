@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { MAX_CONNECTOR_ADD_ARG } from "./connectorsContract";
 import { drawingActions, parseHostMessage, parseShellState, settingsActions, settingsPatchKeySchema, settingsSections, shellStateSchema } from "./contract";
 
 const fixture = JSON.parse(readFileSync(resolve(__dirname, "../../../../tests/fixtures/shell-state.v1.json"), "utf8"));
@@ -60,6 +61,7 @@ describe("shell contract", () => {
     );
     expect(state.settings.microphone.devices.map((d) => d.state)).toEqual(["active", "unavailable"]);
     expect(state.settings.integrations.connectors.map((c) => c.toolCount)).toEqual([12, null]);
+    expect(state.settings.integrations.catalog.map((c) => c.setup)).toEqual(["signIn", "folder"]);
     expect(state.settings.routines.map((r) => r.next)).toEqual(["2026-10-25T08:00:00Z", null]);
   });
 
@@ -88,7 +90,7 @@ describe("shell contract", () => {
 
   it("knows every sidebar section and settings action", () => {
     expect(settingsSections).toHaveLength(16);
-    expect(settingsActions).toHaveLength(29);
+    expect(settingsActions).toHaveLength(31);
     expect(settingsSections).not.toContain("billing");
     expect(settingsActions).not.toContain("formatDisk");
   });
@@ -143,6 +145,9 @@ describe("shell contract", () => {
       hotkeyTrigger: settings.shortcuts.shape.talk.shape.trigger.options,
       chromeState: settings.integrations.shape.chrome.options,
       connectorStatus: settings.integrations.shape.connectors.element.shape.status.options,
+      connectorKind: settings.integrations.shape.connectors.element.shape.kind.options,
+      connectorAuth: settings.integrations.shape.connectors.element.shape.auth.options,
+      catalogSetup: settings.integrations.shape.catalog.element.shape.setup.options,
       reachState: settings.agents.shape.reach.element.shape.state.options,
       routineStatus: settings.routines.element.shape.status.options,
       accessMode: settings.access.shape.mode.options,
@@ -151,6 +156,22 @@ describe("shell contract", () => {
     expect(Object.keys(actual).sort()).toEqual(Object.keys(enums).sort());
     for (const [name, values] of Object.entries(actual)) expect([name, [...values]]).toEqual([name, enums[name]]);
     expect(shellStateSchema.shape.notch.shape.section.options).toEqual(enums.sections);
+  });
+
+  it("connector wire shape is strict", () => {
+    const connector = fixture.settings.integrations.connectors[0];
+    const parse = (c: unknown, catalog: unknown[] = fixture.settings.integrations.catalog) =>
+      shellStateSchema.safeParse({ ...fixture, settings: { ...fixture.settings, integrations: { ...fixture.settings.integrations, connectors: [c], catalog } } }).success;
+    expect(parse(connector)).toBe(true);
+    const { kind: _kind, ...noKind } = connector;
+    expect(parse(noKind)).toBe(false);
+    expect(parse({ ...connector, auth: "oauth" })).toBe(false);
+    expect(parse({ ...connector, label: "x".repeat(31) })).toBe(false);
+    expect(parse({ ...connector, secret: "x" })).toBe(false);
+    expect(parse({ ...connector, since: "yesterday" })).toBe(false);
+    expect(parse(connector, [{ ...fixture.settings.integrations.catalog[0], setup: "oauth" }])).toBe(false);
+    expect(parse(connector, Array(33).fill(fixture.settings.integrations.catalog[0]))).toBe(false);
+    expect(MAX_CONNECTOR_ADD_ARG).toBe(8000);
   });
 
   it("parses mic.level", () => {

@@ -184,44 +184,6 @@ public class SettingsServiceTests
         Assert.Matches("^win:[0-9a-f]{16}$", id);
     }
 
-    [Fact]
-    public void ConnectorArgParsesValidDrafts()
-    {
-        Assert.True(SettingsActionArgs.TryParseConnector("""{"name":" Linear ","url":"https://mcp.linear.app/sse","auth":"apiKey"}""", out var draft, out _));
-        Assert.Equal(new ConnectorDraft("Linear", "https://mcp.linear.app/sse", ConnectorAuth.ApiKey), draft);
-        Assert.True(SettingsActionArgs.TryParseConnector("""{"name":"Local","url":"http://127.0.0.1:3000/mcp","auth":"none"}""", out draft, out _));
-        Assert.Equal(ConnectorAuth.None, draft!.Auth);
-        Assert.True(SettingsActionArgs.TryParseConnector("""{"name":"Gmail","url":"https://x.example/mcp","auth":"browser"}""", out draft, out _));
-        Assert.Equal(ConnectorAuth.Browser, draft!.Auth);
-    }
-
-    [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    [InlineData("not json")]
-    [InlineData("[]")]
-    [InlineData("""{"name":"","url":"https://x.example","auth":"none"}""")]
-    [InlineData("""{"name":"X","url":"http://evil.example/mcp","auth":"none"}""")]
-    [InlineData("""{"name":"X","url":"https://user:pw@x.example/mcp","auth":"none"}""")]
-    [InlineData("""{"name":"X","url":"https://x.example/mcp","auth":"oauth"}""")]
-    [InlineData("""{"name":1,"url":"https://x.example/mcp","auth":"none"}""")]
-    [InlineData("""{"url":"https://x.example/mcp","auth":"none"}""")]
-    public void ConnectorArgRejectsBadDrafts(string? arg)
-    {
-        Assert.False(SettingsActionArgs.TryParseConnector(arg, out var draft, out var error));
-        Assert.Null(draft);
-        Assert.False(string.IsNullOrWhiteSpace(error));
-    }
-
-    [Fact]
-    public void ConnectorArgRejectsOversizeAndLongNames()
-    {
-        var longName = new string('n', 61);
-        Assert.False(SettingsActionArgs.TryParseConnector($$"""{"name":"{{longName}}","url":"https://x.example/mcp","auth":"none"}""", out _, out _));
-        var huge = $$"""{"name":"X","url":"https://x.example/{{new string('p', 600)}}","auth":"none"}""";
-        Assert.False(SettingsActionArgs.TryParseConnector(huge, out _, out _));
-    }
-
     [Theory]
     [InlineData(null, "abc", "Authorization", "Bearer abc")]
     [InlineData("", "Bearer abc", "Authorization", "Bearer abc")]
@@ -343,7 +305,5 @@ public class SettingsServiceTests
     {
         Assert.Equal("Give the connector a name.", SettingsActionArgs.UserMessage(new ArgumentException("Give the connector a name.", "displayName")));
         Assert.Equal("Up to 20.", SettingsActionArgs.UserMessage(new InvalidOperationException("Up to 20.")));
-        Assert.False(SettingsActionArgs.TryParseConnector("""{"name":"X","url":"http://evil.example/mcp","auth":"none"}""", out _, out var error));
-        Assert.DoesNotContain("(Parameter", error);
     }
 }
