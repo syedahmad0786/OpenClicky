@@ -70,6 +70,10 @@ public sealed class BrowserOpsTests
             { "snapshot", "{\"tabId\":0}" },
             { "batch", "{\"steps\":[{\"op\":\"javascript\",\"code\":\"1\"}]," + why + "}" },
             { "nope", "{}" },
+            { "snapshot", "{\"tabId\":\"4\"}" },
+            { "snapshot", "{\"tabId\":4.5}" },
+            { "batch", "{\"steps\":[{\"op\":\"back\",\"tabId\":\"4\"}]," + why + "}" },
+            { "click", "{\"ref\":\"e1\",\"rationale\":null}" },
         };
     }
 
@@ -94,6 +98,22 @@ public sealed class BrowserOpsTests
             rationale = "Search",
             steps = new object[] { new { op = "fill", @ref = "e3", text = "cats" }, new { op = "press", key = "Enter" } },
         })));
+    }
+
+    [Fact]
+    public void NullsAreAbsentAndWholeNumberTabIdsPass()
+    {
+        using var doc = JsonDocument.Parse("""
+            {"op":"snapshot","tabId":null,"query":null,"say":null,"rationale":null,"interactive":null,"save":null}
+            """);
+        Assert.Null(BrowserOps.Validate("snapshot", doc.RootElement));
+        Assert.Equal(BrowserOpKind.Read, BrowserOps.Kind("screenshot", JsonDocument.Parse("""{"save":null}""").RootElement));
+        Assert.Null(BrowserOps.Validate("snapshot", JsonDocument.Parse("""{"tabId":4.0}""").RootElement));
+        Assert.Null(BrowserOps.Validate("wait_for", JsonDocument.Parse("""{"timeout":null,"text":"Done"}""").RootElement));
+        Assert.Null(BrowserOps.Validate("batch", JsonDocument.Parse("""
+            {"rationale":"Go back","say":null,"steps":[{"op":"back","tabId":null},{"op":"click","ref":"e1","dismiss":null}]}
+            """).RootElement));
+        Assert.Null(BrowserOps.Validate("snapshot", Args(new { say = new string('a', 400) })));
     }
 
     [Fact]

@@ -109,6 +109,16 @@ describe("createBridge", () => {
     expect(list.result.text).not.toContain("Bank");
   });
 
+  it("deny fragments are matched verbatim, without trimming", async () => {
+    const { f, run } = setup();
+    f.add(13, 1, { title: "Your purchases", url: "https://shop.test/orders" });
+    f.add(14, 1, { title: "Chase Online - Accounts", url: "https://secure.chase.test/" });
+    const deny = { deny: ["chase ", "  ", ""] };
+    expect((await run("snapshot", { tabId: 13 }, deny)).ok).toBe(true);
+    expect(await run("snapshot", { tabId: 14 }, deny))
+      .toEqual({ ok: false, error: "This site is on the blocked list. Nothing was read or changed." });
+  });
+
   it("canceled_by_user hands over and reports the task", async () => {
     const { run, bridge, debuggee, tabs } = setup();
     const opened = await run("open", { url: "https://example.test/" });

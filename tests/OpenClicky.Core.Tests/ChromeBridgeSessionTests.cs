@@ -226,6 +226,40 @@ public sealed class ChromeBridgeSessionTests
     }
 
     [Fact]
+    public async Task RefusesCallsAfterEnd()
+    {
+        var (session, bridge, _) = Create(AgentAccessMode.FullAccess);
+        await session.EndAsync(tidy: false, default);
+
+        var after = await session.CallAsync("browser", Args(new { op = "snapshot" }), default);
+
+        Assert.True(after.IsError);
+        Assert.Equal("This job's browser session has ended.", after.Content[0].Text);
+        Assert.Equal(["end"], bridge.Commands.Select(c => c.Op));
+    }
+
+    [Fact]
+    public async Task NullArgsAreDroppedAndLongSayIsCut()
+    {
+        var (session, bridge, broker) = Create(AgentAccessMode.ConfirmEach);
+        using var args = JsonDocument.Parse($$"""
+            {"op":"batch","tabId":null,"rationale":"Go back","say":"{{new string('s', 200)}}",
+             "steps":[{"op":"back","tabId":null},{"op":"click","ref":"e1","dismiss":null}]}
+            """);
+
+        var result = await session.CallAsync("browser", args.RootElement, default);
+
+        Assert.False(result.IsError);
+        var command = Assert.Single(bridge.Commands);
+        Assert.Equal(160, command.Say!.Length);
+        Assert.False(command.Args.TryGetProperty("tabId", out _));
+        Assert.False(command.Args.GetProperty("steps")[0].TryGetProperty("tabId", out _));
+        Assert.False(command.Args.GetProperty("steps")[1].TryGetProperty("dismiss", out _));
+        Assert.Equal("e1", command.Args.GetProperty("steps")[1].GetProperty("ref").GetString());
+        Assert.DoesNotContain(broker.Last!.Arguments.Values, v => v.Contains("null"));
+    }
+
+    [Fact]
     public void ToolNamesMapFromMcp()
     {
         Assert.True(ChromeBridgeSession.TryMapToolName("openclicky_browser", out var mapped));

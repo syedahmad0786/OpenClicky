@@ -41,7 +41,7 @@ public static class BrowserOps
         if (!All.Contains(op)) return $"Unknown operation \"{Clip(op)}\". Use one of: {string.Join(", ", ModelOps)}.";
         if (args.ValueKind != JsonValueKind.Object) return "Arguments must be an object.";
         if (Check(op, args) is { } problem) return problem;
-        if (Has(args, "say") && Str(args, "say") is not { Length: <= 160 }) return "say is a short note of at most 160 characters.";
+        if (Has(args, "say") && Str(args, "say") is null) return "say is a short note."; // over-long notes are cut to 160 by the session
         if (Has(args, "rationale") && Str(args, "rationale") is not { Length: <= 500 }) return "rationale is at most 500 characters.";
         if (Kind(op, args) is BrowserOpKind.Act or BrowserOpKind.AlwaysAsk && string.IsNullOrWhiteSpace(Str(args, "rationale")))
             return $"{op} changes the page, so give a rationale saying why.";
@@ -50,7 +50,7 @@ public static class BrowserOps
 
     private static string? Check(string op, JsonElement a)
     {
-        if (Has(a, "tabId") && !(a.GetProperty("tabId").TryGetInt32(out var tab) && tab > 0)) return "tabId must be a positive whole number.";
+        if (Has(a, "tabId") && !IsTabId(a.GetProperty("tabId"))) return "tabId must be a positive whole number.";
         if (Has(a, "ref") && !(Str(a, "ref") is { } r && Ref.IsMatch(r))) return "ref must be a ref like e12 from the latest snapshot.";
         switch (op)
         {
@@ -112,7 +112,10 @@ public static class BrowserOps
     private static IEnumerable<JsonElement> Steps(JsonElement args) =>
         args.ValueKind == JsonValueKind.Object && args.TryGetProperty("steps", out var s) && s.ValueKind == JsonValueKind.Array
             ? s.EnumerateArray().Where(e => e.ValueKind == JsonValueKind.Object) : [];
-    private static bool Has(JsonElement a, string name) => a.TryGetProperty(name, out _);
+    /// <summary>JSON null counts as absent: models send optional arguments as null.</summary>
+    private static bool Has(JsonElement a, string name) => a.TryGetProperty(name, out var v) && v.ValueKind != JsonValueKind.Null;
+    private static bool IsTabId(JsonElement v) =>
+        v.ValueKind == JsonValueKind.Number && v.TryGetDouble(out var d) && d >= 1 && d <= int.MaxValue && d == Math.Floor(d);
     private static string? Str(JsonElement a, string name) =>
         a.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
     private static double? Num(JsonElement a, string name) =>

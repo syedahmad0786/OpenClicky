@@ -95,8 +95,9 @@ export function createBridge({ debuggee, tabs, downloads, refStore, limits = {} 
   }
 
   // The deny list is a convenience guard, not a security boundary: a page can change its title after we look.
+  // Fragments are used verbatim (lower-cased, not trimmed): "chase " must not match "purchases".
   const deniedBy = (cmd, ...texts) => {
-    const fragments = (Array.isArray(cmd.deny) ? cmd.deny : []).map((d) => String(d).trim().toLowerCase()).filter(Boolean);
+    const fragments = (Array.isArray(cmd.deny) ? cmd.deny : []).map((d) => String(d).toLowerCase()).filter((d) => d.trim());
     return fragments.some((f) => texts.some((t) => String(t ?? "").toLowerCase().includes(f)));
   };
   const checkUrl = (cmd, url) => { if (deniedBy(cmd, hostOf(url))) throw new Error(BLOCKED); };

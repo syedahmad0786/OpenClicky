@@ -96,10 +96,13 @@ public static class AgentDenyList
         return null;
     }
 
-    /// <summary>The defaults then the user's extra fragments, trimmed and lower-case (for the browser extension's check).</summary>
+    /// <summary>
+    /// The defaults verbatim (their trailing spaces matter: "chase " must not match "purchases"), then the user's
+    /// non-empty extra fragments trimmed and lower-case. For the browser extension's check.
+    /// </summary>
     public static IReadOnlyList<string> Fragments(IEnumerable<string>? extra) =>
-        DefaultTitleFragments.Concat(extra ?? []).Where(f => !string.IsNullOrWhiteSpace(f))
-            .Select(f => f.Trim().ToLowerInvariant()).Distinct().ToArray();
+        DefaultTitleFragments.Concat((extra ?? []).Where(f => !string.IsNullOrWhiteSpace(f)).Select(f => f.Trim().ToLowerInvariant()))
+            .Distinct().ToArray();
 
     public static IReadOnlyList<string> ParseExtraFragments(string? csv) =>
         string.IsNullOrWhiteSpace(csv)

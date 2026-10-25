@@ -75,6 +75,7 @@ public sealed class ChromeBridgeSession
     private async Task<DesktopToolResult> CallCoreAsync(string tool, JsonElement args, CancellationToken token)
     {
         if (!ToolNames.Contains(tool, StringComparer.Ordinal)) return Error($"Unknown tool '{tool}'.");
+        if (Volatile.Read(ref _ended) == 1) return Error("This job's browser session has ended.");
         if (_declined) return Error("This job's browser work ended when you declined an action.");
         var op = args.ValueKind == JsonValueKind.Object && args.TryGetProperty("op", out var o) && o.ValueKind == JsonValueKind.String
             ? o.GetString()! : "";
@@ -103,7 +104,8 @@ public sealed class ChromeBridgeSession
 
         var acting = kind is BrowserOpKind.Act or BrowserOpKind.AlwaysAsk;
         BrowserReply reply;
-        try { reply = await _bridge.SendAsync(Command(op, Text(args, "say"), ModelArgs(args)), Timeout(op, args), token).ConfigureAwait(false); }
+        var say = Text(args, "say") is { } note && note.Length > 160 ? note[..160] : Text(args, "say");
+        try { reply = await _bridge.SendAsync(Command(op, say, ModelArgs(args)), Timeout(op, args), token).ConfigureAwait(false); }
         catch { if (acting) _failedApprovedAction = true; throw; }
         if (!reply.Ok)
         {
@@ -146,22 +148,31 @@ public sealed class ChromeBridgeSession
         _ => TimeSpan.FromSeconds(25),
     };
 
-    /// <summary>The args the extension sees: everything but the app-side keys.</summary>
+    /// <summary>The args the extension sees: everything but the app-side keys, with nulls (meaning absent) dropped.</summary>
     private static JsonElement ModelArgs(JsonElement args) => JsonSerializer.SerializeToElement(
-        args.EnumerateObject().Where(p => !AppSideArgs.Contains(p.Name)).ToDictionary(p => p.Name, p => p.Value));
+        args.EnumerateObject().Where(p => !AppSideArgs.Contains(p.Name) && p.Value.ValueKind != JsonValueKind.Null)
+            .ToDictionary(p => p.Name, p => DropNulls(p.Value)));
+
+    private static object? DropNulls(JsonElement value) => value.ValueKind switch
+    {
+        JsonValueKind.Object => value.EnumerateObject().Where(p => p.Value.ValueKind != JsonValueKind.Null)
+            .ToDictionary(p => p.Name, p => DropNulls(p.Value)),
+        JsonValueKind.Array => value.EnumerateArray().Select(DropNulls).ToArray(),
+        _ => value,
+    };
 
     /// <summary>What the approval shows: one entry per arg, or one line per batch step.</summary>
     private static Dictionary<string, string> Flatten(string op, JsonElement args)
     {
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
-        foreach (var p in args.EnumerateObject().Where(p => !AppSideArgs.Contains(p.Name)))
+        foreach (var p in args.EnumerateObject().Where(p => !AppSideArgs.Contains(p.Name) && p.Value.ValueKind != JsonValueKind.Null))
         {
             if (op == "batch" && p.Name == "steps")
             {
                 var i = 0;
                 foreach (var step in p.Value.EnumerateArray())
                     values[$"step {++i}"] = Text(step, "op") + " " + string.Join(" ", step.EnumerateObject()
-                        .Where(s => s.Name != "op").Select(s => $"{s.Name}={Value(s.Value)}"));
+                        .Where(s => s.Name != "op" && s.Value.ValueKind != JsonValueKind.Null).Select(s => $"{s.Name}={Value(s.Value)}"));
             }
             else values[p.Name] = Value(p.Value);
         }

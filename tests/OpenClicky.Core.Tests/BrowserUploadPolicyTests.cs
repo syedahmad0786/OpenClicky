@@ -57,8 +57,53 @@ public sealed class BrowserUploadPolicyTests : IDisposable
     [Fact]
     public void RefusesOpenClickyAppData()
     {
-        var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OpenClicky", "settings.json");
-        Assert.NotNull(BrowserUploadPolicy.Validate([path]));
+        var root = Path.Combine(_dir, "AppData", "OpenClicky");
+        var settings = File(Path.Combine("AppData", "OpenClicky", "settings.json"));
+
+        Assert.Equal("settings.json looks like a secret or browser data, so it was not uploaded.",
+            BrowserUploadPolicy.Validate([settings], [root]));
+        Assert.Null(BrowserUploadPolicy.Validate([File(Path.Combine("AppData", "OpenClickyNotes", "notes.txt"))], [root]));
+        Assert.Contains(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OpenClicky"),
+            BrowserUploadPolicy.DefaultProtectedRoots);
+    }
+
+    [Fact]
+    public void RefusesStreamDeviceAndUncSpellings()
+    {
+        var plain = File("notes.txt");
+        Assert.Null(BrowserUploadPolicy.Validate([plain]));
+        Assert.NotNull(BrowserUploadPolicy.Validate([plain + "::$DATA"]));
+        Assert.NotNull(BrowserUploadPolicy.Validate([plain + ":hidden"]));
+        Assert.NotNull(BrowserUploadPolicy.Validate([@"\\?\" + plain]));
+        Assert.NotNull(BrowserUploadPolicy.Validate([@"\\.\" + plain]));
+        Assert.NotNull(BrowserUploadPolicy.Validate(["//?/" + plain]));
+        Assert.NotNull(BrowserUploadPolicy.Validate([@"\\localhost\" + plain[0] + "$" + plain[2..]]));
+    }
+
+    [Fact]
+    public void RefusesProtectedFileReachedThroughJunction()
+    {
+        var root = Path.Combine(_dir, "protected", "OpenClicky");
+        File(Path.Combine("protected", "OpenClicky", "notes.txt"));
+        var link = Path.Combine(_dir, "link");
+        if (!TryLinkDirectory(link, root)) return; // no symlink privilege and no mklink: nothing to test here
+        try
+        {
+            Assert.Equal("notes.txt looks like a secret or browser data, so it was not uploaded.",
+                BrowserUploadPolicy.Validate([Path.Combine(link, "notes.txt")], [root]));
+        }
+        finally { Directory.Delete(link); } // the link only, never what it points to
+    }
+
+    private static bool TryLinkDirectory(string link, string target)
+    {
+        try { Directory.CreateSymbolicLink(link, target); return true; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { }
+        if (!OperatingSystem.IsWindows()) return false;
+        using var mklink = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/c mklink /J \"{link}\" \"{target}\"")
+            { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true })!;
+        mklink.WaitForExit(10_000);
+        return Directory.Exists(link);
     }
 
     [Fact]

@@ -46,6 +46,9 @@ public class AgentDenyListTests
         Assert.Equal("1password", all[0]);
         Assert.Equal("payroll", all[^1]);
         Assert.Single(all, f => f == "paypal");
-        Assert.All(all, f => Assert.Equal(f.Trim().ToLowerInvariant(), f));
+        Assert.Contains("chase ", all);
+        Assert.Contains("keeper ", all);
+        Assert.DoesNotContain("chase", all);
+        Assert.All(all, f => Assert.Equal(f.ToLowerInvariant(), f));
     }
 }
