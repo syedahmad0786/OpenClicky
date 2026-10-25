@@ -183,9 +183,9 @@ internal sealed partial class TrayApplicationContext
             return true;
         }
         if (!drive.OnPhysicalInput(kind, p.X, p.Y)) return true;
+        PauseTask(); // first: the orchestrator's next beforeStep must already see the pause
         Log("drive_taken_back kind=" + kind);
         HideDrivingPill();
-        PauseTask();
         return true;
     }
 
