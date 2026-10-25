@@ -7,11 +7,11 @@ type Flag = "morningBrief" | "suggestions" | "integrationNudges" | "meetingCount
 const CARDS: { flag: Flag; title: string; description: string }[] = [
   {
     flag: "morningBrief", title: "Morning brief",
-    description: "Once between 7 am and noon: today's meetings, jobs that need you and routines due. Built on this PC. Plan my day sends the brief to your model provider.",
+    description: "Once between 7 am and noon: today's meetings, jobs that need you and routines due. Built on this PC. Plan my day sends the brief to your model provider as a chat message, with the window in front, like any chat message.",
   },
   {
     flag: "suggestions", title: "Suggestions",
-    description: "Once a day, sends the titles of your recent jobs and routines and the names of your connectors to your model provider, which suggests up to three tasks. Nothing runs until you click Do it.",
+    description: "Once a day, sends the titles of your recent jobs and routines and the names of your connectors to your model provider, which suggests up to three tasks. Nothing runs until you click Do it, which sends the shown message as a chat message, with the window in front.",
   },
   {
     flag: "integrationNudges", title: "Connect nudges",

@@ -31,6 +31,9 @@ it("Proactive: four toggles render off and the sidebar lists the section", () =>
     expect(screen.getByRole("switch", { name })).toHaveAttribute("aria-checked", "false");
   expect(screen.getByRole("button", { name: "Proactive" })).toHaveAttribute("aria-current", "page");
   expect(screen.getByText("Proactive cards wait while you're on a call, presenting or in a full-screen app.")).toBeInTheDocument();
+  // Plan my day and Do it go through the normal chat path, which also sends the window in front.
+  expect(screen.getByText(/Plan my day sends the brief to your model provider as a chat message, with the window in front, like any chat message\./)).toBeInTheDocument();
+  expect(screen.getByText(/Nothing runs until you click Do it, which sends the shown message as a chat message, with the window in front\./)).toBeInTheDocument();
 });
 
 it("Proactive: toggling Suggestions posts settings.patch", () => {
