@@ -67,6 +67,9 @@ internal static class AutomaticDictationCheck
                         new OrCondition(new PropertyCondition(AutomationElement.NameProperty, "Submit"),
                             new PropertyCondition(AutomationElement.NameProperty, "Send"))) is not null)
                         throw new InvalidOperationException("The disposable fixture unexpectedly exposes a submit control.");
+                    // Other windows may cover the sandbox: keep it topmost (without activating it) so the click below lands on it.
+                    SetWindowPos(sandboxHandle, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010); // HWND_TOPMOST; NOSIZE NOMOVE NOACTIVATE
+                    await Task.Delay(300);
                     var point = edit.GetClickablePoint();
                     var executor = new CompositeAgentExecutor();
                     var click = await executor.ExecuteAsync(new(AgentToolNames.Click, new Dictionary<string, string>
@@ -133,6 +136,9 @@ internal static class AutomaticDictationCheck
         thread.Join();
         return exit;
     }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr insertAfter, int x, int y, int cx, int cy, uint flags);
 
     private static string? ReadValue(AutomationElement element)
     {

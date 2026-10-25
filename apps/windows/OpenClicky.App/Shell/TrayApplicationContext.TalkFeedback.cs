@@ -1,6 +1,7 @@
 using OpenClicky.App.Speech;
 using OpenClicky.Core;
 using OpenClicky.Core.CompanionCursor;
+using OpenClicky.Core.Dictation;
 using OpenClicky.Core.Shell;
 using OpenClicky.Core.Speech;
 using OpenClicky.Input;
@@ -162,6 +163,13 @@ internal sealed partial class TrayApplicationContext
                 CancelTask();
                 _taskControl.Resume();
                 return false;
+            // The card stays up while the last phrase is delivered; ending dictation removes it.
+            case (DictationCards.ActivityId, DictationCards.StopAction):
+                if (!_dictationActive || _dictationHeld) return false;
+                _ = FinishHandsFreeDictationAsync();
+                return true;
+            case (DictationCards.LearnedId, DictationCards.UndoAction):
+                return false; // D6: forget the learned word
             default:
                 Log("shell: card action not handled: " + actionId);
                 return false;

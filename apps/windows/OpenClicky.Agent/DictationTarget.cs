@@ -1,5 +1,6 @@
 using System.Windows.Automation;
 using OpenClicky.Core;
+using OpenClicky.Core.Dictation;
 
 namespace OpenClicky.Agent;
 
@@ -27,14 +28,23 @@ public sealed class DictationTarget
     public bool CanVerifyText { get; }
     internal AutomationElement Element => _element;
 
-    public static bool TryCapture(out DictationTarget? target, out string error, IEnumerable<string>? exclusions = null)
+    public static bool TryCapture(out DictationTarget? target, out string error, IEnumerable<string>? exclusions = null) =>
+        TryCapture(out target, out _, out error, exclusions);
+
+    /// <summary>As <see cref="TryCapture(out DictationTarget?, out string, IEnumerable{string}?)"/>, plus why it failed, for dictation's gate.</summary>
+    public static bool TryCapture(out DictationTarget? target, out DictationCaptureFailure failure, out string error,
+        IEnumerable<string>? exclusions = null)
     {
         target = null;
+        failure = DictationCaptureFailure.NoFocus;
         error = "Select an editable text field in another app, then start dictation again.";
         var window = ForegroundFocusRestorer.Capture();
+        // Our notch's fields live in the WebView2 process, so the field's process alone cannot prove the window is not ours.
+        if (ForegroundWindowInfo.IsCurrentProcessWindow(window)) { failure = DictationCaptureFailure.OwnWindow; return false; }
         var title = ForegroundWindowInfo.GetTitle();
         if (AgentDenyList.IsDenied(title, exclusions))
         {
+            failure = DictationCaptureFailure.Denied;
             error = "This app is excluded from dictation. Nothing was inspected.";
             return false;
         }
@@ -44,7 +54,9 @@ public sealed class DictationTarget
         try
         {
             var element = AutomationElement.FocusedElement;
-            if (element is null || element.Current.ProcessId == Environment.ProcessId) return false;
+            if (element is null) return false;
+            if (element.Current.ProcessId == Environment.ProcessId) { failure = DictationCaptureFailure.OwnWindow; return false; }
+            failure = DictationCaptureFailure.NotWritable;
             if (!element.Current.IsEnabled || !element.Current.IsKeyboardFocusable)
             {
                 error = "The selected control is disabled or cannot accept keyboard input.";
@@ -52,6 +64,7 @@ public sealed class DictationTarget
             }
             if (element.Current.IsPassword)
             {
+                failure = DictationCaptureFailure.Password;
                 error = "Dictation is unavailable in password or protected fields.";
                 return false;
             }
@@ -70,16 +83,19 @@ public sealed class DictationTarget
 
             var name = string.IsNullOrWhiteSpace(element.Current.Name) ? element.Current.ControlType.LocalizedControlType : element.Current.Name;
             target = new(window, focus, element, element.GetRuntimeId(), title ?? "Selected app", name, readable: true);
+            failure = DictationCaptureFailure.None;
             error = "";
             return true;
         }
         catch (ElementNotAvailableException)
         {
+            failure = DictationCaptureFailure.NoFocus;
             error = "The selected field disappeared. Select it again and restart dictation.";
             return false;
         }
         catch (InvalidOperationException)
         {
+            failure = DictationCaptureFailure.NotWritable;
             error = "The selected control cannot be used for dictation.";
             return false;
         }
@@ -102,19 +118,19 @@ public sealed class DictationTarget
         try { action = await executor.ExecuteAsync(request, userConfirmed: true, cancellationToken).ConfigureAwait(false); }
         catch (Exception ex)
         {
-            return new(true, false, "Input was attempted but did not finish. The destination may contain partial text: " + ex.Message, false, null);
+            return new(true, false, "Input was attempted but did not finish. The destination may contain partial text: " + ex.Message, false, null, beforeText);
         }
         if (!action.Success)
-            return new(true, false, "Input was attempted but did not finish. The destination may contain partial text: " + action.Message, false, null);
+            return new(true, false, "Input was attempted but did not finish. The destination may contain partial text: " + action.Message, false, null, beforeText);
 
         await Task.Delay(80, cancellationToken).ConfigureAwait(false);
         var finalText = ReadText();
         if (finalText is null)
-            return new(true, true, $"Inserted {text.Length} characters. The destination does not expose readable text, so insertion is unverified.", false, null);
+            return new(true, true, $"Inserted {text.Length} characters. The destination does not expose readable text, so insertion is unverified.", false, null, beforeText);
         var verified = DictationInsertionProof.IsExactContiguousChange(beforeText, finalText, text);
         return verified
-            ? new(true, true, $"Inserted and verified {text.Length} characters in the destination.", true, finalText)
-            : new(true, true, "Input was sent, but the readable destination did not show the reviewed draft as a new change. Treat insertion as unverified.", false, finalText);
+            ? new(true, true, $"Inserted and verified {text.Length} characters in the destination.", true, finalText, beforeText)
+            : new(true, true, "Input was sent, but the readable destination did not show the reviewed draft as a new change. Treat insertion as unverified.", false, finalText, beforeText);
     }
 
     private bool Revalidate(bool requireCurrentFocus, IEnumerable<string>? exclusions)
@@ -152,4 +168,6 @@ public sealed class DictationTarget
 
 }
 
-public sealed record DictationInsertResult(bool InputAttempted, bool InputCompleted, string Message, bool Verified, string? FinalText);
+/// <param name="ValueBefore">The field's value read just before input was sent; null when nothing was attempted or it was unreadable.</param>
+public sealed record DictationInsertResult(bool InputAttempted, bool InputCompleted, string Message, bool Verified, string? FinalText,
+    string? ValueBefore = null);
