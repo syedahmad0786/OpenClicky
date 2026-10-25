@@ -16,6 +16,8 @@ namespace OpenClicky.App;
 internal sealed partial class TrayApplicationContext
 {
     private BrowserBridgeServer? _browserBridge;
+    /// <summary>Released by Connect: wakes a supervisor that waits because nothing is registered.</summary>
+    private readonly SemaphoreSlim _browserRegistered = new(0, 1);
 
     private static string BrowserManifestPath =>
         Path.Combine(BrowserNativeHostRegistrar.DefaultBridgeFolder, BrowserNativeHostRegistrar.HostName + ".json");
@@ -24,7 +26,12 @@ internal sealed partial class TrayApplicationContext
 
     private void StartBrowserBridge() => _ = Task.Run(SuperviseBrowserBridgeAsync);
 
-    /// <summary>A server instance runs once; when one faults, the next starts 2 s later.</summary>
+    private static bool BrowserRegistered() => BrowserConnectionStore.Load(BrowserConnectionStore.DefaultPath).Registered;
+
+    /// <summary>
+    /// The pipe is open only while the user's Connect stands, so a disconnected browser's host can't get back in.
+    /// A server instance runs once: a disposed one (Disconnect) is replaced at once, a faulted one 2 s later.
+    /// </summary>
     private async Task SuperviseBrowserBridgeAsync()
     {
         byte[] secret;
@@ -32,22 +39,27 @@ internal sealed partial class TrayApplicationContext
         catch (Exception ex) when (ex is not OutOfMemoryException) { Log("browser_secret_error=" + ex.GetType().Name); return; }
         while (!_lifetime.IsCancellationRequested)
         {
+            if (!BrowserRegistered())
+            {
+                try { await _browserRegistered.WaitAsync(_lifetime.Token).ConfigureAwait(false); }
+                catch (OperationCanceledException) { return; }
+                continue;
+            }
             var server = new BrowserBridgeServer(secret, BrowserBridgeServer.PipeName,
                 () => BrowserConnectionStore.Load(BrowserConnectionStore.DefaultPath).SelectedInstance,
                 id => SaveBrowserConnection(c => c with { SelectedInstance = id }));
             server.Changed += OnBrowserChanged;
             server.StopRequested += OnBrowserStopRequested;
             _browserBridge = server;
-            try
-            {
-                await server.RunAsync(_lifetime.Token).ConfigureAwait(false);
-                return; // only cancellation ends RunAsync without an exception
-            }
-            catch (Exception ex) when (ex is not OutOfMemoryException) { Log("browser_bridge_error=" + ex.GetType().Name); }
+            var faulted = false;
+            try { await server.RunAsync(_lifetime.Token).ConfigureAwait(false); } // returns on app exit or Disconnect's dispose
+            catch (Exception ex) when (ex is not OutOfMemoryException) { Log("browser_bridge_error=" + ex.GetType().Name); faulted = true; }
+            Interlocked.CompareExchange(ref _browserBridge, null, server); // a disposed server may still report IsConnected
             server.Changed -= OnBrowserChanged;
             server.StopRequested -= OnBrowserStopRequested;
             try { await server.DisposeAsync().ConfigureAwait(false); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
             OnBrowserChanged(); // its profiles are gone from the card
+            if (!faulted) continue;
             try { await Task.Delay(TimeSpan.FromSeconds(2), _lifetime.Token).ConfigureAwait(false); }
             catch (OperationCanceledException) { return; }
         }
@@ -70,7 +82,7 @@ internal sealed partial class TrayApplicationContext
     /// <summary>The task's browser gate, on its access snapshot; null when no browser is connected. Its owner calls EndAsync on every exit.</summary>
     private ChromeBridgeSession? CreateBrowserSession(AgentAccessMode access, JobRun? work, string runId)
     {
-        if (_browserBridge is not { IsConnected: true } bridge) return null;
+        if (_browserBridge is not { } bridge || !BrowserGate.OffersSession(bridge.IsConnected, BrowserRegistered())) return null;
         var identity = new BrowserTaskIdentity(runId, work?.Job.Id ?? "task-" + runId, work?.Job.Title ?? "OpenClicky task", work?.Job.Colour ?? "blue");
         return new ChromeBridgeSession(bridge, new BrowserApprovalBroker(_confirm, _taskControl), access, identity,
             AgentDenyList.Fragments(AgentDenyList.ParseExtraFragments(_settings.AgentDenyListExtra)),
@@ -123,6 +135,7 @@ internal sealed partial class TrayApplicationContext
         var manifest = BrowserNativeHostRegistrar.WriteManifest(BrowserNativeHostRegistrar.DefaultBridgeFolder, Application.ExecutablePath);
         BrowserNativeHostRegistrar.Register(Registry.CurrentUser, browser.Kind.VendorKey, manifest);
         SaveBrowserConnection(c => c with { BrowserId = browser.Kind.Id, ProfileDirectory = profile.Directory, Registered = true });
+        try { _browserRegistered.Release(); } catch (SemaphoreFullException) { } // already signalled
         OpenExtensionsPage(browser, profile);
         ShowExtensionFolder();
     }
@@ -134,6 +147,8 @@ internal sealed partial class TrayApplicationContext
             if (BrowserNativeHostRegistrar.IsRegistered(Registry.CurrentUser, vendorKey, BrowserManifestPath))
                 BrowserNativeHostRegistrar.Unregister(Registry.CurrentUser, vendorKey);
         SaveBrowserConnection(c => c with { Registered = false });
+        // Drop live connections too: the supervisor sees nothing registered and keeps the pipe closed until the next Connect.
+        if (_browserBridge is { } bridge) _ = Task.Run(async () => { try { await bridge.DisposeAsync().ConfigureAwait(false); } catch (Exception ex) when (ex is not OutOfMemoryException) { } });
         _shell?.AddToast("The browser is disconnected. You can remove the OpenClicky extension from your browser's extensions page.");
     }
 
@@ -172,12 +187,7 @@ internal sealed partial class TrayApplicationContext
         var kind = BrowserCatalog.Known.FirstOrDefault(k => k.Id == connection.BrowserId);
         var registered = connection.Registered && kind is not null
             && BrowserNativeHostRegistrar.IsRegistered(Registry.CurrentUser, kind.VendorKey, BrowserManifestPath);
-        var state = detected.Count == 0 ? ChromeState.NoBrowser
-            : !registered ? ChromeState.NotInstalled
-            : instances.Count == 0 ? ChromeState.Waiting
-            : bridge!.IsWorking ? ChromeState.Working
-            : ChromeState.Connected;
-        return (state, view);
+        return (BrowserGate.CardState(detected.Count > 0, registered, instances.Count, bridge?.IsWorking == true), view);
     }
 
     /// <summary>Approvals wait for a paused task first, then ask with the request's tool, rationale and arguments.</summary>

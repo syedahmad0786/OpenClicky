@@ -247,7 +247,7 @@ internal sealed class HomeForm : Form
         chromeSetup.Click += (_, _) => setupChrome?.Invoke();
         chromeSetup.Enabled = setupChrome is not null;
         connectionInfo.Controls.Add(chromeSetup);
-        connectionInfo.Controls.Add(AppTheme.Label("Optional: use your existing signed-in tabs on sites you choose. Review the requested site access in Chrome before enabling the local extension.", 9));
+        connectionInfo.Controls.Add(AppTheme.Label("Optional: let agents use your signed-in browser in their own tab group. Connect it in Settings → Integrations → Browser.", 9));
         connectionsPage.Controls.Add(connectionInfo);
         _workspace.TabPages.AddRange([chatPage, taskPage, workPage, memoryPage, notesPage, connectionsPage]);
         _workspace.SelectedIndexChanged += (_, _) =>

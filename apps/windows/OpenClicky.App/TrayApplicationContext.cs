@@ -871,8 +871,8 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
                 }
                 finally
                 {
-                    foreach (var connector in connectors) connector.Dispose();
                     if (browser is not null) await browser.EndAsync(tidy: !token.IsCancellationRequested, CancellationToken.None).ConfigureAwait(false);
+                    foreach (var connector in connectors) connector.Dispose();
                 }
                 var answer = result.Messages.LastOrDefault(m => m.Role == "assistant" && !string.IsNullOrWhiteSpace(m.Text))?.Text;
                 if (!string.IsNullOrWhiteSpace(answer))
