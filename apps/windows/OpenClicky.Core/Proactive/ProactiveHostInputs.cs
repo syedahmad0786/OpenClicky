@@ -14,7 +14,8 @@ public static class ProactiveHostInputs
 
     /// <summary>
     /// Needs-you jobs; jobs completed since yesterday's local midnight; the 10 newest job titles; non-paused routines due in the
-    /// rest of the local day (titled by their job, in <paramref name="localNow"/>'s offset); every non-paused routine's job title.
+    /// rest of the local day (titled by their job, in <paramref name="localNow"/>'s offset); every non-paused routine's job title,
+    /// once per title ignoring case.
     /// A routine whose job is gone is left out.
     /// </summary>
     public static WorkSummary Summarise(IReadOnlyList<WorkJob> jobs, IReadOnlyList<Routine> routines, DateTimeOffset localNow)
@@ -29,7 +30,7 @@ public static class ProactiveHostInputs
             jobs.OrderByDescending(j => j.LastRunAt ?? j.CreatedAt).Take(RecentJobs).Select(j => j.Title).ToList(),
             active.Where(r => r.NextRunAt >= localNow && r.NextRunAt < endOfDay)
                 .Select(r => new RoutineSlot(titles[r.JobId], r.NextRunAt.ToOffset(localNow.Offset))).ToList(),
-            active.Select(r => titles[r.JobId]).ToList());
+            active.Select(r => titles[r.JobId]).Distinct(StringComparer.OrdinalIgnoreCase).ToList());
     }
 
     /// <summary>

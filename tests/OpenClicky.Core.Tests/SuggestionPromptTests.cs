@@ -53,6 +53,16 @@ public class SuggestionPromptTests
         Assert.Equal(("ab c", "de", "f g", "id1"), (s.Title, s.Description, s.Prompt, s.Id));
     }
 
+    [Fact]
+    public void DropsAgentTaskPrompts()
+    {
+        // Do it sends the prompt as a chat message; one the chat path would turn into a desktop agent task is not offered.
+        var reply = "{\"suggestions\":[" + Entry("Agent", "d", "openclicky agent tidy my desktop") + "," + Entry("Launch", "d", "Open Spotify")
+            + "," + Entry("Colon", "d", "Agent: email Sam") + "," + Entry("Notes", "d", "Summarise my notes") + "]}";
+        var s = Assert.Single(SuggestionPrompt.Parse(reply, Now, Ids()));
+        Assert.Equal(("Notes", "id1"), (s.Title, s.Id));
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]

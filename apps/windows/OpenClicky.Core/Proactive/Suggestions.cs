@@ -65,7 +65,8 @@ public static class SuggestionPrompt
 
     /// <summary>
     /// Reads at most three complete suggestions from the reply; anything unparsable gives an empty list. Never throws.
-    /// A ``` fence needs no explicit strip: the JSON is taken from the first '{' to the last '}'.
+    /// A ``` fence needs no explicit strip: the JSON is taken from the first '{' to the last '}'. A prompt the chat path
+    /// would start as a desktop agent task (<see cref="AgentIntent.TryExtract"/>) is dropped: Do it only sends chat.
     /// </summary>
     public static IReadOnlyList<Suggestion> Parse(string? reply, DateTimeOffset now, Func<string> newId)
     {
@@ -82,7 +83,7 @@ public static class SuggestionPrompt
             {
                 if (e.ValueKind != JsonValueKind.Object) continue;
                 string title = Field(e, "title", TitleChars), description = Field(e, "description", DescriptionChars), prompt = Field(e, "prompt", PromptChars);
-                if (title.Length == 0 || description.Length == 0 || prompt.Length == 0) continue;
+                if (title.Length == 0 || description.Length == 0 || prompt.Length == 0 || AgentIntent.TryExtract(prompt, out _)) continue;
                 result.Add(new(newId(), title, description, prompt, now, now + SuggestionSchedule.Lifetime));
                 if (result.Count == MaxSuggestions) break;
             }

@@ -18,6 +18,7 @@ public class ProactiveHostInputsTests
             Job("d", WorkJobStates.Ready, now.AddMinutes(-1)),
         };
         for (var i = 0; i < 10; i++) jobs.Add(Job("old" + i, WorkJobStates.Ready, now.AddDays(-30 - i)));
+        jobs.Add(Job("A", WorkJobStates.Ready, now.AddDays(-60))); // "Job A": same title as "Job a" but for case
         Routine R(string id, string jobId, bool paused, DateTimeOffset next) => new(id, jobId, RoutineCadence.Daily, 0, 0, 0, paused, next);
         var routines = new List<Routine>
         {
@@ -25,6 +26,8 @@ public class ProactiveHostInputsTests
             R("r2", "b", true, now.AddHours(1)), // paused
             R("r3", "d", false, now.AddDays(1)), // tomorrow
             R("r4", "gone", false, now.AddHours(1)), // job deleted
+            R("r5", "a", false, now.AddHours(-1)), // due earlier today: not in today's slots; a second routine for job a
+            R("r6", "A", false, now.AddDays(2)), // a title that differs only by case
         };
 
         var s = ProactiveHostInputs.Summarise(jobs, routines, now);
@@ -37,7 +40,7 @@ public class ProactiveHostInputsTests
         Assert.Equal("Job a", slot.Title);
         Assert.Equal(now.AddHours(2), slot.At);
         Assert.Equal(now.Offset, slot.At.Offset);
-        Assert.Equal(["Job a", "Job d"], s.RoutineTitles);
+        Assert.Equal(["Job a", "Job d"], s.RoutineTitles); // one per title, ignoring case
     }
 
     [Theory]
