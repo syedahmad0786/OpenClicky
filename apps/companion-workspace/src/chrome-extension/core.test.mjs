@@ -161,6 +161,19 @@ describe("createBridge", () => {
     expect(stored).toEqual({ 11: 3 });
   });
 
+  it("a restart keeps the counters of tabs it has not touched yet", async () => {
+    let stored = { 11: 2, 12: 5 };
+    const refStore = { load: async () => stored, save: async (c) => { stored = JSON.parse(JSON.stringify(c)); } };
+    const deny = { deny: [] }; // tab 12 is on the default blocked list in setup()
+    const first = setup({ refStore });
+    expect((await first.run("snapshot", { tabId: 11 }, deny)).result.text).toContain("[e3]");
+    expect(stored).toEqual({ 11: 3, 12: 5 });
+    const second = setup({ refStore }); // restarts again before tab 12 was touched
+    expect((await second.run("snapshot", { tabId: 11 }, deny)).result.text).toContain("[e4]");
+    expect((await second.run("snapshot", { tabId: 12 }, deny)).result.text).toContain("[e6]");
+    expect(stored).toEqual({ 11: 4, 12: 6 });
+  });
+
   it("wait_for gets its wait plus 10 s", async () => {
     vi.useFakeTimers();
     try {

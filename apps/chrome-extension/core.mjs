@@ -117,8 +117,10 @@ export function createBridge({ debuggee, tabs, downloads, refStore, limits = {} 
   }
 
   async function saveCounters() {
-    if (!refStore) return;
-    const now = Object.fromEntries([...refTables].map(([id, t]) => [id, t._counter]));
+    if (!refStore || !counters) return;
+    // Merge with what was loaded: tabs this worker never touched keep their stored counters.
+    const now = { ...(await counters) };
+    for (const [id, t] of refTables) now[id] = Math.max(Number(now[id]) || 0, t._counter);
     const json = JSON.stringify(now);
     if (json === savedCounters) return;
     savedCounters = json;
