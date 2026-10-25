@@ -86,9 +86,42 @@ RE depth: **S** = static evidence is enough · **L** = needs a live view-only lo
 | E7 | Learned how-tos | ≤60 saved; newest 10 + 5 most related added to prompts | Missing | S |
 | E8 | Routines | Voice-created only (routines tool: create/update/pause/resume/delete/run_now/status); Settings list with Run now/Pause/Delete and status; 30 s scheduler, stale 2 h, 3 min after wake, network wait, AC keep-awake, retry 300 s, pause after 3 failures | Partial (UI dialog, 60 s timer, retry 15/30/45) | S |
 | E9 | Agent settings | Agent folder picker; auto-approve extra usage (→ Skip, no billing); speak start/finish; updates beside cursor; "what agents can reach" (Windows privacy states, opens ms-settings) | Missing | S |
-| E10 | Proactive | Morning paper, suggestion cards, integration nudges (10 s dwell, ≤3/24 h, 48 h snooze), meeting countdown (from 75 s) — paused in 1.1.1 | Partial (awareness offers) | S |
+| E10 | Proactive | Morning paper, suggestion cards, integration nudges (10 s dwell, ≤3/24 h, 48 h snooze), meeting countdown (from 75 s) — paused in 1.1.1 | Built — brief, suggestions, connect nudges, meeting countdown; off by default; native check pending (rows P1–P4 below; sub-project P). | S |
 | E11 | Agent engine | Own H1 runner (loopback /turn /events /steer /cancel /prewarm), Codex and Pi options, 120 steps, 30 min | Have (OpenWork/OpenCode) — keep, add steer/concurrency | S |
 
+## 4b. Proactive (sub-project P)
+
+All four features are **off by default** (Settings → Proactive); nothing is turned on by code, migration or test. Cards only appear in the notch shell. Proactive code only shows and removes cards; sending text, opening a link or opening Settings happens only when the user clicks a card button.
+
+What leaves the machine: the brief sends nothing unless you click **Plan my day** (then its lines go to your model provider as a chat message); suggestions send, once a day, up to 10 recent job titles, 10 routine titles, 20 connector names and 20 declined suggestion titles to your model provider; nudges send nothing (app name and window title are read on this PC only and never stored); the countdown asks the calendar connector you picked for events (that connector's own server), and event data does not go to the model provider unless you click **Plan my day**.
+
+Quiet: cards wait during calls (the microphone in use by another app), presentations and full-screen apps, and come back when it ends (nudges do not). Windows Do Not Disturb is not detected by this sub-project's simple adapter; E's quiet detection replaces it at merge. Calendar: events are read through the connector you pick in Settings → Proactive, by a read-only list-events tool chosen by name, never a write tool; F's connectors replace this adapter at merge.
+
+| ID | Feature | HeyClicky behaviour | OpenClicky today | RE |
+|---|---|---|---|---|
+| P1 | Morning brief | Morning paper card once a day with the day's plan | Built — off by default; one "Good morning" card per day (07:00–12:00, after real input in the last 30 s) built locally from calendar, jobs and routines; **Plan my day** sends it to chat; native check pending. Evidence: `MorningBriefTests`, `ProactiveCoordinatorTests` (brief cases); settings plumbing `SettingsPatchTests` (proactive cases), `ShellSettingsBuilderTests`, vitest `proactivePage.test.tsx` (commits 0df80a9..6f50071) | S |
+| P2 | Suggestion cards | Daily suggestion cards from server-side generation | Built — off by default; once a day (09:00–20:00, retries 5/15/60/180 min) the user's own model provider proposes up to three suggestions, shown one at a time; **Do it** sends the shown message to chat, **Don't suggest** is remembered; native check pending. Evidence: `SuggestionPromptTests`, `SuggestionScheduleTests`, `ProactiveCoordinatorTests` (suggestion cases), `ProactiveStoreTests` | S |
+| P3 | Connect nudges | Integration nudges (10 s dwell, ≤3 per 24 h, 48 h snooze, 18 s card) | Built — off by default; 20 popular apps recognised by app and window title on this PC, "Connect Slack?" style card opens Integrations; ≤3 per rolling 24 h, 48 h snooze; native check pending. Evidence: `NudgeCatalogTests`, `NudgeTrackerTests`, `ProactiveCoordinatorTests` (nudge case) | S |
+| P4 | Meeting countdown | Meeting countdown from 75 s before start | Built — off by default; read-only events from the user's calendar connector, card from 75 s before start until 2 min after, text in 15 s steps, **Join** opens the meeting link; native check pending. Evidence: `MeetingCountdownTests`, `CalendarEventsTests`, `McpCalendarSourceTests`, `ProactiveCoordinatorTests` (countdown cases), `ProactiveHostInputsTests` | S |
+| P-S1 | Server-side suggestion generation, job polling, receipts and server notifications | Suggestions generated on the HeyClicky server and polled | Skip — no HeyClicky backend; suggestions come from the user's own model provider, once a day, from local data Settings names | — |
+| P-S2 | Three- and five-times-a-day cadences | More frequent suggestion slots | Skip — one daily slot (09:00–20:00) covers the feature; add cadences if asked | — |
+| P-S3 | Approve-with-adjustment, founding a new Clicky, auto-creating a routine from a card | Richer card outcomes | Skip — **Do it** sends the suggested message to chat, where the user can ask for a job or routine | — |
+| P-S4 | Separate morning-suggestions invitation card and its dismissal-rest rules | Invitation card with rest rules | Skip — paused in 1.1.1; the brief and suggestion cards cover it | — |
+| P-S5 | Morning paper research job and random greeting lines/kaomoji | Research job plus randomised greetings | Skip — the brief is built locally from calendar, jobs and routines; one greeting in our own words | — |
+| P-S6 | Long-tail nudge catalog (~70 apps), catalog refresh, Spotify 7.5 s dwell, post-connect verification | Large refreshable catalog | Skip — 20 popular apps; F owns connecting and verification | — |
+| P-S7 | Directions action and spoken countdown or brief | Directions button, speech | Skip — cards only, Join/Open only; avoids speaking at the wrong moment | — |
+| P-S8 | Do Not Disturb via undocumented WNF quiet-hours state | Reads Windows quiet hours | Skip — `IQuietSignal` seam; E's `QuietState` replaces the simple adapter at merge | — |
+| P-S9 | Onboarding and sign-in suppression reasons | Suppresses cards during onboarding/sign-in | Skip — onboarding (H) is not built; suggestions skip the day when no provider is configured | — |
+
+**Native-accepted: pending.** P1–P4 move to Native-accepted after the user runs these seven checks (they need a real calendar, real apps and a real call). Automated state on 25 Oct: 94 focused Core checks for the P classes above, plus `SettingsPatchTests.ProactiveFlagsDefaultOffAndPatch` (a fresh profile has every proactive flag off) and `ProactiveCoordinatorTests.AllOffShowsNothingAndCallsNothing` (all-off makes no calls); full gate 1,667 Core, 48 Input and 199 vitest (19 files) checks green, Release build 0 warnings.
+
+1. Settings → Proactive: all four toggles are off on a fresh profile.
+2. Turn on Meeting countdown, pick a calendar connector, add a meeting starting in 3 minutes: a card appears about 75 s before, counts down, and Join opens the meeting link.
+3. Turn on Morning brief before noon, use the mouse: "Good morning" appears once; restarting OpenClicky does not show it again today; Plan my day sends it to chat.
+4. Turn on Suggestions with a signed-in provider: up to three cards arrive one at a time; Do it sends the shown message; Don't suggest is not repeated tomorrow.
+5. Turn on Connect nudges, use Slack or Gmail for 10 s: "Connect Slack?" appears; Connect opens Integrations; it does not return for 48 h.
+6. Start a Teams/Zoom call or present PowerPoint: no proactive card appears, and a shown one goes away until the call ends.
+7. Do Not Disturb: note whether cards still appear (the simple adapter cannot see Windows DND; E's detector should).
 ## 5. Connectors and browser (sub-projects F, G)
 
 | ID | Feature | HeyClicky behaviour | OpenClicky today | RE |
