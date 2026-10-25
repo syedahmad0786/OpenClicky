@@ -24,8 +24,9 @@ public sealed class McpTokenSource(McpOAuthTokens initial, McpOAuth oauth, Actio
             var current = _tokens;
             if (!Expiring(current)) return current.AccessToken;
             var fresh = await oauth.RefreshAsync(current, ct).ConfigureAwait(false);
-            save(fresh);
+            // Swap first: the server may have rotated the refresh token, so the old one is spent even if saving fails.
             _tokens = fresh;
+            save(fresh);
             return fresh.AccessToken;
         }
         finally { _gate.Release(); }

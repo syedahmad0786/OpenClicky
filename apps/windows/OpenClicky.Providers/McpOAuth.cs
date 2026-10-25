@@ -165,7 +165,11 @@ public sealed partial class McpOAuth : IDisposable
             && protectedResource.TryGetProperty("scopes_supported", out var supported) && supported.ValueKind == JsonValueKind.Array
                 ? string.Join(' ', supported.EnumerateArray().Where(s => s.ValueKind == JsonValueKind.String).Select(s => s.GetString()).Where(s => !string.IsNullOrWhiteSpace(s)))
                 : "";
-        var resource = Text(protectedResource, "resource") ?? CanonicalResource(mcpUrl);
+        // RFC 9728 §3.3: metadata naming another resource (say, a victim server's, via a hostile challenge) is refused,
+        // so a token meant for that resource is never sent to this server.
+        var resource = Text(protectedResource, "resource") is { } named
+            ? Covers(named, mcpUrl) ? named : throw new McpOAuthException(McpOAuthFailure.InsecureEndpoint)
+            : CanonicalResource(mcpUrl);
         var scope = challengeScope ?? (scopes.Length > 0 ? scopes : null);
 
         using var serverMetadata = await FirstJsonAsync(AuthorizationServerCandidates(issuer), ct).ConfigureAwait(false)
@@ -189,7 +193,10 @@ public sealed partial class McpOAuth : IDisposable
         };
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
-        using var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+        HttpResponseMessage response;
+        try { response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { return null; } // our 30 s timeout: try the well-known URLs
+        using var _ = response;
         return response.StatusCode == HttpStatusCode.Unauthorized && response.Headers.TryGetValues("WWW-Authenticate", out var values)
             ? string.Join(", ", values)
             : null;
@@ -212,6 +219,7 @@ public sealed partial class McpOAuth : IDisposable
                 document.Dispose();
             }
             catch (HttpRequestException) { }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested) { } // our 30 s timeout: next candidate
             catch (JsonException) { }
         }
         return null;
@@ -228,7 +236,7 @@ public sealed partial class McpOAuth : IDisposable
             response_types = new[] { "code" },
             token_endpoint_auth_method = "none",
         }), Encoding.UTF8, "application/json");
-        using var response = await _http.PostAsync(endpoint, content, ct).ConfigureAwait(false);
+        using var response = await TimeoutIs(McpOAuthFailure.TokenExchangeFailed, _http.PostAsync(endpoint, content, ct), ct).ConfigureAwait(false);
         if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
             throw new McpOAuthException(McpOAuthFailure.ApprovedClientsOnly);
         if (!response.IsSuccessStatusCode) throw new McpOAuthException(McpOAuthFailure.RegistrationUnsupported);
@@ -251,7 +259,10 @@ public sealed partial class McpOAuth : IDisposable
         }
         request.Content = new StringContent(Form(fields), Encoding.UTF8, "application/x-www-form-urlencoded");
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-        using var response = await _http.SendAsync(request, ct).ConfigureAwait(false);
+        // A sign-in exchange that times out failed; a refresh that times out is transient and stays a plain timeout.
+        using var response = rejected == McpOAuthFailure.TokenExchangeFailed
+            ? await TimeoutIs(rejected, _http.SendAsync(request, ct), ct).ConfigureAwait(false)
+            : await _http.SendAsync(request, ct).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
             // A refresh the server refuses needs a new sign-in; a server error is transient and must not force one.
@@ -275,6 +286,23 @@ public sealed partial class McpOAuth : IDisposable
         else if (value.ValueKind != JsonValueKind.String || !double.TryParse(value.GetString(), System.Globalization.NumberStyles.Float,
             System.Globalization.CultureInfo.InvariantCulture, out seconds)) return null;
         return double.IsFinite(seconds) ? Math.Clamp(seconds, 0, 10 * 365 * 86_400d) : null;
+    }
+
+    /// <summary>Turns our own HTTP timeout (not the caller's cancellation) into <paramref name="failure"/>.</summary>
+    private static async Task<HttpResponseMessage> TimeoutIs(McpOAuthFailure failure, Task<HttpResponseMessage> send, CancellationToken ct)
+    {
+        try { return await send.ConfigureAwait(false); }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested) { throw new McpOAuthException(failure); }
+    }
+
+    /// <summary>Same scheme, host and port, and a segment-wise path prefix: <c>https://h/</c> covers <c>https://h/mcp</c>, <c>https://h/m</c> does not.</summary>
+    private static bool Covers(string resource, Uri mcpUrl)
+    {
+        if (!Uri.TryCreate(resource, UriKind.Absolute, out var uri) || !string.Equals(uri.Scheme, mcpUrl.Scheme, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(uri.IdnHost, mcpUrl.IdnHost, StringComparison.OrdinalIgnoreCase) || uri.Port != mcpUrl.Port) return false;
+        var prefix = uri.AbsolutePath.TrimEnd('/');
+        var path = mcpUrl.AbsolutePath;
+        return prefix.Length == 0 || path == prefix || path.StartsWith(prefix + "/", StringComparison.Ordinal);
     }
 
     private static async Task<JsonDocument> ParseAsync(HttpResponseMessage response, McpOAuthFailure failure, CancellationToken ct)

@@ -37,6 +37,20 @@ public class McpTokenSourceTests
     }
 
     [Fact]
+    public async Task SaveFailureKeepsRotatedTokens()
+    {
+        var server = new McpOAuthTests.FakeServer();
+        server.Json("POST", "https://as.test/token", """{"access_token":"at-2","refresh_token":"rt-2","expires_in":3600}""");
+        using var oauth = new McpOAuth(server);
+        var source = new McpTokenSource(McpOAuthTests.Tokens(Now.AddSeconds(10)), oauth, _ => throw new IOException("disk full"), () => Now);
+
+        await Assert.ThrowsAsync<IOException>(() => source.GetAsync(CancellationToken.None));
+
+        Assert.Equal("at-2", await source.GetAsync(CancellationToken.None));
+        Assert.Single(server.Requests);
+    }
+
+    [Fact]
     public async Task ValidTokenNoRefresh()
     {
         var server = new McpOAuthTests.FakeServer();

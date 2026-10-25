@@ -177,6 +177,50 @@ public class McpOAuthTests
     }
 
     [Fact]
+    public async Task MetadataForAnotherResourceRefused()
+    {
+        // A hostile challenge pointing at a victim's metadata must not get the user signed in to the victim.
+        var server = FakeServer.Standard();
+        server.Route("POST", "https://mcp.x.test/mcp", _ => Unauthorized("Bearer resource_metadata=\"https://victim.test/.well-known/oauth-protected-resource\""));
+        server.Json("GET", "https://victim.test/.well-known/oauth-protected-resource", """{"resource":"https://victim.test/mcp","authorization_servers":["https://as.test"]}""");
+        var browser = new Browser();
+        await Fails(McpOAuthFailure.InsecureEndpoint, server, browser);
+        Assert.Empty(server.Where("POST", "https://as.test/register"));
+        Assert.Null(browser.Authorize);
+
+        foreach (var other in new[] { "https://mcp.x.test/m", "https://mcp.x.test:8443/mcp", "http://mcp.x.test/mcp", "https://mcp.x.test/mcp/sub" })
+        {
+            server = FakeServer.Standard();
+            server.Json("GET", "https://mcp.x.test/.well-known/oauth-protected-resource/mcp", $$"""{"resource":"{{other}}","authorization_servers":["https://as.test"]}""");
+            browser = new Browser();
+            await Fails(McpOAuthFailure.InsecureEndpoint, server, browser);
+            Assert.Empty(server.Where("POST", "https://as.test/register"));
+            Assert.Null(browser.Authorize);
+        }
+    }
+
+    [Fact]
+    public async Task HttpTimeoutsAreClassified()
+    {
+        // Our own 30 s timeout on a metadata candidate moves on to the next candidate.
+        var server = FakeServer.Standard();
+        server.Route("GET", "https://mcp.x.test/.well-known/oauth-protected-resource/mcp", _ => throw new TaskCanceledException("timed out"));
+        server.Json("GET", "https://mcp.x.test/.well-known/oauth-protected-resource", """{"authorization_servers":["https://as.test"]}""");
+        using (var oauth = new McpOAuth(server, new Browser().Open, FreePort()))
+            Assert.Equal("at-1", (await oauth.SignInAsync(Mcp, null, Timeout())).AccessToken);
+
+        server = FakeServer.Standard();
+        server.Route("POST", "https://as.test/register", _ => throw new TaskCanceledException("timed out"));
+        await Fails(McpOAuthFailure.TokenExchangeFailed, server);
+
+        server = FakeServer.Standard();
+        server.Route("POST", "https://as.test/token", _ => throw new TaskCanceledException("timed out"));
+        var browser = new Browser();
+        await Fails(McpOAuthFailure.TokenExchangeFailed, server, browser);
+        Assert.Contains(NotFinished, browser.Page);
+    }
+
+    [Fact]
     public async Task StateMismatchFails()
     {
         var server = FakeServer.Standard();
