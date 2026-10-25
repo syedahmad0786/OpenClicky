@@ -27,6 +27,9 @@ public static class AgentDenyList
         "robinhood",
     ];
 
+    /// <summary>Host forms of the bank defaults, so the browser's pre-navigation URL check (host only) catches them too.</summary>
+    private static readonly string[] DefaultHostFragments = ["chase.com", "bankofamerica.com", "wellsfargo.com", "capitalone.com"];
+
     public static bool IsDenied(string? foregroundWindowTitle, IEnumerable<string>? extraFragments = null)
     {
         if (string.IsNullOrWhiteSpace(foregroundWindowTitle))
@@ -97,11 +100,11 @@ public static class AgentDenyList
     }
 
     /// <summary>
-    /// The defaults verbatim (their trailing spaces matter: "chase " must not match "purchases"), then the user's
+    /// The defaults verbatim (their trailing spaces matter: "chase " must not match "purchases") and the bank hosts, then the user's
     /// non-empty extra fragments trimmed and lower-case. For the browser extension's check.
     /// </summary>
     public static IReadOnlyList<string> Fragments(IEnumerable<string>? extra) =>
-        DefaultTitleFragments.Concat((extra ?? []).Where(f => !string.IsNullOrWhiteSpace(f)).Select(f => f.Trim().ToLowerInvariant()))
+        DefaultTitleFragments.Concat(DefaultHostFragments).Concat((extra ?? []).Where(f => !string.IsNullOrWhiteSpace(f)).Select(f => f.Trim().ToLowerInvariant()))
             .Distinct().ToArray();
 
     public static IReadOnlyList<string> ParseExtraFragments(string? csv) =>

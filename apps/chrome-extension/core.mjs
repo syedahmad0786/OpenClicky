@@ -172,6 +172,13 @@ export function createBridge({ debuggee, tabs, downloads, refStore, limits = {} 
     return session(tabId);
   }
 
+  /** After an action or a load the tab may have landed somewhere blocked: look at its title and URL again before reading it. */
+  async function stillAllowed(cmd, tabId) {
+    let tab;
+    try { tab = await tabs.api.tabs.get(tabId); } catch { throw new Error(CLOSED); }
+    if (deniedBy(cmd, tab.title, hostOf(tab.url))) throw new Error(BLOCKED);
+  }
+
   async function openTab(cmd, url) {
     checkUrl(cmd, url);
     const id = await tabs.open(cmd.task, url);
@@ -185,11 +192,14 @@ export function createBridge({ debuggee, tabs, downloads, refStore, limits = {} 
       await sleep(100);
     }
     await s.settle();
+    await stillAllowed(cmd, id); // a redirect or the loaded title can be blocked
     return { id, s };
   }
 
   /** The op's message, a blank line, then what changed since the model's last look at this tab. */
-  async function changes(task, tabId, s, text) {
+  async function changes(cmd, tabId, s, text) {
+    const { task } = cmd;
+    await stillAllowed(cmd, tabId);
     if (s.dialog) {
       return `${text}\n\n${UNTRUSTED}\nA page dialog is open (${s.dialog.type}): "${String(s.dialog.message).slice(0, 500)}". Answer it with dialog.`;
     }
@@ -276,7 +286,7 @@ export function createBridge({ debuggee, tabs, downloads, refStore, limits = {} 
       }
     }
     const lines = [...done, ...(failure ? [failure] : [])].join("\n");
-    const text = s ? await changes(cmd.task, tabId, s, lines) : lines;
+    const text = s ? await changes(cmd, tabId, s, lines) : lines;
     if (failure) throw new Error(text);
     return { text };
   }
@@ -306,7 +316,7 @@ export function createBridge({ debuggee, tabs, downloads, refStore, limits = {} 
     if (op === "batch") return batch(cmd, a);
     if (op === "open" && a.tabId === undefined) {
       const { id, s } = await openTab(cmd, a.url);
-      return { text: await changes(task, id, s, `Opened ${a.url} in tab ${id}.`) };
+      return { text: await changes(cmd, id, s, `Opened ${a.url} in tab ${id}.`) };
     }
 
     const tabId = a.tabId ?? tabs.current(task);
@@ -335,7 +345,7 @@ export function createBridge({ debuggee, tabs, downloads, refStore, limits = {} 
     if (op === "screenshot") return s.screenshot();
     if (op === "javascript") return { text: `${UNTRUSTED}\n${(await s.javascript(a)).text}` };
     const r = await PAGE[op](s, a);
-    return { text: await changes(task, tabId, s, r.text) };
+    return { text: await changes(cmd, tabId, s, r.text) };
   }
 
   async function now(cmd) {

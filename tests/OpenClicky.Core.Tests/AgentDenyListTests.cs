@@ -51,4 +51,15 @@ public class AgentDenyListTests
         Assert.DoesNotContain("chase", all);
         Assert.All(all, f => Assert.Equal(f.ToLowerInvariant(), f));
     }
+
+    [Fact]
+    public void FragmentsCarryBankHostsBeforeExtras()
+    {
+        var all = AgentDenyList.Fragments(["payroll"]);
+        foreach (var host in new[] { "chase.com", "bankofamerica.com", "wellsfargo.com", "capitalone.com" }) Assert.Contains(host, all);
+        Assert.Contains("chase ", all); // the verbatim defaults stay
+        Assert.Contains("bank of america", all);
+        Assert.Equal("payroll", all[^1]);
+        Assert.Contains(AgentDenyList.Fragments(null), f => "www.chase.com".Contains(f, StringComparison.Ordinal));
+    }
 }

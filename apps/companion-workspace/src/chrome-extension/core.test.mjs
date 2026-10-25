@@ -109,6 +109,32 @@ describe("createBridge", () => {
     expect(list.result.text).not.toContain("Bank");
   });
 
+  it("an action that lands on a blocked page is refused before any snapshot", async () => {
+    let fake;
+    const { run, debuggee, f } = setup({ responders: {
+      "Input.dispatchMouseEvent": (p) => { if (p.type === "mouseReleased") fake.tabs.get(11).title = "My Bank - sign in"; return {}; },
+    } });
+    fake = f;
+    expect((await run("snapshot", { tabId: 11 })).ok).toBe(true);
+    const mark = debuggee.calls.length;
+    expect(await run("click", { tabId: 11, ref: "e1" }))
+      .toEqual({ ok: false, error: "This site is on the blocked list. Nothing was read or changed." });
+    const after = debuggee.calls.slice(mark);
+    expect(after.filter((c) => c.method === "Input.dispatchMouseEvent")).toHaveLength(3); // the click did happen
+    const released = after.findIndex((c) => c.params?.type === "mouseReleased");
+    expect(after.slice(released).filter((c) => c.method === "Accessibility.getFullAXTree")).toHaveLength(0);
+  });
+
+  it("open that lands on a blocked page is refused before any snapshot", async () => {
+    const { run, debuggee } = setup();
+    // The host passes the pre-navigation check; the loaded page's title (the fake uses the url) is blocked.
+    expect(await run("open", { url: "https://example.test/?next=bank" }))
+      .toEqual({ ok: false, error: "This site is on the blocked list. Nothing was read or changed." });
+    expect(debuggee.of("Accessibility.getFullAXTree")).toHaveLength(0);
+    expect(await run("open", { url: "https://www.chase.com/" }, { deny: ["chase.com"] }))
+      .toEqual({ ok: false, error: "This site is on the blocked list. Nothing was read or changed." });
+  });
+
   it("deny fragments are matched verbatim, without trimming", async () => {
     const { f, run } = setup();
     f.add(13, 1, { title: "Your purchases", url: "https://shop.test/orders" });
