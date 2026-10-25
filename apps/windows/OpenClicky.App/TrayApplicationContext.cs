@@ -858,7 +858,9 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             }
             if (!_sandboxDemo && _settings.AuthProvider == AuthProvider.ChatGPT)
             {
-                var browser = CreateBrowserSession(access, work, id);
+                var control = _taskControl;
+                var browser = CreateBrowserSession(access, work, id, CancelTask, control.WaitAsync,
+                    async t => { await control.WaitAsync(t).ConfigureAwait(false); return null; });
                 var connectors = OpenConnectors();
                 OpenCodeTaskResult result;
                 try

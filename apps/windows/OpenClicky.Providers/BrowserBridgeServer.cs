@@ -104,6 +104,9 @@ public sealed class BrowserBridgeServer : IBrowserBridge, IAsyncDisposable
         lock (_sync) connection = Selected();
         if (connection is null) return new BrowserReply(false, NotConnected);
 
+        // The extension runs one command at a time, so commands take turns here and the timeout starts at the turn:
+        // one job's wait must not tick while another job's command runs.
+        await connection.Turn.WaitAsync(token).ConfigureAwait(false);
         var id = "c" + Interlocked.Increment(ref _nextId);
         var pending = new TaskCompletionSource<BrowserReply>(TaskCreationOptions.RunContinuationsAsynchronously);
         connection.Pending[id] = pending;
@@ -129,7 +132,11 @@ public sealed class BrowserBridgeServer : IBrowserBridge, IAsyncDisposable
                 return new BrowserReply(false, Disconnected);
             }
         }
-        finally { connection.Pending.TryRemove(id, out _); }
+        finally
+        {
+            connection.Pending.TryRemove(id, out _);
+            connection.Turn.Release();
+        }
     }
 
     public IDisposable TrackTask(string task)
@@ -330,6 +337,8 @@ public sealed class BrowserBridgeServer : IBrowserBridge, IAsyncDisposable
     private sealed class Connection(NamedPipeServerStream pipe)
     {
         private readonly SemaphoreSlim _writeGate = new(1, 1);
+        /// <summary>One command in flight per connection, from write to result or timeout.</summary>
+        public SemaphoreSlim Turn { get; } = new(1, 1);
         public NamedPipeServerStream Pipe { get; } = pipe;
         public ConcurrentDictionary<string, TaskCompletionSource<BrowserReply>> Pending { get; } = new();
         public volatile bool Closed;

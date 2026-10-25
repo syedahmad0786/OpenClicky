@@ -188,9 +188,8 @@ public sealed class BrowserBridgeServerTests
         await chrome.ReadyAsync();
 
         var first = rig.Server.SendAsync(Cmd("snapshot"), T, default);
-        var second = rig.Server.SendAsync(Cmd("extract", "task-2"), T, default);
+        var second = rig.Server.SendAsync(Cmd("extract", "task-2"), T, default); // waits its turn behind the first
         await chrome.CommandAsync("snapshot");
-        await chrome.CommandAsync("extract");
         chrome.Stdin.Complete(); // Chrome closed the port: the host exits and drops the pipe
 
         var gone = new BrowserReply(false, "The browser disconnected.");
@@ -198,6 +197,28 @@ public sealed class BrowserBridgeServerTests
         Assert.Equal(gone, await second.WaitAsync(T));
         await WaitUntil(() => !rig.Server.IsConnected && rig.Server.Instances.Count == 0);
         Assert.False((await rig.Server.SendAsync(Cmd("tabs"), T, default)).Ok);
+    }
+
+    [Fact]
+    public async Task CommandsTakeTurnsAndTheTimeoutStartsAtTheTurn()
+    {
+        var pipe = NewPipe();
+        await using var rig = new ServerRig(pipe);
+        await using var chrome = new FakeChrome(pipe);
+        await chrome.HelloAsync("profile-a");
+        await chrome.ReadyAsync();
+
+        var first = rig.Server.SendAsync(Cmd("download"), T, default);
+        var firstCmd = await chrome.CommandAsync("download");
+        var second = rig.Server.SendAsync(Cmd("snapshot", "task-2"), TimeSpan.FromMilliseconds(600), default);
+        await Task.Delay(900); // longer than the second's timeout: it must not tick while the first runs
+        Assert.False(second.IsCompleted);
+        await chrome.SendAsync(new { type = "result", id = firstCmd.GetProperty("id").GetString(), ok = true, result = new { text = "saved" } });
+        Assert.Equal(new BrowserReply(true, "saved"), await first.WaitAsync(T));
+
+        var secondCmd = await chrome.CommandAsync("snapshot"); // written only now
+        await chrome.SendAsync(new { type = "result", id = secondCmd.GetProperty("id").GetString(), ok = true, result = new { text = "page" } });
+        Assert.Equal(new BrowserReply(true, "page"), await second.WaitAsync(T));
     }
 
     [Fact]

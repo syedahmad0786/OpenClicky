@@ -25,6 +25,7 @@ public sealed class ChromeBridgeSession
     private readonly IReadOnlyList<string> _deny;
     private readonly string? _outputFolder;
     private readonly IDisposable _tracker;
+    private readonly IDisposable? _lease;
     private readonly SemaphoreSlim _calls = new(1, 1);
     private volatile bool _declined;
     private volatile bool _failedApprovedAction;
@@ -41,7 +42,7 @@ public sealed class ChromeBridgeSession
     }
 
     public ChromeBridgeSession(IBrowserBridge bridge, IChromeActionBroker broker, AgentAccessMode access,
-        BrowserTaskIdentity identity, IReadOnlyList<string> deny, string? outputFolder)
+        BrowserTaskIdentity identity, IReadOnlyList<string> deny, string? outputFolder, IDisposable? lease = null)
     {
         _bridge = bridge;
         _broker = broker;
@@ -50,6 +51,7 @@ public sealed class ChromeBridgeSession
         _deny = deny;
         _outputFolder = outputFolder;
         _tracker = bridge.TrackTask(identity.Task);
+        _lease = lease;
     }
 
     public async Task<DesktopToolResult> CallAsync(string tool, JsonElement arguments, CancellationToken token)
@@ -59,7 +61,7 @@ public sealed class ChromeBridgeSession
         finally { _calls.Release(); }
     }
 
-    /// <summary>Sends <c>end{tidy}</c> once and stops tracking the task. Never throws.</summary>
+    /// <summary>Sends <c>end{tidy}</c> once, stops tracking the task and releases <c>lease</c> (e.g. its stop registration). Never throws.</summary>
     public async Task EndAsync(bool tidy, CancellationToken token)
     {
         if (Interlocked.Exchange(ref _ended, 1) == 1) return;
@@ -69,7 +71,7 @@ public sealed class ChromeBridgeSession
                 .ConfigureAwait(false);
         }
         catch { /* best effort: the next sweep releases the task's tabs */ }
-        finally { _tracker.Dispose(); }
+        finally { _tracker.Dispose(); _lease?.Dispose(); }
     }
 
     private async Task<DesktopToolResult> CallCoreAsync(string tool, JsonElement args, CancellationToken token)

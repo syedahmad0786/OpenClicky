@@ -18,6 +18,8 @@ internal sealed partial class TrayApplicationContext
     private BrowserBridgeServer? _browserBridge;
     /// <summary>Released by Connect: wakes a supervisor that waits because nothing is registered.</summary>
     private readonly SemaphoreSlim _browserRegistered = new(0, 1);
+    /// <summary>Each live browser session's stop callback by task id, from creation to EndAsync.</summary>
+    private readonly BrowserStopRegistry _browserStops = new();
 
     private static string BrowserManifestPath =>
         Path.Combine(BrowserNativeHostRegistrar.DefaultBridgeFolder, BrowserNativeHostRegistrar.HostName + ".json");
@@ -72,21 +74,33 @@ internal sealed partial class TrayApplicationContext
         catch (Exception ex) when (ex is not OutOfMemoryException) { Log("browser_changed_error=" + ex.GetType().Name); }
     }
 
-    /// <summary>Stop from the extension: its popup sends no task (stop whatever runs); a group's Stop names its task.</summary>
+    /// <summary>Stop from the extension: its popup sends no task (stop every run with a browser session); a group's Stop names its task.</summary>
     private void OnBrowserStopRequested(string? task)
     {
-        try { OnUi(() => { if (task is null || task == _runningTaskId) CancelTask(); }); }
+        try
+        {
+            OnUi(() =>
+            {
+                try { _browserStops.Stop(task); }
+                catch (Exception ex) when (ex is not OutOfMemoryException) { Log("browser_stop_error=" + ex.GetType().Name); }
+            });
+        }
         catch (Exception ex) when (ex is not OutOfMemoryException) { Log("browser_stop_error=" + ex.GetType().Name); }
     }
 
-    /// <summary>The task's browser gate, on its access snapshot; null when no browser is connected. Its owner calls EndAsync on every exit.</summary>
-    private ChromeBridgeSession? CreateBrowserSession(AgentAccessMode access, JobRun? work, string runId)
+    /// <summary>
+    /// The task's browser gate, on its access snapshot; null when no browser is connected. Its owner calls EndAsync on every exit.
+    /// The run's hooks: <paramref name="stop"/> cancels it (the extension's Stop), <paramref name="pause"/> holds every page command
+    /// while it is paused, and <paramref name="beforeApproval"/> runs before each approval and its lease is held while it asks.
+    /// </summary>
+    private ChromeBridgeSession? CreateBrowserSession(AgentAccessMode access, JobRun? work, string runId, Action stop,
+        Func<CancellationToken, Task> pause, Func<CancellationToken, Task<IAsyncDisposable?>> beforeApproval)
     {
         if (_browserBridge is not { } bridge || !BrowserGate.OffersSession(bridge.IsConnected, BrowserRegistered())) return null;
         var identity = new BrowserTaskIdentity(runId, work?.Job.Id ?? "task-" + runId, work?.Job.Title ?? "OpenClicky task", work?.Job.Colour ?? "blue");
-        return new ChromeBridgeSession(bridge, new BrowserApprovalBroker(_confirm, _taskControl), access, identity,
-            AgentDenyList.Fragments(AgentDenyList.ParseExtraFragments(_settings.AgentDenyListExtra)),
-            work is null ? null : _work.OutputFolder(work.Job));
+        return new ChromeBridgeSession(new PausableBrowserBridge(bridge, pause), new BrowserApprovalBroker(_confirm.ConfirmNonInputAsync, beforeApproval),
+            access, identity, AgentDenyList.Fragments(AgentDenyList.ParseExtraFragments(_settings.AgentDenyListExtra)),
+            work is null ? null : _work.OutputFolder(work.Job), _browserStops.Register(runId, stop));
     }
 
     /// <summary>Settings → Integrations, where the browser card lives (the classic "Set up Chrome tabs" button).</summary>
@@ -188,16 +202,5 @@ internal sealed partial class TrayApplicationContext
         var registered = connection.Registered && kind is not null
             && BrowserNativeHostRegistrar.IsRegistered(Registry.CurrentUser, kind.VendorKey, BrowserManifestPath);
         return (BrowserGate.CardState(detected.Count > 0, registered, instances.Count, bridge?.IsWorking == true), view);
-    }
-
-    /// <summary>Approvals wait for a paused task first, then ask with the request's tool, rationale and arguments.</summary>
-    private sealed class BrowserApprovalBroker(WinFormsAgentConfirm confirm, AgentTaskControl control) : IChromeActionBroker
-    {
-        public async Task<bool> ApproveAsync(ActionRequest request, CancellationToken token)
-        {
-            await control.WaitAsync(token).ConfigureAwait(false);
-            return await confirm.ConfirmNonInputAsync(request.ToolName + "\n" + request.Rationale + "\n"
-                + string.Join("\n", request.Arguments.Select(argument => argument.Key + ": " + argument.Value)), token).ConfigureAwait(false);
-        }
     }
 }
