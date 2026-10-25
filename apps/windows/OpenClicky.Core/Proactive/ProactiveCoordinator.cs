@@ -91,7 +91,7 @@ public sealed class ProactiveCoordinator(IProactiveCardSink sink, IQuietSignal q
         _quietLogged = null;
 
         // 5. Countdown, even while busy.
-        _meeting = settings.MeetingCountdown && MeetingCountdown.Current(_events ?? [], now, new HashSet<string>(state.DismissedMeetings.Keys)) is { } e
+        _meeting = settings.MeetingCountdown && MeetingCountdown.Current(_events ?? [], now, state.DismissedMeetings) is { } e
             ? ProactiveCards.Meeting(ProactiveCards.MeetingCardId(e.Id), e, now) : null;
 
         // 6–9. Busy holds new cards; nudge dwell is still credited.

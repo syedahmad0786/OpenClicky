@@ -7,9 +7,13 @@ public static class MeetingCountdown
 {
     public static readonly TimeSpan ShowBefore = TimeSpan.FromSeconds(75), ShowAfter = TimeSpan.FromMinutes(2);
 
-    /// <summary>The earliest timed, not-dismissed event inside the window, or null.</summary>
-    public static UpcomingEvent? Current(IReadOnlyList<UpcomingEvent> events, DateTimeOffset now, IReadOnlySet<string> dismissedIds) =>
-        events.Where(e => !e.IsAllDay && !dismissedIds.Contains(e.Id) && e.StartsAt - now <= ShowBefore && now - e.StartsAt < ShowAfter)
+    /// <summary>
+    /// The earliest timed, not-dismissed event inside the window, or null. <paramref name="dismissed"/> maps an event id to
+    /// the start the user dismissed: only that occurrence is hidden, so a series that reuses one id shows again next time.
+    /// </summary>
+    public static UpcomingEvent? Current(IReadOnlyList<UpcomingEvent> events, DateTimeOffset now, IReadOnlyDictionary<string, DateTimeOffset> dismissed) =>
+        events.Where(e => !e.IsAllDay && !(dismissed.TryGetValue(e.Id, out var at) && at == e.StartsAt)
+                          && e.StartsAt - now <= ShowBefore && now - e.StartsAt < ShowAfter)
               .OrderBy(e => e.StartsAt).FirstOrDefault();
 
     /// <summary>"Starts in m:ss" in 15 s steps (rounded up), then "Starting now", then "Started N min ago".</summary>

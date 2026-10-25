@@ -7,7 +7,7 @@ public class MeetingCountdownTests
     private static readonly DateTimeOffset Start = new(2026, 10, 25, 10, 0, 0, TimeSpan.Zero);
     private static UpcomingEvent Ev(string id, DateTimeOffset at, bool allDay = false, string? url = null, string? link = null) =>
         new(id, id, at, null, allDay, url, link, null);
-    private static readonly IReadOnlySet<string> None = new HashSet<string>();
+    private static readonly IReadOnlyDictionary<string, DateTimeOffset> None = new Dictionary<string, DateTimeOffset>();
 
     [Fact]
     public void ShowsFrom75sUntil2MinAfter()
@@ -20,10 +20,21 @@ public class MeetingCountdownTests
         Assert.Null(MeetingCountdown.Current(list, Start.AddSeconds(120), None));
 
         Assert.Null(MeetingCountdown.Current([Ev("d", Start, allDay: true)], Start, None));
-        Assert.Null(MeetingCountdown.Current(list, Start, new HashSet<string> { "a" }));
+        Assert.Null(MeetingCountdown.Current(list, Start, new Dictionary<string, DateTimeOffset> { ["a"] = Start }));
 
         var earlier = Ev("early", Start.AddSeconds(-30));
         Assert.Same(earlier, MeetingCountdown.Current([e, earlier], Start.AddSeconds(-10), None));
+    }
+
+    [Fact]
+    public void DismissalIsPerOccurrence()
+    {
+        // A recurring series can reuse one event id: dismissing today's occurrence must not hide tomorrow's.
+        var dismissed = new Dictionary<string, DateTimeOffset> { ["series"] = Start };
+        var today = Ev("series", Start);
+        var tomorrow = Ev("series", Start.AddDays(1));
+        Assert.Null(MeetingCountdown.Current([today], Start, dismissed));
+        Assert.Same(tomorrow, MeetingCountdown.Current([tomorrow], Start.AddDays(1), dismissed));
     }
 
     [Theory]
