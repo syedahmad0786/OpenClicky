@@ -14,6 +14,7 @@ internal sealed class JobRun(WorkJob job, string ask, string? routineId, AgentAc
 {
     private JobLiveState _live = JobLiveState.Empty;
     private volatile bool _waitingForScreen;
+    private volatile bool _timedOut;
     private string? _steering;
     private OpenWorkServerService? _server;
     private readonly List<string> _heldSteers = []; // also the lock for _server's hand-over
@@ -31,6 +32,8 @@ internal sealed class JobRun(WorkJob job, string ask, string? routineId, AgentAc
     public IReadOnlyList<string> Outputs { get; } = outputs;
     public DateTimeOffset StartedAt { get; } = DateTimeOffset.UtcNow;
     public bool FromTalk { get; } = fromTalk;
+    /// <summary>A routine run cancelled for running past <see cref="RoutineScheduler.StaleAfter"/>: it ends as failed. Set on the UI thread.</summary>
+    public bool TimedOut { get => _timedOut; set => _timedOut = value; }
     /// <summary>A desktop tool call is waiting for another run to give the screen back (the card says so).</summary>
     public bool WaitingForScreen { get => _waitingForScreen; set => _waitingForScreen = value; }
     /// <summary>The run's row in Tasks.</summary>

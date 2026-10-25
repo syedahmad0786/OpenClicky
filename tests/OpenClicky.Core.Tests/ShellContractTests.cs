@@ -237,6 +237,7 @@ public class ShellContractTests
         Assert.Equal([ReachState.Allowed, ReachState.Unknown], s.Agents.Reach.Select(r => r.State));
         Assert.Equal([RoutineStatus.Scheduled, RoutineStatus.Paused], s.Routines.Select(r => r.Status));
         Assert.Null(s.Routines[0].Last);
+        Assert.Equal("Paused after 3 failed runs", s.Routines[1].Note);
         Assert.Equal(AccessModeView.ConfirmEach, s.Access.Mode);
         Assert.False(s.Advanced.UseLocalProxy);
     }

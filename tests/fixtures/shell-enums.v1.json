@@ -19,7 +19,7 @@
   "chromeState": ["notInstalled", "waiting", "connected"],
   "connectorStatus": ["connected", "checking", "error", "needsSignIn"],
   "reachState": ["allowed", "denied", "unknown"],
-  "routineStatus": ["scheduled", "running", "failed", "paused"],
+  "routineStatus": ["scheduled", "running", "failed", "paused", "waiting"],
   "accessMode": ["preview", "confirmEach", "auto", "full"],
   "drawingActions": ["replayWindow", "replayFullScreen", "replayBoard", "print", "remove"]
 }

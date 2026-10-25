@@ -283,6 +283,19 @@ it("Routines: a failed or running routine shows its status, and the empty state 
   expect(screen.getByText("Ctrl")).toBeInTheDocument();
   expect(screen.getByText("Alt")).toBeInTheDocument();
   expect(screen.getByText("“Every weekday at 8:30, summarise my unread email.”")).toBeInTheDocument();
+  expect(screen.getByText("Routines run while your PC is awake and OpenClicky is open.")).toBeInTheDocument();
+});
+
+it("Routines: a routine waiting for the network shows the Waiting badge and its note; the footer says when routines run", () => {
+  host();
+  render(<SettingsPanel state={make("routines", (s) => {
+    s.settings.routines[0].status = "waiting"; s.settings.routines[0].note = "Waiting for the internet";
+    s.settings.routines[1].note = "Paused after 3 failed runs";
+  })} />);
+  expect(screen.getByText("Waiting")).toBeInTheDocument();
+  expect(screen.getByText("Waiting for the internet")).toBeInTheDocument();
+  expect(screen.getByText("Paused after 3 failed runs")).toBeInTheDocument();
+  expect(screen.getByText("Routines run while your PC is awake and OpenClicky is open.")).toBeInTheDocument();
 });
 
 // ---- Memory / Notes / Clipboard / Tasks

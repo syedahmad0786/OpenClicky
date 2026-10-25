@@ -151,8 +151,8 @@
       "reach": [{ "id": "files", "label": "Files and folders", "state": "allowed" }, { "id": "camera", "label": "Camera", "state": "unknown" }]
     },
     "routines": [
-      { "id": "r1", "title": "Morning summary", "schedule": "Every day at 8:00", "next": "2026-10-25T08:00:00Z", "last": null, "status": "scheduled" },
-      { "id": "r2", "title": "Weekly backup", "schedule": "Every Friday at 18:00", "next": null, "last": "2026-10-23T18:00:00Z", "status": "paused" }
+      { "id": "r1", "title": "Morning summary", "schedule": "Every day at 8:00", "next": "2026-10-25T08:00:00Z", "last": null, "status": "scheduled", "note": null },
+      { "id": "r2", "title": "Weekly backup", "schedule": "Every Friday at 18:00", "next": null, "last": "2026-10-23T18:00:00Z", "status": "paused", "note": "Paused after 3 failed runs" }
     ],
     "access": { "mode": "confirmEach", "denyList": "C:\\Windows\\System32", "rememberHistory": true },
     "advanced": { "useLocalProxy": false, "proxyUrl": "", "forceGdiCapture": false }

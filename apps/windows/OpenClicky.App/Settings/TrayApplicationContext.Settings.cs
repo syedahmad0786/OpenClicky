@@ -44,7 +44,7 @@ internal sealed partial class TrayApplicationContext
     private SettingsRuntime SettingsRuntimeFor(IReadOnlyList<Routine> routines, IReadOnlyList<WorkJob> jobs, IReadOnlyList<ConnectorInfo> connectors) =>
         SettingsProbe.Current with
         {
-            Routines = SettingsActionArgs.RoutineViews(routines, jobs),
+            Routines = SettingsActionArgs.RoutineViews(routines, jobs, _routinesWaiting),
             Connectors = connectors.Select(c => _connectorChecks.TryGetValue(c.Key, out var check)
                 ? new ConnectorView(c.Key, c.DisplayName, c.Host, check.Status, check.Tools)
                 : new ConnectorView(c.Key, c.DisplayName, c.Host, ConnectorStatus.Connected, null)).ToList(),

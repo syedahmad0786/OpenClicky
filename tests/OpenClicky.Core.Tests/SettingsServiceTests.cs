@@ -244,8 +244,9 @@ public class SettingsServiceTests
         Assert.True(paused.IsPaused);
         Assert.False(RoutineSchedule.IsDue(paused, Now));
 
-        var resumed = SettingsActionArgs.Resume(paused, Now, TimeZoneInfo.Utc);
+        var resumed = SettingsActionArgs.Resume(paused with { ConsecutiveFailures = 3 }, Now, TimeZoneInfo.Utc);
         Assert.False(resumed.IsPaused);
+        Assert.Equal(0, resumed.ConsecutiveFailures); // a routine paused after 3 failures gets three fresh tries
         // A stale next-run time is not replayed on resume: it moves to the next slot after now.
         Assert.Equal(new DateTimeOffset(2026, 10, 25, 9, 0, 0, TimeSpan.Zero), resumed.NextRunAt);
         Assert.False(RoutineSchedule.IsDue(resumed, Now));
@@ -259,19 +260,29 @@ public class SettingsServiceTests
         Routine[] routines =
         [
             Daily(),
-            Daily(paused: true) with { Id = "r2" },
+            Daily(paused: true) with { Id = "r2", LastOutcome = "Paused after 3 failed runs" },
             Daily(failures: 2) with { Id = "r3" },
             Daily() with { Id = "r4", JobId = "j2" },
             Daily() with { Id = "r5", JobId = "gone" },
+            Daily(failures: 1) with { Id = "r6" },
+            Daily() with { Id = "r7", JobId = "j2" },
         ];
-        var views = SettingsActionArgs.RoutineViews(routines, [job, running]);
-        Assert.Equal(["r1", "r2", "r3", "r4"], views.Select(v => v.Id));
+        var views = SettingsActionArgs.RoutineViews(routines, [job, running], waitingForNetwork: new HashSet<string> { "r6", "r7", "r2" });
+        Assert.Equal(["r1", "r2", "r3", "r4", "r6", "r7"], views.Select(v => v.Id));
         Assert.Equal("Morning brief", views[0].Title);
         Assert.Equal("Every day at 09:00", views[0].Schedule);
         Assert.Equal(ShellStateBuilder.Iso(Now.AddDays(-3)), views[0].Next);
         Assert.Equal(ShellStateBuilder.Iso(Now.AddDays(-4)), views[0].Last);
-        Assert.Equal([RoutineStatus.Scheduled, RoutineStatus.Paused, RoutineStatus.Failed, RoutineStatus.Running], views.Select(v => v.Status));
+        // Paused wins, then running, then waiting for the network, then failed.
+        Assert.Equal([RoutineStatus.Scheduled, RoutineStatus.Paused, RoutineStatus.Failed, RoutineStatus.Running, RoutineStatus.Waiting, RoutineStatus.Running],
+            views.Select(v => v.Status));
         Assert.Null(views[1].Next); // a paused routine has no next run
+        Assert.Equal("Paused after 3 failed runs", views[1].Note);
+        Assert.Equal("Waiting for the internet", views[4].Note);
+        Assert.Null(views[0].Note);
+        Assert.Null(views[2].Note);
+        Assert.Null(views[3].Note);
+        Assert.Equal(views.Select(v => v.Status).Take(4), SettingsActionArgs.RoutineViews(routines, [job, running]).Select(v => v.Status).Take(4));
     }
 
     [Theory]

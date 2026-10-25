@@ -173,12 +173,14 @@ public static class SettingsActionArgs
 
     public static Routine Pause(Routine routine) => routine with { IsPaused = true };
 
-    /// <summary>Resuming schedules the next slot after now, so a long pause does not fire a stale run at once.</summary>
+    /// <summary>Resuming schedules the next slot after now, so a long pause does not fire a stale run at once, and starts the failure count afresh.</summary>
     public static Routine Resume(Routine routine, DateTimeOffset now, TimeZoneInfo zone) =>
-        routine with { IsPaused = false, NextRunAt = RoutineSchedule.NextAfter(routine, now, zone) };
+        routine with { IsPaused = false, NextRunAt = RoutineSchedule.NextAfter(routine, now, zone), ConsecutiveFailures = 0 };
 
-    /// <summary>Routines whose job still exists, titled by that job. Paused routines show no next run.</summary>
-    public static IReadOnlyList<RoutineView> RoutineViews(IReadOnlyList<Routine> routines, IReadOnlyList<WorkJob> jobs)
+    /// <summary>Routines whose job still exists, titled by that job. Paused routines show no next run and say their last outcome.
+    /// <paramref name="waitingForNetwork"/>: routine ids the last scheduler tick could not start for want of the network.</summary>
+    public static IReadOnlyList<RoutineView> RoutineViews(IReadOnlyList<Routine> routines, IReadOnlyList<WorkJob> jobs,
+        IReadOnlySet<string>? waitingForNetwork = null)
     {
         var byId = jobs.ToDictionary(j => j.Id, StringComparer.Ordinal);
         return routines.Where(r => byId.ContainsKey(r.JobId)).Select(r =>
@@ -186,10 +188,17 @@ public static class SettingsActionArgs
             var job = byId[r.JobId];
             var status = r.IsPaused ? RoutineStatus.Paused
                 : job.Status == WorkJobStates.Running ? RoutineStatus.Running
+                : waitingForNetwork?.Contains(r.Id) == true ? RoutineStatus.Waiting
                 : r.ConsecutiveFailures > 0 ? RoutineStatus.Failed
                 : RoutineStatus.Scheduled;
+            var note = status switch
+            {
+                RoutineStatus.Paused when !string.IsNullOrWhiteSpace(r.LastOutcome) => r.LastOutcome.Trim(),
+                RoutineStatus.Waiting => Work.RoutineScheduler.WaitingLine,
+                _ => null,
+            };
             return new RoutineView(r.Id, string.IsNullOrWhiteSpace(job.Title) ? "Job" : job.Title.Trim(), RoutineSchedule.Describe(r),
-                r.IsPaused ? null : ShellStateBuilder.Iso(r.NextRunAt), r.LastRunAt is { } last ? ShellStateBuilder.Iso(last) : null, status);
+                r.IsPaused ? null : ShellStateBuilder.Iso(r.NextRunAt), r.LastRunAt is { } last ? ShellStateBuilder.Iso(last) : null, status, note);
         }).ToList();
     }
 

@@ -10,6 +10,7 @@ const STATUS = {
   running: { tone: "ok", text: "Running" },
   failed: { tone: "danger", text: "Failed" },
   paused: { tone: "muted", text: "Paused" },
+  waiting: { tone: "warn", text: "Waiting" },
 } as const;
 
 /** null for a date the host sent that does not parse, so no "Next Invalid Date" line shows. */
@@ -32,6 +33,7 @@ function RoutineItem({ r, confirming, onConfirm }: { r: Routine; confirming: boo
             <span>{r.schedule}</span>
             {next ? <span className="settings-line">Next {next}</span> : null}
             {last ? <span className="settings-line">Last {last}</span> : null}
+            {r.note ? <span className="settings-line">{r.note}</span> : null}
           </>
         )}>
         <Badge tone={STATUS[r.status].tone}>{STATUS[r.status].text}</Badge>
@@ -69,6 +71,7 @@ export function RoutinesPage({ state }: { state: ShellState }) {
           ))}
         </Group>
       )}
+      <p className="settings-note">Routines run while your PC is awake and OpenClicky is open.</p>
     </Page>
   );
 }

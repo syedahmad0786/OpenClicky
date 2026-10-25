@@ -244,9 +244,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         ResumeUserSteps();
         _home.Disposed += (_, _) => CloseUserSteps();
         _lease.Changed += OnLeaseChanged;
-        _routineTimer.Tick += (_, _) => { RunDueRoutine(); RequestShellPush(); };
-        _routineTimer.Start();
-        _home.Disposed += (_, _) => _routineTimer.Dispose();
+        StartRoutines();
         // Esc (never swallowed) stops OpenClicky only while it is doing something; a cancelled shortcut ends itself.
         // Speech outside a turn (announcements, previews) stops too; SpeechOutput.Stop is a no-op when nothing plays.
         // A confirm dialog owns Esc: declining a talk action must not also stop a (paused) task or clear the drawing.

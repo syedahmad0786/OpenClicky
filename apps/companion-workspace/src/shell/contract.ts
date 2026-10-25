@@ -141,7 +141,8 @@ const settingsViewSchema = z.object({
     schedule: text(160),
     next: iso.nullable(),
     last: iso.nullable(),
-    status: z.enum(["scheduled", "running", "failed", "paused"]),
+    status: z.enum(["scheduled", "running", "failed", "paused", "waiting"]),
+    note: text(200).nullable(),
   }).strict()).max(100),
   access: z.object({
     mode: z.enum(["preview", "confirmEach", "auto", "full"]),

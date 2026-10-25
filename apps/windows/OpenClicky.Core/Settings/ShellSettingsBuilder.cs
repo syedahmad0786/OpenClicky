@@ -154,7 +154,7 @@ public static class ShellSettingsBuilder
                 WithId(agents.Reach, r => r.Id, MaxReach)
                     .Select(r => new ReachItem(Cut(r.Id, 160), Cut(r.Label, 160), r.State)).ToList()),
             WithId(v.Routines, r => r.Id, MaxRoutines).Select(r => new RoutineView(Cut(r.Id, 160), Cut(r.Title, 160),
-                Cut(r.Schedule, 160), Iso(r.Next), Iso(r.Last), r.Status)).ToList(),
+                Cut(r.Schedule, 160), Iso(r.Next), Iso(r.Last), r.Status, CutOrNull(r.Note, 200))).ToList(),
             new SettingsAccess(access.Mode, SettingsCatalog.CleanDenyList(access.DenyList), access.RememberHistory),
             new SettingsAdvanced(advanced.UseLocalProxy, SettingsCatalog.LoopbackUrl(advanced.ProxyUrl, stripUserInfo: true) ?? SettingsCatalog.DefaultProxyUrl,
                 advanced.ForceGdiCapture));

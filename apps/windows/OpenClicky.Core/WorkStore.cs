@@ -544,8 +544,6 @@ public static class RoutineSchedule
 {
     public const int MinIntervalMinutes = 5;
     public const int MaxIntervalMinutes = 7 * 24 * 60;
-    public const int MaxRetries = 3;
-    public static readonly TimeSpan RetryDelay = TimeSpan.FromMinutes(15);
 
     public static void Validate(Routine routine)
     {
@@ -577,14 +575,17 @@ public static class RoutineSchedule
 
     public static bool IsDue(Routine routine, DateTimeOffset now) => !routine.IsPaused && routine.NextRunAt <= now;
 
-    /// <summary>A missed run (app closed or PC asleep) runs once on return; the next time is counted from its finish, so missed runs never pile up.</summary>
+    /// <summary>A missed run (app closed or PC asleep) runs once on return; the next time is counted from its finish, so missed runs never pile up.
+    /// A failure retries <see cref="RoutineScheduler.RetryAfter"/> later; the third in a row pauses the routine.</summary>
     public static Routine AfterRun(Routine routine, bool succeeded, string outcome, DateTimeOffset finishedAt, TimeZoneInfo zone)
     {
-        var failures = succeeded ? 0 : routine.ConsecutiveFailures + 1;
-        var next = !succeeded && failures <= MaxRetries
-            ? finishedAt + RetryDelay * failures
-            : NextAfter(routine, finishedAt, zone);
-        return routine with { NextRunAt = next, LastRunAt = finishedAt, LastOutcome = outcome, ConsecutiveFailures = failures };
+        if (succeeded)
+            return routine with { NextRunAt = NextAfter(routine, finishedAt, zone), LastRunAt = finishedAt, LastOutcome = outcome, ConsecutiveFailures = 0 };
+        var failures = routine.ConsecutiveFailures + 1;
+        if (failures >= RoutineScheduler.PauseAfterFailures)
+            return routine with { IsPaused = true, NextRunAt = NextAfter(routine, finishedAt, zone), LastRunAt = finishedAt,
+                LastOutcome = RoutineScheduler.PausedOutcome, ConsecutiveFailures = failures };
+        return routine with { NextRunAt = finishedAt + RoutineScheduler.RetryAfter, LastRunAt = finishedAt, LastOutcome = outcome, ConsecutiveFailures = failures };
     }
 
     public static string Describe(Routine routine)

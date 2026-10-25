@@ -18,7 +18,15 @@ internal sealed partial class TrayApplicationContext
     private readonly WorkStore _work = new();
     /// <summary>Lessons from finished runs, fed into later job prompts. ponytail: under %APPDATA%\OpenClicky until E12 moves it under the agent root.</summary>
     private readonly HowToStore _howTos = new(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "OpenClicky", "howtos.json"));
-    private readonly System.Windows.Forms.Timer _routineTimer = new() { Interval = 60_000 };
+    private readonly System.Windows.Forms.Timer _routineTimer = new() { Interval = (int)RoutineScheduler.Tick.TotalMilliseconds };
+    /// <summary>UI thread: a routine tick is in progress (a start may pump messages; the next tick waits for this one).</summary>
+    private bool _routineTicking;
+    /// <summary>UI thread: no routine starts before this, set for three minutes after the PC wakes.</summary>
+    private DateTimeOffset? _routineHoldUntil;
+    /// <summary>UI thread: routines the last tick could not start for want of the network (shown as Waiting). In memory only.</summary>
+    private IReadOnlySet<string> _routinesWaiting = new HashSet<string>();
+    /// <summary>UI thread: held while an unpaused routine exists and the PC is on mains power.</summary>
+    private readonly PowerKeepAwake _keepAwake = new();
     /// <summary>Running job runs by job id. Added on admission, removed when the run ends (on the run's thread).</summary>
     private readonly ConcurrentDictionary<string, JobRun> _jobRuns = new(StringComparer.Ordinal);
     /// <summary>Which jobs hold one of the five slots and which wait. The authority on starting a job; <see cref="_jobRuns"/> follows it.</summary>
@@ -42,8 +50,6 @@ internal sealed partial class TrayApplicationContext
     /// <summary>What one address read may take; a step watch reads every <see cref="UserStepWatch.Poll"/>, off the UI thread.</summary>
     private static readonly TimeSpan AddressReadBudget = TimeSpan.FromMilliseconds(300);
     private const string SteerTooLate = "That job has already finished — ask a follow-up instead.";
-    /// <summary>UI thread: scheduled runs in flight; the PC stays awake while any is.</summary>
-    private int _routineRuns;
 
     /// <param name="Ask">The ask it will start with once steered (its follow-up or request plus each steer); null: not steered.</param>
     private sealed record QueuedStart(string? FollowUp, string? RoutineId, bool FromTalk, WorkJob Before, string? Ask = null);
@@ -226,7 +232,6 @@ internal sealed partial class TrayApplicationContext
             ReleaseSlot(run.Job.Id);
             return false;
         }
-        if (routineId is not null) KeepAwake(true);
         _home.RefreshWork();
         RequestShellPush();
         AnnounceJob(JobEvent.Started, run.Job.Title, run.Job.Id, scheduled: routineId is not null);
@@ -316,16 +321,79 @@ internal sealed partial class TrayApplicationContext
         RequestShellPush();
     }
 
-    private void RunDueRoutine()
+    /// <summary>UI thread, at start-up: the routine tick, the wake hold and the keep-awake re-check on a power change.</summary>
+    private void StartRoutines()
     {
-        if (!System.Net.NetworkInformation.NetworkInterface.GetIsNetworkAvailable()) return;
-        Routine? due;
-        // Routines take the same slots as the user's jobs; a job already running or waiting is left alone.
-        try { due = _work.Routines().FirstOrDefault(r => RoutineSchedule.IsDue(r, DateTimeOffset.UtcNow) && !_admission.Contains(r.JobId)); }
+        _routineTimer.Tick += (_, _) => { RunDueRoutines(); RequestShellPush(); };
+        _routineTimer.Start();
+        Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerModeChanged;
+        _home.Disposed += (_, _) => CloseRoutines();
+        UpdateKeepAwake();
+    }
+
+    /// <summary>Quitting: the static SystemEvents handler goes (it would keep this alive) and the power request is cleared.</summary>
+    private void CloseRoutines()
+    {
+        Microsoft.Win32.SystemEvents.PowerModeChanged -= OnPowerModeChanged;
+        _routineTimer.Dispose();
+        _keepAwake.Dispose();
+    }
+
+    private void OnPowerModeChanged(object? sender, Microsoft.Win32.PowerModeChangedEventArgs e) => OnUi(() =>
+    {
+        if (e.Mode == Microsoft.Win32.PowerModes.Resume) _routineHoldUntil = DateTimeOffset.UtcNow + RoutineScheduler.WakeHold;
+        else if (e.Mode == Microsoft.Win32.PowerModes.StatusChange) UpdateKeepAwake();
+    });
+
+    /// <summary>UI thread, every <see cref="RoutineScheduler.Tick"/>: stops stale routine runs, re-checks keep-awake and starts the due
+    /// routines (through admission, so past five they queue). A routine that cannot start counts as a failed run.</summary>
+    private void RunDueRoutines()
+    {
+        if (_routineTicking) return;
+        _routineTicking = true;
+        try
+        {
+            var now = DateTimeOffset.UtcNow;
+            StopStaleRoutineRuns(now);
+            IReadOnlyList<Routine> routines;
+            try { routines = _work.Routines(); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { Log("routine_read_error=" + ex.GetType().Name); return; }
+            UpdateKeepAwake(routines);
+            // Routines take the same slots as the user's jobs; a job already running or waiting is left alone.
+            var active = routines.Select(r => r.JobId).Where(_admission.Contains).ToHashSet(StringComparer.Ordinal);
+            var decision = RoutineScheduler.Decide(routines,
+                new(now, System.Net.NetworkInformation.NetworkInterface.GetIsNetworkAvailable(), _routineHoldUntil, active));
+            _routinesWaiting = decision.WaitingForNetwork.Select(r => r.Id).ToHashSet(StringComparer.Ordinal);
+            foreach (var due in decision.Start)
+            {
+                if (StartJob(due.JobId, null, due.Id)) continue;
+                try { _work.SaveRoutine(RoutineSchedule.AfterRun(due, false, "Could not start; see Chat.", DateTimeOffset.UtcNow, TimeZoneInfo.Local)); }
+                catch (Exception ex) when (ex is not OutOfMemoryException) { Log("routine_save_error=" + ex.GetType().Name); }
+            }
+        }
+        finally { _routineTicking = false; }
+    }
+
+    /// <summary>A routine-started run past <see cref="RoutineScheduler.StaleAfter"/> is cancelled; <see cref="FinishJob"/> records it as failed.</summary>
+    private void StopStaleRoutineRuns(DateTimeOffset now)
+    {
+        foreach (var run in _jobRuns.Values)
+        {
+            if (run.RoutineId is null || run.TimedOut || !RoutineScheduler.IsStale(run.StartedAt, now)) continue;
+            Log("routine_run_stale");
+            run.TimedOut = true;
+            run.Cancel();
+            run.Control.Resume();
+        }
+    }
+
+    /// <summary>UI thread: the power request is held only while an unpaused routine exists and the PC is on mains power.</summary>
+    private void UpdateKeepAwake(IReadOnlyList<Routine>? routines = null)
+    {
+        try { routines ??= _work.Routines(); }
         catch (Exception ex) when (ex is not OutOfMemoryException) { Log("routine_read_error=" + ex.GetType().Name); return; }
-        if (due is null || StartJob(due.JobId, null, due.Id)) return;
-        try { _work.SaveRoutine(RoutineSchedule.AfterRun(due, false, "Could not start; see Chat.", DateTimeOffset.UtcNow, TimeZoneInfo.Local)); }
-        catch (Exception ex) when (ex is not OutOfMemoryException) { Log("routine_save_error=" + ex.GetType().Name); }
+        var on = routines.Any(r => !r.IsPaused) && SystemInformation.PowerStatus.PowerLineStatus == PowerLineStatus.Online;
+        if (on != _keepAwake.IsOn && !_keepAwake.Set(on)) Log("keep_awake_refused");
     }
 
     /// <summary>Records a finished run. <paramref name="text"/> is the reply without its result block; <paramref name="result"/> is stored
@@ -333,6 +401,8 @@ internal sealed partial class TrayApplicationContext
     /// A Talk job takes its result's title. <paramref name="replyDelivered"/>: the run's reply was spoken aloud (nothing does that yet, so it stays false).</summary>
     private void FinishJob(JobRun work, string status, string text, JobResult? result = null, bool replyDelivered = false)
     {
+        // Cancelled for running too long (routine runs only): a failed run, whatever ended it.
+        if (work.TimedOut && status != AgentProgressStates.Completed) (status, text) = (AgentProgressStates.Failed, RoutineScheduler.StaleOutcome);
         var summary = status == AgentProgressStates.Completed ? result?.Summary ?? JobPrompt.FirstSentence(text) : text;
         // A run that ended by asking for the user's own step waits for them (needs-you) instead of being done.
         var step = status == AgentProgressStates.Completed ? result?.YourTurn : null;
@@ -355,7 +425,6 @@ internal sealed partial class TrayApplicationContext
         var shownTitle = work.FromTalk && result?.Title is { } named ? named : work.Job.Title;
         OnUi(() =>
         {
-            if (work.RoutineId is not null) KeepAwake(false);
             _home.RefreshWork();
             _jobOutputs.Remove(work.Job.Id);
             RequestShellPush();
@@ -383,16 +452,6 @@ internal sealed partial class TrayApplicationContext
     {
         try { _work.WriteIndex(); }
         catch (Exception ex) when (ex is not OutOfMemoryException) { Log("work_index_error=" + ex.GetType().Name); }
-    }
-
-    [System.Runtime.InteropServices.DllImport("kernel32.dll")]
-    private static extern uint SetThreadExecutionState(uint flags);
-
-    /// <summary>UI thread: keeps the PC from sleeping (ES_CONTINUOUS | ES_SYSTEM_REQUIRED) while any scheduled run is in flight.</summary>
-    private void KeepAwake(bool on)
-    {
-        _routineRuns = Math.Max(0, _routineRuns + (on ? 1 : -1));
-        SetThreadExecutionState(_routineRuns > 0 ? 0x80000001u : 0x80000000u);
     }
 
     /// <summary>UI thread, for the shell push: a job's output files as its card shows them (cached until it finishes or is opened).</summary>

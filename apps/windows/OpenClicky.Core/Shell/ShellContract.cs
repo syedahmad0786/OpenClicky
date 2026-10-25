@@ -25,7 +25,7 @@ public enum HotkeyTrigger { Hold, DoubleTap }
 public enum ChromeState { NotInstalled, Waiting, Connected }
 public enum ConnectorStatus { Connected, Checking, Error, NeedsSignIn }
 public enum ReachState { Allowed, Denied, Unknown }
-public enum RoutineStatus { Scheduled, Running, Failed, Paused }
+public enum RoutineStatus { Scheduled, Running, Failed, Paused, Waiting }
 /// <summary>Wire form of the agent access mode: preview, confirmEach, auto, full.</summary>
 public enum AccessModeView { Preview, ConfirmEach, Auto, Full }
 
@@ -102,7 +102,8 @@ public sealed record VoiceOption(string Id, string Name, string Detail, bool Ava
 public sealed record DictationLanguage(string Code, string Name, string Native);
 public sealed record ConnectorView(string Key, string Name, string Host, ConnectorStatus Status, int? ToolCount);
 public sealed record ReachItem(string Id, string Label, ReachState State);
-public sealed record RoutineView(string Id, string Title, string Schedule, string? Next, string? Last, RoutineStatus Status);
+/// <param name="Note">A line under the row: a paused routine's last outcome, or that it waits for the internet.</param>
+public sealed record RoutineView(string Id, string Title, string Schedule, string? Next, string? Last, RoutineStatus Status, string? Note = null);
 
 public sealed record SettingsAccount(
     AccountProvider Provider, string? SignedInAs, string Model, string QuickModel, IReadOnlyList<string> Models,
