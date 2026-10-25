@@ -523,12 +523,7 @@ internal sealed partial class TrayApplicationContext
         var path = Path.Combine(_work.AgentRoot, "howtos.json");
         if (!string.Equals(path, _howTosPath, StringComparison.OrdinalIgnoreCase))
         {
-            try
-            {
-                var previous = _howTosPath.Length > 0 ? _howTosPath : Path.Combine(_work.DefaultAgentRoot, "howtos.json");
-                if (!File.Exists(path) && File.Exists(previous)) File.Copy(previous, path);
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log("howto_carry_error=" + ex.GetType().Name); }
+            FileCarryOver.CopyIfMissing(_howTosPath.Length > 0 ? _howTosPath : Path.Combine(_work.DefaultAgentRoot, "howtos.json"), path);
             _howTos = new HowToStore(path);
             _howTosPath = path;
         }

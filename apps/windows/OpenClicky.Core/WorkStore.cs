@@ -60,6 +60,7 @@ public sealed class WorkStore
     private const string CompanionsFolderName = "companions";
     private readonly string _defaultAgentRoot;
     private volatile string _agentRoot;
+    private string? _previousAgentRoot; // guarded by _sync: where WORK.md came from if the root just changed
 
     /// <param name="rootDirectory">The companions folder; its parent is the agent root (default %APPDATA%\OpenClicky).</param>
     public WorkStore(string? databasePath = null, string? rootDirectory = null)
@@ -84,24 +85,34 @@ public sealed class WorkStore
     /// </summary>
     public bool SetRoot(string? agentFolder)
     {
-        lock (_sync)
+        string? folder = null;
+        if (!string.IsNullOrWhiteSpace(agentFolder))
         {
-            if (string.IsNullOrWhiteSpace(agentFolder)) { _agentRoot = _defaultAgentRoot; return true; }
-            try
+            try // the slow part (a network folder) runs outside the lock; only the assignment is locked
             {
-                var folder = Path.GetFullPath(agentFolder);
+                folder = Path.GetFullPath(agentFolder);
                 Directory.CreateDirectory(folder);
                 var probe = Path.Combine(folder, ".openclicky-write-test-" + Guid.NewGuid().ToString("N"));
                 File.WriteAllText(probe, "");
                 File.Delete(probe);
-                _agentRoot = folder;
-                return true;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or System.Security.SecurityException)
             {
-                _agentRoot = _defaultAgentRoot;
+                folder = null;
+                Assign(_defaultAgentRoot);
                 return false;
             }
+        }
+        Assign(folder ?? _defaultAgentRoot);
+        return true;
+    }
+
+    private void Assign(string root)
+    {
+        lock (_sync)
+        {
+            if (!string.Equals(root, _agentRoot, StringComparison.OrdinalIgnoreCase)) _previousAgentRoot = _agentRoot;
+            _agentRoot = root;
         }
     }
 
@@ -330,6 +341,10 @@ public sealed class WorkStore
             var root = AgentRoot;
             var path = Path.Combine(root, "WORK.md");
             Directory.CreateDirectory(root);
+            // A new root starts from the WORK.md the user had (their own lines survive); the old file stays untouched.
+            if (!File.Exists(path))
+                foreach (var old in new[] { _previousAgentRoot is null ? null : Path.Combine(_previousAgentRoot, "WORK.md"), Path.Combine(_defaultAgentRoot, CompanionsFolderName, "WORK.md") })
+                    if (FileCarryOver.CopyIfMissing(old, path)) break;
             var text = WorkIndex.Render(File.Exists(path) ? File.ReadAllText(path, Encoding.UTF8) : "",
                 jobs.Select(j => new WorkIndexJob(j.Title, Path.GetRelativePath(root, JobFolder(j)), j.Status)).ToList(),
                 jobs.Where(j => j.LastRunAt is not null).Select(j => new WorkIndexRun(j.LastRunAt!.Value, j.Status, j.Summary)).ToList());

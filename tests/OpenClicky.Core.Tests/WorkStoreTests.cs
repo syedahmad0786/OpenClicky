@@ -355,6 +355,40 @@ public class WorkStoreTests
     });
 
     [Fact]
+    public void LegacyWorkMdIsCarriedToTheRootOnce() => InTempStore((store, root) =>
+    {
+        var legacy = Path.Combine(root, "companions", "WORK.md");
+        Directory.CreateDirectory(Path.GetDirectoryName(legacy)!);
+        File.WriteAllText(legacy, "# Work\n\nMy own line\n");
+        store.CreateJob(WorkStore.DefaultCompanionSlug, "Job", "p");
+        store.WriteIndex();
+        var text = File.ReadAllText(Path.Combine(root, "WORK.md"));
+        Assert.Contains("My own line", text);
+        Assert.Contains("Job", text);
+        Assert.Equal("# Work\n\nMy own line\n", File.ReadAllText(legacy)); // the old file is never modified
+    });
+
+    [Fact]
+    public void WorkMdIsCarriedOnARootChange() => InTempStore((store, root) =>
+    {
+        store.CreateJob(WorkStore.DefaultCompanionSlug, "Job", "p");
+        store.WriteIndex();
+        var first = Path.Combine(root, "WORK.md");
+        File.AppendAllText(first, "\nAdded by me\n");
+        var before = File.ReadAllText(first);
+
+        var chosen = Path.Combine(root, "chosen");
+        store.SetRoot(chosen);
+        store.WriteIndex();
+        Assert.Contains("Added by me", File.ReadAllText(Path.Combine(chosen, "WORK.md")));
+        Assert.Equal(before, File.ReadAllText(first));
+
+        File.AppendAllText(Path.Combine(chosen, "WORK.md"), "Second edit\n");
+        store.WriteIndex(); // an existing WORK.md is never replaced by the previous one
+        Assert.Contains("Second edit", File.ReadAllText(Path.Combine(chosen, "WORK.md")));
+    });
+
+    [Fact]
     public void CapTrimsOldestFinishedWithoutRoutine() => InTempStore((store, _) =>
     {
         var at = DateTimeOffset.UtcNow;
