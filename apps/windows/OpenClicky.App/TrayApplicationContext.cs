@@ -78,6 +78,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             ? (_sandbox.Handle, _sandbox.ActiveControl?.Handle ?? IntPtr.Zero) : null);
 
         _settings = LoadSettingsWithSecrets();
+        ApplyAgentFolder();
         EngineSettingsChanged(); // remembers the provider and proxy the first runs use
         IgnoreLegacyFixtureTranscript();
         _hotkey = new ShortcutMonitor(ShortcutBindings.From(_settings));

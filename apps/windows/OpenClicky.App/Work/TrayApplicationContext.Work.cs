@@ -16,8 +16,12 @@ namespace OpenClicky.App;
 internal sealed partial class TrayApplicationContext
 {
     private readonly WorkStore _work = new();
-    /// <summary>Lessons from finished runs, fed into later job prompts. ponytail: under %APPDATA%\OpenClicky until E12 moves it under the agent root.</summary>
-    private readonly HowToStore _howTos = new(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "OpenClicky", "howtos.json"));
+    /// <summary>Lessons from finished runs, fed into later job prompts. Kept at &lt;agent root&gt;\howtos.json; <see cref="ApplyAgentFolder"/> swaps it when the root changes.</summary>
+    private HowToStore _howTos = null!; // set by ApplyAgentFolder in the constructor, before anything can finish a job
+    private string _howTosPath = "";
+    /// <summary>The chosen agent folder could not be used and the shell was not up to say so yet.</summary>
+    private bool _agentFolderNotice;
+    private const string AgentFolderUnusable = "Can't use that folder — new jobs stay in the default folder.";
     private readonly System.Windows.Forms.Timer _routineTimer = new() { Interval = (int)RoutineScheduler.Tick.TotalMilliseconds };
     /// <summary>UI thread: a routine tick is in progress (a start may pump messages; the next tick waits for this one).</summary>
     private bool _routineTicking;
@@ -508,6 +512,31 @@ internal sealed partial class TrayApplicationContext
         });
     }
 
+    /// <summary>
+    /// Points new companions and jobs at <see cref="AppSettings.AgentFolder"/> (blank: the default) and keeps the how-tos at its root.
+    /// Saved jobs and existing companions stay where they are; nothing moves. A new root with no howtos.json starts from a copy of the
+    /// previous one (the old file is never moved or changed). An unusable folder falls back to the default with a toast.
+    /// </summary>
+    private void ApplyAgentFolder()
+    {
+        var usable = _work.SetRoot(_settings.AgentFolder);
+        var path = Path.Combine(_work.AgentRoot, "howtos.json");
+        if (!string.Equals(path, _howTosPath, StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                var previous = _howTosPath.Length > 0 ? _howTosPath : Path.Combine(_work.DefaultAgentRoot, "howtos.json");
+                if (!File.Exists(path) && File.Exists(previous)) File.Copy(previous, path);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log("howto_carry_error=" + ex.GetType().Name); }
+            _howTos = new HowToStore(path);
+            _howTosPath = path;
+        }
+        if (usable) return;
+        Log("agent_folder_unusable");
+        if (_shell is null) _agentFolderNotice = true; else _shell.AddToast(AgentFolderUnusable);
+    }
+
     /// <summary>Keeps what a finished run says it learned (model text: stored, never logged). A failed save never blocks the job.</summary>
     private void SaveHowTos(string jobId, IReadOnlyList<string>? learned)
     {
@@ -515,8 +544,9 @@ internal sealed partial class TrayApplicationContext
         try
         {
             var now = DateTimeOffset.UtcNow;
-            foreach (var lesson in learned) _howTos.Add(lesson, jobId, now);
-            _howTos.Save();
+            var howTos = _howTos; // one store for the whole save, even if the agent folder changes meanwhile
+            foreach (var lesson in learned) howTos.Add(lesson, jobId, now);
+            howTos.Save();
         }
         catch (Exception ex) when (ex is not OutOfMemoryException) { Log("howto_save_error=" + ex.GetType().Name); }
     }

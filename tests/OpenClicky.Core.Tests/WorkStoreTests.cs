@@ -254,6 +254,107 @@ public class WorkStoreTests
     });
 
     [Fact]
+    public void NewJobsUseAgentFolder() => InTempStore((store, root) =>
+    {
+        var chosen = Path.Combine(root, "chosen");
+        Assert.True(store.SetRoot(chosen));
+        var job = store.CreateJob(WorkStore.DefaultCompanionSlug, "Job", "p");
+        var expected = Path.Combine(chosen, "companions", WorkStore.DefaultCompanionSlug, "jobs", job.Id);
+        Assert.Equal(expected, job.FolderPath);
+        Assert.Equal(expected, store.GetJob(job.Id).FolderPath);
+        Assert.True(Directory.Exists(Path.Combine(expected, "output")));
+    });
+
+    [Fact]
+    public void OldJobsKeepTheirFolderAndCompanionsTheirNotes() => InTempStore((store, root) =>
+    {
+        var oldJob = store.CreateJob(WorkStore.DefaultCompanionSlug, "Old", "p");
+        var oldCompanion = store.CreateCompanion("Old Hand", "Was here first.");
+        store.AppendNote(oldCompanion.Slug, "Fact before the move");
+        store.AppendNote(WorkStore.DefaultCompanionSlug, "Main fact");
+        var chosen = Path.Combine(root, "chosen");
+        store.SetRoot(chosen);
+
+        Assert.Equal(Path.Combine(root, "companions", "openclicky", "jobs", oldJob.Id), store.GetJob(oldJob.Id).FolderPath);
+        Assert.Equal(oldJob.FolderPath, store.JobFolder(store.GetJob(oldJob.Id)));
+        Assert.True(Directory.Exists(oldJob.FolderPath));
+        Assert.Contains("Fact before the move", store.ReadNotes(oldCompanion.Slug));
+        Assert.Contains("Main fact", store.ReadNotes(WorkStore.DefaultCompanionSlug));
+        Assert.Equal(Path.Combine(root, "companions", oldCompanion.Slug), store.CompanionFolder(oldCompanion.Slug));
+
+        var fresh = store.CreateCompanion("New Hand", "");
+        Assert.Equal(Path.Combine(chosen, "companions", fresh.Slug), store.CompanionFolder(fresh.Slug));
+        Assert.True(File.Exists(store.NotesPath(fresh.Slug)));
+        Assert.StartsWith(chosen, store.NotesPath(fresh.Slug));
+    });
+
+    [Fact]
+    public void IndexWrittenAtCurrentRoot() => InTempStore((store, root) =>
+    {
+        store.CreateJob(WorkStore.DefaultCompanionSlug, "Before", "p");
+        var chosen = Path.Combine(root, "chosen");
+        store.SetRoot(chosen);
+        var after = store.CreateJob(WorkStore.DefaultCompanionSlug, "After", "p");
+        store.WriteIndex();
+        var text = File.ReadAllText(Path.Combine(chosen, "WORK.md"));
+        Assert.Contains("After", text);
+        Assert.Contains("Before", text); // every job is listed, wherever its folder is
+        Assert.Contains(Path.Combine("companions", "openclicky", "jobs", after.Id), text);
+        Assert.False(File.Exists(Path.Combine(root, "WORK.md")));
+    });
+
+    [Fact]
+    public void ResetToDefault() => InTempStore((store, root) =>
+    {
+        Assert.Equal(root, store.DefaultAgentRoot);
+        store.SetRoot(Path.Combine(root, "chosen"));
+        Assert.NotEqual(root, store.AgentRoot);
+        Assert.True(store.SetRoot(null));
+        Assert.Equal(root, store.AgentRoot);
+        var job = store.CreateJob(WorkStore.DefaultCompanionSlug, "Back", "p");
+        Assert.Equal(Path.Combine(root, "companions", "openclicky", "jobs", job.Id), job.FolderPath);
+        store.SetRoot(Path.Combine(root, "chosen"));
+        Assert.True(store.SetRoot("  "));
+        Assert.Equal(root, store.AgentRoot);
+    });
+
+    [Fact]
+    public void UnwritableFolderFallsBackToDefault() => InTempStore((store, root) =>
+    {
+        Directory.CreateDirectory(root);
+        var file = Path.Combine(root, "a-file");
+        File.WriteAllText(file, "x");
+        store.SetRoot(Path.Combine(root, "chosen"));
+
+        Assert.False(store.SetRoot(Path.Combine(file, "inside"))); // a folder cannot be made under a file
+        Assert.Equal(root, store.AgentRoot);
+        Assert.False(store.SetRoot("bad|name:*?"));
+        Assert.Equal(root, store.AgentRoot);
+        var job = store.CreateJob(WorkStore.DefaultCompanionSlug, "Still works", "p");
+        Assert.StartsWith(Path.Combine(root, "companions"), job.FolderPath);
+    });
+
+    [Fact]
+    public void MigratedCompanionsKeepTheDefaultFolder() => InTempStore((_, root) =>
+    {
+        Directory.CreateDirectory(root);
+        var db = Path.Combine(root, "openclicky.db");
+        using (var connection = new SqliteConnection($"Data Source={db};Pooling=False"))
+        {
+            connection.Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = """
+                CREATE TABLE companions(slug TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT NOT NULL, created_at_utc TEXT NOT NULL, is_archived INTEGER NOT NULL DEFAULT 0);
+                INSERT INTO companions VALUES('openclicky','OpenClicky','Main','2026-10-01T00:00:00.0000000+00:00',0);
+                """;
+            command.ExecuteNonQuery();
+        }
+        var store = new WorkStore(db, Path.Combine(root, "companions"));
+        store.SetRoot(Path.Combine(root, "chosen"));
+        Assert.Equal(Path.Combine(root, "companions", "openclicky"), store.CompanionFolder("openclicky"));
+    });
+
+    [Fact]
     public void CapTrimsOldestFinishedWithoutRoutine() => InTempStore((store, _) =>
     {
         var at = DateTimeOffset.UtcNow;

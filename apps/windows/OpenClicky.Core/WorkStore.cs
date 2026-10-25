@@ -57,14 +57,53 @@ public sealed class WorkStore
     private readonly object _sync = new();
     private bool _migrated;
 
+    private const string CompanionsFolderName = "companions";
+    private readonly string _defaultAgentRoot;
+    private volatile string _agentRoot;
+
+    /// <param name="rootDirectory">The companions folder; its parent is the agent root (default %APPDATA%\OpenClicky).</param>
     public WorkStore(string? databasePath = null, string? rootDirectory = null)
     {
         var appData = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "OpenClicky");
         _databasePath = databasePath ?? Path.Combine(appData, "openclicky.db");
-        RootDirectory = Path.GetFullPath(rootDirectory ?? Path.Combine(appData, "companions"));
+        _defaultAgentRoot = rootDirectory is null ? appData : Path.GetDirectoryName(Path.GetFullPath(rootDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)) ?? appData;
+        _agentRoot = _defaultAgentRoot;
     }
 
-    public string RootDirectory { get; }
+    /// <summary>Where agents work when no folder is chosen. Also holds WORK.md and howtos.json.</summary>
+    public string DefaultAgentRoot => _defaultAgentRoot;
+    /// <summary>The current agent root: WORK.md and howtos.json live here, companions under <see cref="RootDirectory"/>.</summary>
+    public string AgentRoot => _agentRoot;
+    /// <summary>The folder new companions and new jobs go under: &lt;agent root&gt;\companions.</summary>
+    public string RootDirectory => Path.Combine(_agentRoot, CompanionsFolderName);
+
+    /// <summary>
+    /// Points new companions and new jobs at <paramref name="agentFolder"/> (null or blank: the default). Nothing on disk moves: saved jobs
+    /// keep their own folder and existing companions keep theirs. Returns false when the folder could not be written to; the default
+    /// is used instead.
+    /// </summary>
+    public bool SetRoot(string? agentFolder)
+    {
+        lock (_sync)
+        {
+            if (string.IsNullOrWhiteSpace(agentFolder)) { _agentRoot = _defaultAgentRoot; return true; }
+            try
+            {
+                var folder = Path.GetFullPath(agentFolder);
+                Directory.CreateDirectory(folder);
+                var probe = Path.Combine(folder, ".openclicky-write-test-" + Guid.NewGuid().ToString("N"));
+                File.WriteAllText(probe, "");
+                File.Delete(probe);
+                _agentRoot = folder;
+                return true;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or System.Security.SecurityException)
+            {
+                _agentRoot = _defaultAgentRoot;
+                return false;
+            }
+        }
+    }
 
     public IReadOnlyList<Companion> Companions(bool includeArchived = false)
     {
@@ -99,8 +138,9 @@ public sealed class WorkStore
             var slug = baseSlug;
             for (var suffix = 2; Exists(connection, "companions", "slug", slug); suffix++) slug = $"{baseSlug}-{suffix}";
             var companion = new Companion(slug, name, role, DateTimeOffset.UtcNow);
-            Insert(connection, companion);
-            SeedFolder(companion);
+            var folder = SafeChild(RootDirectory, slug); // a new companion lives under the current root, and stays there
+            Insert(connection, companion, folder);
+            SeedFolder(companion, folder);
             return companion;
         }
     }
@@ -119,14 +159,26 @@ public sealed class WorkStore
         }
     }
 
-    public string CompanionFolder(string slug) => SafeChild(RootDirectory, RequireSlug(slug));
+    /// <summary>Where the companion's AGENTS.md lives: the folder it was created in, even after the agent folder changes.</summary>
+    public string CompanionFolder(string slug)
+    {
+        slug = RequireSlug(slug);
+        lock (_sync)
+        {
+            using var connection = Open();
+            using var command = connection.CreateCommand();
+            command.CommandText = "SELECT folder FROM companions WHERE slug=$slug";
+            command.Parameters.AddWithValue("$slug", slug);
+            return command.ExecuteScalar() is string { Length: > 0 } stored ? stored : SafeChild(RootDirectory, slug);
+        }
+    }
     public string NotesPath(string slug) => Path.Combine(CompanionFolder(slug), "AGENTS.md");
 
     /// <summary>Returns the companion's notes file, truncated to <see cref="MaxNotesBytes"/> characters for prompts.</summary>
     public string ReadNotes(string slug)
     {
         var path = NotesPath(slug);
-        if (!File.Exists(path)) SeedFolder(GetCompanion(slug));
+        if (!File.Exists(path)) SeedFolder(GetCompanion(slug), CompanionFolder(slug));
         var text = File.ReadAllText(path, Encoding.UTF8);
         return text.Length <= MaxNotesBytes ? text : text[..MaxNotesBytes];
     }
@@ -275,10 +327,11 @@ public sealed class WorkStore
         lock (_sync)
         {
             var jobs = Jobs();
-            var path = Path.Combine(RootDirectory, "WORK.md");
-            Directory.CreateDirectory(RootDirectory);
+            var root = AgentRoot;
+            var path = Path.Combine(root, "WORK.md");
+            Directory.CreateDirectory(root);
             var text = WorkIndex.Render(File.Exists(path) ? File.ReadAllText(path, Encoding.UTF8) : "",
-                jobs.Select(j => new WorkIndexJob(j.Title, Path.GetRelativePath(RootDirectory, JobFolder(j)), j.Status)).ToList(),
+                jobs.Select(j => new WorkIndexJob(j.Title, Path.GetRelativePath(root, JobFolder(j)), j.Status)).ToList(),
                 jobs.Where(j => j.LastRunAt is not null).Select(j => new WorkIndexRun(j.LastRunAt!.Value, j.Status, j.Summary)).ToList());
             File.WriteAllText(path, text, Encoding.UTF8);
         }
@@ -325,8 +378,11 @@ public sealed class WorkStore
         File.AppendAllText(Path.Combine(folder, "runs.md"), entry.Length > 20_000 ? entry[..20_000] + Environment.NewLine : entry, Encoding.UTF8);
     }
 
-    public string JobFolder(WorkJob job) => job.FolderPath.Length > 0 ? job.FolderPath : DefaultJobFolder(job.CompanionSlug, job.Id);
-    private string DefaultJobFolder(string companionSlug, string jobId) => SafeChild(Path.Combine(CompanionFolder(companionSlug), "jobs"), RequireSlug(jobId));
+    public string JobFolder(WorkJob job) => job.FolderPath.Length > 0 ? job.FolderPath : JobFolderUnder(Path.Combine(_defaultAgentRoot, CompanionsFolderName), job.CompanionSlug, job.Id);
+    /// <summary>A new job's folder: under the current agent root, whichever folder its companion's notes are in.</summary>
+    private string DefaultJobFolder(string companionSlug, string jobId) => JobFolderUnder(RootDirectory, companionSlug, jobId);
+    private static string JobFolderUnder(string companions, string companionSlug, string jobId) =>
+        SafeChild(Path.Combine(SafeChild(companions, RequireSlug(companionSlug)), "jobs"), RequireSlug(jobId));
     public string OutputFolder(WorkJob job) => Path.Combine(JobFolder(job), "output");
 
     public IReadOnlyList<string> Outputs(WorkJob job)
@@ -402,9 +458,8 @@ public sealed class WorkStore
         return slug.Length == 0 ? "companion" : slug;
     }
 
-    private void SeedFolder(Companion companion)
+    private static void SeedFolder(Companion companion, string folder)
     {
-        var folder = CompanionFolder(companion.Slug);
         Directory.CreateDirectory(Path.Combine(folder, "jobs"));
         var notes = Path.Combine(folder, "AGENTS.md");
         if (File.Exists(notes)) return;
@@ -424,13 +479,14 @@ public sealed class WorkStore
     {
         if (Exists(connection, "companions", "slug", DefaultCompanionSlug)) return;
         var companion = new Companion(DefaultCompanionSlug, "OpenClicky", "General helper", DateTimeOffset.UtcNow);
-        Insert(connection, companion);
-        SeedFolder(companion);
+        var folder = SafeChild(RootDirectory, DefaultCompanionSlug);
+        Insert(connection, companion, folder);
+        SeedFolder(companion, folder);
     }
 
-    private static void Insert(SqliteConnection connection, Companion companion) =>
-        Execute(connection, "INSERT INTO companions(slug,name,role,created_at_utc,is_archived) VALUES($slug,$name,$role,$at,0)",
-            ("$slug", companion.Slug), ("$name", companion.Name), ("$role", companion.Role), ("$at", Stamp(companion.CreatedAt)));
+    private static void Insert(SqliteConnection connection, Companion companion, string folder) =>
+        Execute(connection, "INSERT INTO companions(slug,name,role,created_at_utc,is_archived,folder) VALUES($slug,$name,$role,$at,0,$folder)",
+            ("$slug", companion.Slug), ("$name", companion.Name), ("$role", companion.Role), ("$at", Stamp(companion.CreatedAt)), ("$folder", folder));
 
     private SqliteConnection Open()
     {
@@ -466,6 +522,30 @@ public sealed class WorkStore
         foreach (var column in new[] { "colour", "folder", "result_json", "user_step_json" })
             if (!columns.Contains(column)) Execute(connection, $"ALTER TABLE jobs ADD COLUMN {column} TEXT NOT NULL DEFAULT ''");
 
+        // Companions made before the agent folder existed live under the default root; remember that so a new root never hides their notes.
+        var companionColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        using (var info = connection.CreateCommand())
+        {
+            info.CommandText = "PRAGMA table_info(companions)";
+            using var reader = info.ExecuteReader();
+            while (reader.Read()) companionColumns.Add(reader.GetString(1));
+        }
+        if (!companionColumns.Contains("folder")) Execute(connection, "ALTER TABLE companions ADD COLUMN folder TEXT NOT NULL DEFAULT ''");
+        var legacySlugs = new List<string>();
+        using (var select = connection.CreateCommand())
+        {
+            select.CommandText = "SELECT slug FROM companions WHERE folder=''";
+            using var reader = select.ExecuteReader();
+            while (reader.Read()) legacySlugs.Add(reader.GetString(0));
+        }
+        foreach (var slug in legacySlugs)
+        {
+            string path;
+            try { path = SafeChild(Path.Combine(_defaultAgentRoot, CompanionsFolderName), RequireSlug(slug)); }
+            catch (ArgumentException) { continue; }
+            Execute(connection, "UPDATE companions SET folder=$folder WHERE slug=$slug", ("$folder", path), ("$slug", slug));
+        }
+
         var pending = new List<(string Id, string Slug, string Colour, string Folder)>();
         using (var select = connection.CreateCommand())
         {
@@ -476,7 +556,7 @@ public sealed class WorkStore
         foreach (var (id, slug, colour, folder) in pending)
         {
             string path;
-            try { path = folder.Length > 0 ? folder : DefaultJobFolder(slug, id); }
+            try { path = folder.Length > 0 ? folder : JobFolderUnder(Path.Combine(_defaultAgentRoot, CompanionsFolderName), slug, id); }
             catch (ArgumentException) { path = ""; } // a malformed legacy id keeps resolving (and failing) as before
             Execute(connection, "UPDATE jobs SET colour=$colour, folder=$folder WHERE id=$id",
                 ("$colour", colour.Length > 0 ? colour : JobColours.FromId(id)), ("$folder", path), ("$id", id));

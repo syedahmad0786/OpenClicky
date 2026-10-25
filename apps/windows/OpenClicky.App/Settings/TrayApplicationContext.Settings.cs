@@ -31,7 +31,7 @@ internal sealed partial class TrayApplicationContext
         ConfirmAccessMode, text => _shell?.AddToast(text), RequestShellPush, OnNotchSettingApplied, Log);
 
     private SettingsRuntimeProbe SettingsProbe => _settingsProbe ??= new SettingsRuntimeProbe(_secrets, () => _settings,
-        () => _chromePipe?.IsConnected == true, _work.RootDirectory, () => OnUi(RequestShellPush));
+        () => _chromePipe?.IsConnected == true, _work.DefaultAgentRoot, () => OnUi(RequestShellPush));
 
     /// <summary>Tray "Settings": the notch Settings tab when the shell runs, else the classic form.</summary>
     private void ShowNotchSettings()
@@ -152,7 +152,9 @@ internal sealed partial class TrayApplicationContext
             case "openTasks": ShowClassicFromNotch(); _home.ShowTasks(); break;
             case "openClipboard": ShowClipboardShelf(); break;
             case "chooseAgentFolder": ChooseAgentFolder(); break;
-            case "resetAgentFolder": if (NotchSettings.Change(s => s.AgentFolder = null)) _shell?.AddToast("Agents use the default folder again."); break;
+            case "resetAgentFolder":
+                if (NotchSettings.Change(s => s.AgentFolder = null)) { ApplyAgentFolder(); IndexWork(); _shell?.AddToast("Agents use the default folder again."); }
+                break;
             case "openPrivacySetting":
                 if (SettingsActionArgs.PrivacyUri(arg) is { } uri) OpenUrl(uri);
                 else Log("settings: unknown privacy area");
@@ -359,10 +361,7 @@ internal sealed partial class TrayApplicationContext
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { _shell?.AddToast("Memory could not be exported: " + ex.Message); }
     }
 
-    /// <summary>
-    /// Saves the folder agents should work in. WorkStore still uses its own root for existing companions; following this
-    /// folder for new companions needs a per-companion folder in WorkStore (agents sub-project).
-    /// </summary>
+    /// <summary>Saves the folder agents should work in. New jobs and companions use it; saved jobs and existing companions stay where they are.</summary>
     private void ChooseAgentFolder()
     {
         using var dialog = new FolderBrowserDialog { Description = "Choose the folder agents work in", UseDescriptionForTitle = true, ShowNewFolderButton = true };
@@ -371,7 +370,10 @@ internal sealed partial class TrayApplicationContext
             || string.IsNullOrWhiteSpace(dialog.SelectedPath)) return;
         var folder = Path.GetFullPath(dialog.SelectedPath);
         if (!Writable(folder)) { _shell?.AddToast("OpenClicky cannot write to that folder. Choose another one."); return; }
-        if (NotchSettings.Change(s => s.AgentFolder = folder)) _shell?.AddToast("Agent folder saved.");
+        if (!NotchSettings.Change(s => s.AgentFolder = folder)) return;
+        ApplyAgentFolder();
+        IndexWork();
+        _shell?.AddToast("Agent folder saved. New jobs go there; earlier ones stay where they are.");
 
         static bool Writable(string dir)
         {

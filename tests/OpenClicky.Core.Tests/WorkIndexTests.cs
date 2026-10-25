@@ -30,10 +30,10 @@ public class WorkIndexTests
             store.SetJobState(older.Id, WorkJobStates.Completed, T0);
             store.WriteIndex();
 
-            var text = File.ReadAllText(Path.Combine(store.RootDirectory, "WORK.md"));
+            var text = File.ReadAllText(Path.Combine(store.AgentRoot, "WORK.md"));
             Assert.StartsWith("# Work\n\n- Newer job — ", text.TrimStart('﻿'));
-            Assert.Contains($"- Newer job — {Path.Combine("openclicky", "jobs", newer.Id)} — ready", text);
-            Assert.Contains($"- Older job — {Path.Combine("openclicky", "jobs", older.Id)} — done", text);
+            Assert.Contains($"- Newer job — {Path.Combine("companions", "openclicky", "jobs", newer.Id)} — ready", text);
+            Assert.Contains($"- Older job — {Path.Combine("companions", "openclicky", "jobs", older.Id)} — done", text);
             Assert.True(text.IndexOf("Newer job", StringComparison.Ordinal) < text.IndexOf("Older job", StringComparison.Ordinal));
             Assert.Equal($"{Stamp(T0)} · done", Block(text).Trim()); // an empty summary leaves no trailing separator
         }
