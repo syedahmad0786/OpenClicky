@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using OpenClicky.Agent;
-using OpenClicky.App.Proactive;
 using OpenClicky.Core;
 using OpenClicky.Core.Proactive;
 using OpenClicky.Core.Shell;
@@ -26,7 +25,7 @@ internal sealed partial class TrayApplicationContext
     private void WireProactive()
     {
         _physicalInput.UserActivity += _ => Volatile.Write(ref _proactiveActivityTick, Environment.TickCount64);
-        _proactive = new ProactiveCoordinator(new ShellCardSink(() => _shell), new WindowsQuietSignal(Log), ProactiveCalendar,
+        _proactive = new ProactiveCoordinator(new ShellCardSink(() => _shell), new ProactiveQuiet(() => _settings.Paused), ProactiveCalendar,
             new TalkClientSuggestionSource(() => (ProviderFactory.CreateTalkClient(_settings, _secrets, Log), _settings.ResolveTalkModel())),
             ProactiveStore.Load(), state => ProactiveStore.Save(state), Log);
         _proactiveTimer.Tick += (_, _) =>
@@ -46,7 +45,9 @@ internal sealed partial class TrayApplicationContext
         if (shellActive && settings.AnyOn) RefreshProactiveWork(now);
         var activity = Volatile.Read(ref _proactiveActivityTick);
         DateTimeOffset? lastActivity = activity == 0 ? null : now - TimeSpan.FromMilliseconds(Environment.TickCount64 - activity);
-        var busy = _talk.State != CompanionVoiceState.Idle || _talk.ConversationActive || _dictationActive || _taskCts is not null
+        // As E's routines and announcements: a run in the foreground (a native task, or a job on the screen) counts as busy;
+        // a background job does not.
+        var busy = _talk.State != CompanionVoiceState.Idle || _talk.ConversationActive || _dictationActive || RunInForeground
             || _submissionCts is not null || _talk.Walkthrough.View.Active;
         var work = _proactiveWork;
         return new(settings, now, shellActive, busy, lastActivity, _settings.DisplayName,
@@ -83,9 +84,9 @@ internal sealed partial class TrayApplicationContext
         return NudgeCatalog.Match(process, title);
     }
 
+    /// <summary>F's connector for that key, opened per fetch the same way a job opens it (signed-in accounts refresh silently).</summary>
     private ICalendarSource? ProactiveCalendar(string key) =>
-        _connectors.List().FirstOrDefault(c => c.Key == key) is { } c && _connectors.Secret(c.Key) is { } secret
-            ? new McpCalendarSource(c.Key, c.DisplayName, secret) : null;
+        _connectors.List().FirstOrDefault(c => c.Key == key) is { } info ? new McpCalendarSource(() => OpenConnector(info)) : null;
 
     /// <summary>null when the card is not proactive; otherwise what <c>CardAction</c> returns (always false: the card goes).</summary>
     private bool? ProactiveCardAction(string cardId, string actionId)
@@ -108,6 +109,13 @@ internal sealed partial class TrayApplicationContext
     }
 
     private void ProactiveCardDismissed(string cardId) => _proactive?.CardDismissed(cardId);
+
+    /// <summary>E's <see cref="QuietDetector"/> (calls, presenting, full screen, quiet hours) plus the tray's Pause; any thread.</summary>
+    private sealed class ProactiveQuiet(Func<bool> paused) : IQuietSignal
+    {
+        public string? QuietReason() =>
+            ProactiveHostInputs.QuietReason(paused(), QuietDetector.Current(), ForegroundWindowInfo.IsCurrentProcessForeground());
+    }
 
     /// <summary>Puts the coordinator's cards in the notch; nothing without a shell.</summary>
     private sealed class ShellCardSink(Func<ShellController?> shell) : IProactiveCardSink

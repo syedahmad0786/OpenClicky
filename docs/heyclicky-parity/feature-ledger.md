@@ -135,7 +135,7 @@ All four features are **off by default** (Settings → Proactive); nothing is tu
 
 What leaves the machine: the brief sends nothing unless you click **Plan my day** (then its lines go to your model provider as a chat message, together with the window in front, the same as any chat message); suggestions send, once a day, up to 10 recent job titles, 10 routine titles, 20 connector names and 20 declined suggestion titles to your model provider, and **Do it** sends the shown message as a chat message together with the window in front (the same as any chat message); nudges send nothing (app name and window title are read on this PC only and never stored); the countdown asks the calendar connector you picked for events (that connector's own server), and event data does not go to the model provider unless you click **Plan my day**.
 
-Quiet: cards wait during calls (microphone in use by another app), presentations, full-screen apps and the shell's quiet time after a new user's first sign-in, as reported by the shell notification state; they come back when it ends (nudges do not). Windows Focus / Do Not Disturb is not detected by this adapter (the undocumented quiet-hours state is not read); E's quiet detection replaces it at merge. Calendar: events are read through the connector you pick in Settings → Proactive, by a list-events tool the connector marks read-only, chosen by name, never a write tool; F's connectors replace this adapter at merge.
+Quiet: since the merge, cards use E's quiet detector, the same one that silences job announcements: they wait during calls (microphone in use by another app), presentations, full-screen apps and the shell's quiet time after a new user's first sign-in, and while OpenClicky is paused from the tray; they come back when it ends (nudges do not). A run in the foreground (a native task or a job on the screen) counts as busy, as for routines; background jobs do not. Windows Focus / Do Not Disturb is not detected (no shell notification state reports it). Calendar: events are read through the connector you pick in Settings → Proactive, opened the same way a job opens it (sub-project F: browser sign-in with silent refresh, key, none or a local command), by a list-events tool the connector marks read-only, chosen by name, never a write tool.
 
 | ID | Feature | HeyClicky behaviour | OpenClicky today | RE |
 |---|---|---|---|---|
@@ -161,7 +161,7 @@ Quiet: cards wait during calls (microphone in use by another app), presentations
 4. Turn on Suggestions with a signed-in provider: up to three cards arrive one at a time; Do it sends the shown message; Don't suggest is not repeated tomorrow.
 5. Turn on Connect nudges, use Slack or Gmail for 10 s: "Connect Slack?" appears; Connect opens Integrations; it does not return for 48 h.
 6. Start a Teams/Zoom call or present PowerPoint: no proactive card appears, and a shown one goes away until the call ends. (If an app crashed while recording, Windows may report the microphone as still in use and cards stay hidden until that app records again.)
-7. Turn on Do Not Disturb (Focus): proactive cards may still appear — this adapter cannot see Focus; E's detector should. Note what you see.
+7. Turn on Do Not Disturb (Focus): proactive cards may still appear — Windows reports no Focus state to desktop apps, so neither E's detector nor P can see it. Note what you see.
 
 ## 5. Connectors and browser (sub-projects F, G)
 

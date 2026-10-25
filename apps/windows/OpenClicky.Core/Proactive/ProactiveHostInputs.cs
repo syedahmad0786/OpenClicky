@@ -1,3 +1,5 @@
+using OpenClicky.Core.Work;
+
 namespace OpenClicky.Core.Proactive;
 
 /// <summary>What the brief and the suggestion prompt need from saved jobs and routines.</summary>
@@ -34,10 +36,12 @@ public static class ProactiveHostInputs
     }
 
     /// <summary>
-    /// One microphone consent-store entry: in use (started, not stopped) by an app other than OpenClicky. Non-packaged entries are
-    /// named by exe path with <c>\</c> written as <c>#</c>; ours is compared case-insensitively. Missing values mean not in use.
+    /// Why proactive cards stay out of the way, from E's <see cref="QuietState"/> (the one quiet source) plus the tray's Pause; null when
+    /// not quiet. Busy and full screen are ignored while OpenClicky's own window is in front: the notch surface covers its monitor while
+    /// it takes input, and would otherwise hide the card the user is clicking. Reasons are fixed strings (they are logged).
     /// </summary>
-    public static bool MicInUseByOther(string subKeyName, long? lastUsedStart, long? lastUsedStop, string? ownExePath) =>
-        lastUsedStart > 0 && lastUsedStop == 0
-        && (string.IsNullOrEmpty(ownExePath) || !subKeyName.Contains(ownExePath.Replace('\\', '#'), StringComparison.OrdinalIgnoreCase));
+    public static string? QuietReason(bool trayPaused, QuietState quiet, bool ownWindowInFront) =>
+        trayPaused ? "Paused"
+        : !quiet.Quiet || (ownWindowInFront && quiet.Reason is "Busy" or "Full screen") ? null
+        : quiet.Reason;
 }

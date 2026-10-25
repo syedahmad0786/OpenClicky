@@ -22,7 +22,7 @@ public static class CalendarEvents
     /// The tool to list events with, or null. The connector must mark it read-only, and its name must say "event" and a
     /// read verb and no write verb. Tools whose required arguments can all be filled come first, then the shorter name.
     /// </summary>
-    // ponytail: name heuristics; F's calendar connector replaces this adapter.
+    // ponytail: name heuristics over a generic MCP connector (F has no calendar-specific connector); a typed calendar connector would replace them.
     public static CalendarToolInfo? ChooseTool(IEnumerable<CalendarToolInfo> tools)
     {
         if (tools is null) return null;

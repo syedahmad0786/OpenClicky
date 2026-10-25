@@ -4,16 +4,19 @@ using OpenClicky.Core.Proactive;
 namespace OpenClicky.Providers;
 
 /// <summary>
-/// Reads events through the user's own remote MCP connector: picks an event tool the connector marks read-only, asks it for the
-/// window and keeps the events that start inside it. Nothing is logged; error messages carry no URL, header or event text.
-/// The optional <paramref name="handler"/> is for tests: the connector disposes it with its HttpClient after each call.
+/// Reads events through one of the user's connectors (sub-project F's: browser sign-in, key, none or a local command), opened fresh per
+/// fetch: picks an event tool the connector marks read-only, asks it for the window and keeps the events that start inside it.
+/// Nothing is logged; error messages carry no URL, header or event text.
 /// </summary>
-// ponytail: stand-in seam over RemoteMcpConnector; sub-project F's calendar connector replaces it.
-public sealed class McpCalendarSource(string key, string displayName, ConnectorSecret secret, HttpMessageHandler? handler = null) : ICalendarSource
+public sealed class McpCalendarSource(Func<McpConnector?> open) : ICalendarSource
 {
+    /// <summary>A remote connector with a plain secret; <paramref name="handler"/> is for tests (disposed with its HttpClient after each call).</summary>
+    public McpCalendarSource(string key, string displayName, ConnectorSecret secret, HttpMessageHandler? handler = null)
+        : this(() => new RemoteMcpConnector(key, displayName, secret, handler)) { }
+
     public async Task<IReadOnlyList<UpcomingEvent>> EventsAsync(DateTimeOffset from, DateTimeOffset to, CancellationToken ct)
     {
-        using var connector = new RemoteMcpConnector(key, displayName, secret, handler);
+        using var connector = open() ?? throw new InvalidDataException("The calendar connector needs sign-in.");
         var tools = await connector.ListToolsAsync(ct).ConfigureAwait(false);
         var tool = CalendarEvents.ChooseTool(tools.Select(t => new CalendarToolInfo(t.Name, t.ReadOnly, t.InputSchemaJson)))
             ?? throw new InvalidDataException("no read-only calendar tool");

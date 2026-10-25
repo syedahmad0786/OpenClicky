@@ -8,7 +8,7 @@ namespace OpenClicky.App;
 /// hours) and whether another app is using the microphone (a call). Any thread; a read that fails counts as not quiet.</summary>
 internal static class QuietDetector
 {
-    private const string MicrophoneConsent = @"Software\Microsoft\Windows\CapabilityAccessManager\ConsentStore\microphone";
+    private const string MicrophoneConsent = @"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone";
 
     [DllImport("shell32.dll")]
     private static extern int SHQueryUserNotificationState(out int state);

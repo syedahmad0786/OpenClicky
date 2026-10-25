@@ -1,3 +1,4 @@
+using OpenClicky.Core.Work;
 using OpenClicky.Core.Proactive;
 
 namespace OpenClicky.Core.Tests;
@@ -44,12 +45,14 @@ public class ProactiveHostInputsTests
     }
 
     [Theory]
-    [InlineData(@"C:#Apps#Zoom#Zoom.exe", 5L, 0L, @"C:\OpenClicky\OpenClicky.exe", true)]
-    [InlineData(@"C:#Apps#Zoom#Zoom.exe", 5L, 9L, @"C:\OpenClicky\OpenClicky.exe", false)] // stopped
-    [InlineData(@"C:#Apps#Zoom#Zoom.exe", 0L, 0L, @"C:\OpenClicky\OpenClicky.exe", false)] // never used
-    [InlineData(@"C:#Apps#Zoom#Zoom.exe", null, null, @"C:\OpenClicky\OpenClicky.exe", false)] // no values (e.g. the NonPackaged key)
-    [InlineData(@"c:#openclicky#OPENCLICKY.EXE", 5L, 0L, @"C:\OpenClicky\OpenClicky.exe", false)] // our own recording
-    [InlineData(@"MicrosoftTeams_8wekyb3d8bbwe", 5L, 0L, null, true)]
-    public void MicInUseByAnotherApp(string name, long? start, long? stop, string? ownExe, bool expected) =>
-        Assert.Equal(expected, ProactiveHostInputs.MicInUseByOther(name, start, stop, ownExe));
+    [InlineData(true, 4, false, false, "Paused")] // the tray's Pause wins over everything
+    [InlineData(false, 5, false, false, null)]
+    [InlineData(false, 5, true, false, "On a call")]
+    [InlineData(false, 4, false, true, "Presenting")] // presenting counts even with our window in front
+    [InlineData(false, 3, false, false, "Full screen")]
+    [InlineData(false, 3, false, true, null)] // the notch itself can read as full screen
+    [InlineData(false, 2, false, true, null)]
+    [InlineData(false, 5, true, true, "On a call")]
+    public void QuietReasonUsesEsQuietStateAndThePause(bool paused, int notificationState, bool mic, bool ownWindow, string? expected) =>
+        Assert.Equal(expected, ProactiveHostInputs.QuietReason(paused, QuietState.From(notificationState, mic), ownWindow));
 }
