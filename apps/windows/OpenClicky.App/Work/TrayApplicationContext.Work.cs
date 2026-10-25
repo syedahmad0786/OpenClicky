@@ -36,7 +36,7 @@ internal sealed partial class TrayApplicationContext
     /// ponytail: in memory only; after a restart Try again runs the job's own request.</summary>
     private readonly Dictionary<string, string?> _lastFollowUps = new(StringComparer.Ordinal);
     /// <summary>UI thread: each needs-you job's open step and the token that ends its address watch.</summary>
-    private readonly Dictionary<string, (UserStep Step, CancellationTokenSource Watch)> _userSteps = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, (UserStep Step, CancellationTokenSource Watch, NotchCard Card)> _userSteps = new(StringComparer.Ordinal);
     /// <summary>What one address read may take; a step watch reads every <see cref="UserStepWatch.Poll"/>, off the UI thread.</summary>
     private static readonly TimeSpan AddressReadBudget = TimeSpan.FromMilliseconds(300);
     private const string SteerTooLate = "That job has already finished — ask a follow-up instead.";
@@ -185,10 +185,8 @@ internal sealed partial class TrayApplicationContext
                     ClassicMessage("That job is already running or waiting for a slot.");
                     return false;
                 case JobAdmission.Outcome.Queued:
-                    EndUserStep(jobId, UserStepEnd.Superseded);
                     return Queue(jobId, followUp, routineId, fromTalk);
             }
-            EndUserStep(jobId, UserStepEnd.Superseded); // a run the user started by hand answers a step still waiting
         }
         string prompt;
         JobRun run;
@@ -207,6 +205,9 @@ internal sealed partial class TrayApplicationContext
             // Try again replays the user's own follow-up, never a queued steer.
             var asked = queued is null ? followUp : queued.FollowUp;
             _lastFollowUps[jobId] = string.IsNullOrWhiteSpace(asked) ? null : asked;
+            // Only now is the run on its way: a run the user started by hand answers a step still waiting. Had anything above thrown,
+            // the step would still be waiting; if the start is undone later, Restore puts the step back from the job as it was read.
+            EndUserStep(jobId, UserStepEnd.Superseded);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -273,6 +274,7 @@ internal sealed partial class TrayApplicationContext
             ReleaseSlot(jobId);
             return false;
         }
+        EndUserStep(jobId, UserStepEnd.Superseded); // queued: `before` above still holds the step, so stopping it from the queue puts the step back
         IndexWork();
         _home.RefreshWork();
         RequestShellPush();
@@ -305,6 +307,7 @@ internal sealed partial class TrayApplicationContext
     {
         try { _work.RecordJobRun(job.Id, job.Status, job.Summary, job.LastRunAt ?? job.CreatedAt); }
         catch (Exception ex) when (ex is not OutOfMemoryException) { Log("job_restore_error=" + ex.GetType().Name); }
+        if (job.Status == WorkJobStates.NeedsYou) PickUpUserStep(job); // it was waiting on the user when this start superseded the step
         IndexWork();
         _home.RefreshWork();
         RequestShellPush();
@@ -453,12 +456,13 @@ internal sealed partial class TrayApplicationContext
     /// six hours counted from when the step was asked. The step text is untrusted and never logged.</summary>
     private void BeginUserStep(WorkJob job, UserStep step, bool resumed = false)
     {
-        if (_userSteps.Remove(job.Id, out var previous)) previous.Watch.Cancel();
+        if (_userSteps.Remove(job.Id, out var previous)) CloseWatch(previous.Watch);
         var watch = new CancellationTokenSource();
-        _userSteps[job.Id] = (step, watch);
+        var card = JobCards.YourTurn(job, step);
+        _userSteps[job.Id] = (step, watch, card);
         if (!resumed) AnnounceJob(JobEvent.NeedsYou, job.Title, job.Id);
         _shell?.RemoveCard(JobAnnouncer.CardId(job.Id)); // the your-turn card says it better than the plain "Needs you" one
-        _shell?.AddCard(JobCards.YourTurn(job, step));
+        _shell?.AddCard(card); // at start-up there is no shell yet: ShowUserStepCards adds it once the shell is up
         _ = WatchUserStepAsync(job.Id, new UserStepWatch(step, step.AskedAt), watch.Token);
     }
 
@@ -489,13 +493,13 @@ internal sealed partial class TrayApplicationContext
     {
         if (!_userSteps.TryGetValue(jobId, out var open) || watch is { } decided && open.Watch.Token != decided) return;
         _userSteps.Remove(jobId);
-        open.Watch.Cancel();
+        CloseWatch(open.Watch);
         _shell?.RemoveCard(JobCards.YourTurnId(jobId));
         try
         {
             _work.SetUserStep(jobId, null);
             if (end is UserStepEnd.TimedOut or UserStepEnd.Stopped)
-                _work.RecordJobRun(jobId, WorkJobStates.Stopped, end == UserStepEnd.TimedOut ? "Waited six hours for your step; stopped." : "Stopped by you.", DateTimeOffset.UtcNow);
+                _work.RecordJobRun(jobId, WorkJobStates.Stopped, end == UserStepEnd.TimedOut ? UserStepWatch.TimedOutSummary : "Stopped by you.", DateTimeOffset.UtcNow);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException) { Log("user_step_end_error=" + ex.GetType().Name); }
         if (end == UserStepEnd.Done && !StartJob(jobId, $"The user finished this step: {open.Step.Step}. Carry on with the job.", routineId: null))
@@ -522,23 +526,55 @@ internal sealed partial class TrayApplicationContext
         return true;
     }
 
-    /// <summary>UI thread, at start-up after <see cref="WorkStore.RecoverInterrupted"/>: needs-you jobs keep waiting, their six hours counted
-    /// from when the step was asked. One whose step cannot be read is stopped, for nothing could end it.</summary>
+    /// <summary>UI thread: a needs-you job is waiting on its stored step again (after a restart, or a start that superseded it was undone).
+    /// A step with time left is watched, its six hours counted from when it was asked, with no announcement. One already past the limit is
+    /// stopped here, with the timeout summary and no card; one that cannot be read is stopped, for nothing could end it.</summary>
+    private void PickUpUserStep(WorkJob job)
+    {
+        var (outcome, step) = UserStepWatch.Resume(job.UserStepJson, DateTimeOffset.UtcNow);
+        try
+        {
+            if (outcome == UserStepResume.Watch) _work.SetUserStep(job.Id, job.UserStepJson);
+            else
+            {
+                _work.SetUserStep(job.Id, null);
+                _work.RecordJobRun(job.Id, WorkJobStates.Stopped, outcome == UserStepResume.TimedOut ? UserStepWatch.TimedOutSummary : WorkStore.InterruptedSummary, DateTimeOffset.UtcNow);
+            }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Log("user_step_resume_error=" + ex.GetType().Name); return; }
+        if (outcome == UserStepResume.Watch) BeginUserStep(job, step!, resumed: true);
+    }
+
+    /// <summary>UI thread, at start-up after <see cref="WorkStore.RecoverInterrupted"/>. Watches restart here, in the classic window too;
+    /// their cards wait for the shell (<see cref="ShowUserStepCards"/>).</summary>
     private void ResumeUserSteps()
     {
         try
         {
-            foreach (var job in _work.Jobs().Where(j => j.Status == WorkJobStates.NeedsYou))
-            {
-                if (UserStepWatch.FromJson(job.UserStepJson) is { } step) BeginUserStep(job, step, resumed: true);
-                else
-                {
-                    _work.SetUserStep(job.Id, null);
-                    _work.RecordJobRun(job.Id, WorkJobStates.Stopped, WorkStore.InterruptedSummary, DateTimeOffset.UtcNow);
-                }
-            }
+            foreach (var job in _work.Jobs().Where(j => j.Status == WorkJobStates.NeedsYou)) PickUpUserStep(job);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException) { Log("user_step_resume_error=" + ex.GetType().Name); }
+        IndexWork();
+    }
+
+    /// <summary>UI thread, once the shell is up: the your-turn cards of the steps resumed before it existed.</summary>
+    private void ShowUserStepCards()
+    {
+        foreach (var open in _userSteps.Values) _shell?.AddCard(open.Card);
+    }
+
+    private static void CloseWatch(CancellationTokenSource watch)
+    {
+        try { watch.Cancel(); }
+        catch (ObjectDisposedException) { }
+        watch.Dispose();
+    }
+
+    /// <summary>Quitting: no watch outlives the app.</summary>
+    private void CloseUserSteps()
+    {
+        foreach (var open in _userSteps.Values) CloseWatch(open.Watch);
+        _userSteps.Clear();
     }
 
     /// <summary>The steer is kept for the run's desktop observations and goes into its session (held until the session exists).

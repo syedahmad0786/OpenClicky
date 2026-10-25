@@ -62,4 +62,30 @@ public sealed class UserStepWatchTests
     [InlineData(null, null)]
     public void OnlyWebPagesOpen(string? page, string? expected) =>
         Assert.Equal(expected, UserStepWatch.PageToOpen(Step(page: page))?.AbsoluteUri);
+
+    [Fact]
+    public void ResumeWatchesAStepWithTimeLeft()
+    {
+        var (outcome, step) = UserStepWatch.Resume(UserStepWatch.ToJson(Step()), Start + UserStepWatch.Limit - TimeSpan.FromMinutes(1));
+        Assert.Equal(UserStepResume.Watch, outcome);
+        Assert.Equal(Step(), step);
+    }
+
+    [Fact]
+    public void ResumeStopsAnExpiredStepWithoutWatchingIt()
+    {
+        Assert.Equal(UserStepResume.TimedOut, UserStepWatch.Resume(UserStepWatch.ToJson(Step()), Start + UserStepWatch.Limit).Outcome);
+        Assert.Equal(UserStepResume.TimedOut, UserStepWatch.Resume(UserStepWatch.ToJson(Step()), Start.AddDays(3)).Outcome);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("not json")]
+    [InlineData("{\"step\":\"\"}")]
+    public void ResumeStopsAStepThatCannotBeRead(string? json) =>
+        Assert.Equal((UserStepResume.Unreadable, (UserStep?)null), UserStepWatch.Resume(json, Start));
+
+    [Fact]
+    public void TimeoutSummaryIsAsSpecified() => Assert.Equal("Waited six hours for your step; stopped.", UserStepWatch.TimedOutSummary);
 }

@@ -242,6 +242,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         catch (Exception ex) when (ex is not OutOfMemoryException) { Log("job_recover_error=" + ex.GetType().Name); }
         IndexWork();
         ResumeUserSteps();
+        _home.Disposed += (_, _) => CloseUserSteps();
         _lease.Changed += OnLeaseChanged;
         _routineTimer.Tick += (_, _) => { RunDueRoutine(); RequestShellPush(); };
         _routineTimer.Start();

@@ -30,10 +30,16 @@ public static class BrowserAddressReader
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception) { return null; } // the window or process went away
     }
 
-    /// <summary><see cref="Read(TimeSpan)"/> off the caller's thread, never held longer than the budget (plus a moment) by a hung browser.</summary>
+    private static Task? _reading;
+
+    /// <summary><see cref="Read(TimeSpan)"/> off the caller's thread, never held longer than the budget (plus a moment) by a hung browser.
+    /// While an earlier read is still outstanding (a hung browser) no new one starts and null is returned, so reads never pile up.
+    /// ponytail: one outstanding read for all callers; a second watcher polling at the same moment just skips that tick.</summary>
     public static async Task<string?> ReadAsync(TimeSpan budget, CancellationToken ct)
     {
+        if (Volatile.Read(ref _reading) is { IsCompleted: false }) return null;
         var work = Task.Run(() => Read(budget), CancellationToken.None); // thread-pool threads are MTA, as UIA wants
+        Volatile.Write(ref _reading, work);
         var finished = await Task.WhenAny(work, Task.Delay(budget + TimeSpan.FromMilliseconds(200), ct)).ConfigureAwait(false);
         ct.ThrowIfCancellationRequested();
         return finished == work ? await work.ConfigureAwait(false) : null;
