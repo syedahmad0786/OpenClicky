@@ -124,12 +124,13 @@ public sealed class DriveSession(AgentAccessMode accessSnapshot, Func<Cancellati
 public static class DriveGuard
 {
     /// <summary>
-    /// Agent input is never sent into OpenClicky itself: not while any of its confirm dialogs is open (another run's click or
-    /// Tab+Space could answer it), and not when the foreground window or the click/scroll point (<paramref name="pointIsOwn"/>,
-    /// null for keys) is one of its windows.
+    /// Agent input is never sent into OpenClicky itself: nothing while any of its confirm dialogs is open (another run's click or
+    /// Tab+Space could answer it); a key (<paramref name="pointIsOwn"/> null) when the foreground window is one of its windows;
+    /// a click or scroll when its point is on one of its windows. A focused OpenClicky window (the notch composer) does not
+    /// block a click or scroll on another app.
     /// </summary>
     public static bool RefusesOwnTarget(bool confirmOpen, bool foregroundIsOwn, bool? pointIsOwn) =>
-        confirmOpen || foregroundIsOwn || pointIsOwn == true;
+        confirmOpen || (pointIsOwn ?? foregroundIsOwn);
 
     /// <summary>
     /// A window whose process integrity (Low 0x1000, Medium 0x2000, High 0x3000, System 0x4000) is above ours, or cannot be

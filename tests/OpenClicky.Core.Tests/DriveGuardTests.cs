@@ -14,6 +14,16 @@ public class DriveGuardTests
         Assert.True(DriveGuard.RefusesOwnTarget(confirmOpen: true, foregroundIsOwn: false, pointIsOwn: false)); // any OpenClicky prompt is up
         Assert.True(DriveGuard.RefusesOwnTarget(false, foregroundIsOwn: true, null)); // typing would land in OpenClicky
         Assert.True(DriveGuard.RefusesOwnTarget(false, false, pointIsOwn: true)); // a click on an OpenClicky window
+        Assert.True(DriveGuard.RefusesOwnTarget(false, foregroundIsOwn: true, pointIsOwn: true));
+    }
+
+    [Fact]
+    public void AFocusedOpenClickyWindowDoesNotBlockClicksElsewhere()
+    {
+        // The notch composer keeps focus after a typed request: a click or scroll on another app still goes through.
+        Assert.False(DriveGuard.RefusesOwnTarget(confirmOpen: false, foregroundIsOwn: true, pointIsOwn: false));
+        // but never while an OpenClicky prompt is up.
+        Assert.True(DriveGuard.RefusesOwnTarget(confirmOpen: true, foregroundIsOwn: true, pointIsOwn: false));
     }
 
     [Fact]

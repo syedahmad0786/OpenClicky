@@ -56,6 +56,9 @@ internal sealed class WinFormsAgentConfirm : IAgentConfirm
             var prior = test?.window ?? ForegroundFocusRestorer.Capture();
             var focus = test?.focus ?? ForegroundFocusRestorer.CaptureFocus(prior);
             Interlocked.Increment(ref _openDialogs);
+            var counted = true;
+            // Before the result is set: the asking run continues asynchronously and must not see its own closed dialog as open.
+            void Closed() { if (counted) { counted = false; Interlocked.Decrement(ref _openDialogs); } }
             try
             {
                 using var dialog = new AgentConfirmDialog(summary, wording, question);
@@ -67,11 +70,11 @@ internal sealed class WinFormsAgentConfirm : IAgentConfirm
                 // Form is closed/disposed; yield UI messages before restoring focus.
                 Application.DoEvents();
                 var restored = !restoreTarget || ForegroundFocusRestorer.Restore(prior, test is not null, focus);
+                Closed();
                 if (cancellationToken.IsCancellationRequested) tcs.TrySetCanceled(cancellationToken);
                 else if (result == DialogResult.Yes && !restored)
                     tcs.TrySetException(new InvalidOperationException("I couldn't restore the target app and field. Select the app you want to use, then try again."));
                 else tcs.TrySetResult(result == DialogResult.Yes);
-                Interlocked.Decrement(ref _openDialogs);
             }
             catch (Exception ex)
             {
@@ -84,7 +87,7 @@ internal sealed class WinFormsAgentConfirm : IAgentConfirm
                     // best-effort restore on failure path
                 }
 
-                Interlocked.Decrement(ref _openDialogs);
+                Closed();
                 tcs.TrySetException(ex);
             }
         }

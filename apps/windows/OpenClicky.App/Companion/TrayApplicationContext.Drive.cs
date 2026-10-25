@@ -153,8 +153,9 @@ internal sealed partial class TrayApplicationContext
     }
 
     /// <summary>
-    /// Never into OpenClicky: refused while any of its confirm dialogs is open, or when the foreground window or the click/scroll
-    /// point is one of its windows. The built-in sandbox test window (the demo's only target) is the one exception.
+    /// Never into OpenClicky: refused while any of its confirm dialogs is open; a key when the foreground window is one of its
+    /// windows; a click or scroll when its point is on one (root or root owner). The built-in sandbox test window (the demo's
+    /// only target) is the one exception.
     /// </summary>
     private bool RefusesOwnTarget(ActionRequest request)
     {
