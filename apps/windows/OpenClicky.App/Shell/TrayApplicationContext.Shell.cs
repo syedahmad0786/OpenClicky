@@ -124,6 +124,7 @@ internal sealed partial class TrayApplicationContext : IShellHost
             ApplyTaskbarPresence();
             ApplyCaptureExclusion();
             UpdateCompanionDock();
+            MaybeStartOnboarding();
         }
         // Updates are checked in classic fallback mode too; there they announce through the tray.
         _updateTimer.Start();
