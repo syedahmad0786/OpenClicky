@@ -51,6 +51,34 @@ public class DictationCorrectionDetectorTests
         Assert.Equal("Kubernetes", d.Observe("Hi deploy to Kubernetes today there"));
     }
 
+    [Fact]
+    public void IsSpent_WhenSpanLostOrWordLearned()
+    {
+        var d = Detector();
+        Assert.False(d.IsSpent);
+        Assert.Null(d.Observe("Note: deploy to kubernates today and more")); // still inside the span: keep watching
+        Assert.False(d.IsSpent);
+        Assert.Null(d.Observe("Notes: deploy to kubernates today"));
+        Assert.True(d.IsSpent);
+
+        var learned = Detector();
+        learned.Observe("Note: deploy to Kubernetes today");
+        Assert.False(learned.IsSpent);
+        Assert.Equal("Kubernetes", learned.Observe("Note: deploy to Kubernetes today"));
+        Assert.True(learned.IsSpent);
+    }
+
+    [Fact]
+    public void NoSpaceScriptFixLearnsNothing()
+    {
+        foreach (var (before, after) in new[] { ("今天我们去公园玩", "今天我们去公园完"), ("これはペンです", "これはペソです") })
+        {
+            var d = new DictationCorrectionDetector("", before, before, []);
+            Assert.Null(d.Observe(after));
+            Assert.Null(d.Observe(after));
+        }
+    }
+
     private static void AssertIgnored(string value)
     {
         var d = Detector();

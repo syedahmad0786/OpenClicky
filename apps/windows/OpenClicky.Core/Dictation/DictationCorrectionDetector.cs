@@ -17,7 +17,7 @@ public sealed class DictationCorrectionDetector
     private readonly string[] _oldWords;
     private readonly IReadOnlyCollection<string> _dictionary;
     private string? _lastValue;
-    private bool _done;
+    private bool _done, _spanLost;
 
     public DictationCorrectionDetector(string valueBefore, string valueAfter, string inserted, IReadOnlyCollection<string> dictionary)
     {
@@ -34,10 +34,14 @@ public sealed class DictationCorrectionDetector
         _done = _oldWords.Length == 0;
     }
 
+    /// <summary>True once there is nothing left to learn: a word was returned, the inserted span no longer sits between its
+    /// prefix and suffix, or the insert was not a clean one. A watch can stop polling.</summary>
+    public bool IsSpent => _done || _spanLost;
+
     /// <summary>The learned word the first time it qualifies; null for every other call.</summary>
     public string? Observe(string currentValue)
     {
-        if (_done || currentValue is null) return null;
+        if (IsSpent || currentValue is null) return null;
         var candidate = Candidate(currentValue);
         var stable = candidate is not null && currentValue == _lastValue;
         _lastValue = currentValue;
@@ -49,7 +53,11 @@ public sealed class DictationCorrectionDetector
     private string? Candidate(string value)
     {
         if (value.Length < _prefix.Length + _suffix.Length
-            || !value.StartsWith(_prefix, StringComparison.Ordinal) || !value.EndsWith(_suffix, StringComparison.Ordinal)) return null;
+            || !value.StartsWith(_prefix, StringComparison.Ordinal) || !value.EndsWith(_suffix, StringComparison.Ordinal))
+        {
+            _spanLost = true;
+            return null;
+        }
         var now = Words(value[_prefix.Length..^_suffix.Length]);
         if (now.Length != _oldWords.Length) return null;
 
@@ -61,6 +69,8 @@ public sealed class DictationCorrectionDetector
             (oldWord, newWord) = (_oldWords[i], now[i]);
         }
         if (newWord is null || oldWord is null) return null;
+        // No-space scripts (Chinese, Japanese, Thai...) have no word breaks: a token there is a whole clause, not a word.
+        if (oldWord.Any(DictationTextFit.IsNoSpaceScript) || newWord.Any(DictationTextFit.IsNoSpaceScript)) return null;
         if (newWord.Length < MinWordLength || newWord.Length > SettingsCatalog.MaxWordLength) return null;
         if (_dictionary.Contains(newWord, StringComparer.OrdinalIgnoreCase)) return null;
 

@@ -261,7 +261,12 @@ internal sealed partial class TrayApplicationContext
                 {
                     await Task.Delay(DictationWatchPollMs, token).ConfigureAwait(false);
                     if (target.ReadValueWhileFocused() is not { } value) { reason = "field_left"; break; }
-                    if (detector.Observe(value) is not { } word) continue;
+                    if (detector.Observe(value) is not { } word)
+                    {
+                        if (!detector.IsSpent) continue;
+                        reason = "span_lost";
+                        break;
+                    }
                     reason = "learned";
                     OnUi(() => LearnDictationWord(word, token));
                     break;
