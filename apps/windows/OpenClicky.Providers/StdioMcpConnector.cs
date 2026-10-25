@@ -73,7 +73,13 @@ public sealed class StdioMcpConnector : JsonRpcMcpConnector
             process.Dispose();
             throw new InvalidOperationException($"OpenClicky couldn't start {Path.GetFileName(launch.FileName)}. Check the command in Connections.");
         }
-        _process = process;
+        // Dispose may have run between the check above and here: whichever side sees the other's write kills the process.
+        Interlocked.Exchange(ref _process, process);
+        if (Volatile.Read(ref _disposed) != 0)
+        {
+            KillTree(process);
+            throw new ObjectDisposedException(GetType().Name);
+        }
         ProcessId = process.Id;
         process.ErrorDataReceived += (_, _) => { };
         process.BeginErrorReadLine();
@@ -205,9 +211,10 @@ public sealed class StdioMcpConnector : JsonRpcMcpConnector
     }
 
     /// <summary>
-    /// Resolves a command the way a console would: a path with a directory as is, otherwise the current directory and then
-    /// each PATH entry, trying each PATHEXT extension (and the bare name when it has one). .exe/.com run directly with
-    /// ArgumentList-style quoting; .cmd/.bat run through %ComSpec% /d /s /c and may not carry cmd metacharacters.
+    /// Resolves a command: a full path (C:\Tools\server.exe) as is, a bare name through each PATH entry only (never the
+    /// current directory), trying each PATHEXT extension (and the bare name when it has one); a relative path with a
+    /// folder is refused. .exe/.com run directly with ArgumentList-style quoting; .cmd/.bat run through
+    /// %ComSpec% /d /s /c and may not carry cmd metacharacters.
     /// </summary>
     internal static (string FileName, string Arguments)? Launch(string command, IReadOnlyList<string> args, string? pathVariable, string? pathExt, out string error)
     {
@@ -216,12 +223,18 @@ public sealed class StdioMcpConnector : JsonRpcMcpConnector
         if (command.Length == 0) return null;
         var extensions = (pathExt ?? ".COM;.EXE;.BAT;.CMD").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Where(e => DirectExtensions.Contains(e, StringComparer.OrdinalIgnoreCase) || LauncherExtensions.Contains(e, StringComparer.OrdinalIgnoreCase)).ToArray();
+        // A drive-relative name like C:server.exe counts too: Path.Combine would resolve it against that drive's current directory.
+        var hasDirectory = command.IndexOfAny(['\\', '/', ':']) >= 0;
+        if (hasDirectory && !Path.IsPathFullyQualified(command))
+        {
+            error = "Give the program's full path, like C:\\Tools\\server.exe, or just its name.";
+            return null;
+        }
         string? found = null;
         try
         {
-            var hasDirectory = command.Contains('\\') || command.Contains('/');
-            IEnumerable<string> folders = hasDirectory ? [""] : new[] { Environment.CurrentDirectory }.Concat(
-                (pathVariable ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(p => p.Trim('"')));
+            IEnumerable<string> folders = hasDirectory ? [""]
+                : (pathVariable ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(p => p.Trim('"'));
             string[] bare = Path.HasExtension(command) ? [command] : [];
             var names = bare.Concat(extensions.Select(e => command + e.ToLowerInvariant())).ToArray();
             found = folders.SelectMany(folder => names.Select(name => folder.Length == 0 ? Path.GetFullPath(name) : Path.Combine(folder, name)))
@@ -247,8 +260,15 @@ public sealed class StdioMcpConnector : JsonRpcMcpConnector
         }
         error = "";
         var shell = Environment.GetEnvironmentVariable("ComSpec") is { Length: > 0 } comSpec ? comSpec : Path.Combine(Environment.SystemDirectory, "cmd.exe");
-        return (shell, "/d /s /c \"" + string.Join(' ', new[] { found }.Concat(args).Select(a => "\"" + a + "\"")) + "\"");
+        return (shell, "/d /s /c \"" + string.Join(' ', new[] { found }.Concat(args).Select(QuoteForLauncher)) + "\"");
     }
+
+    /// <summary>
+    /// Wraps one launcher argument (it has no quote characters) in quotes, doubling trailing backslashes so the program the
+    /// launcher forwards it to (CommandLineToArgvW rules) still reads C:\Notes\ and not an escaped closing quote.
+    /// </summary>
+    private static string QuoteForLauncher(string argument) =>
+        "\"" + argument + new string('\\', argument.Length - argument.TrimEnd('\\').Length) + "\"";
 
     /// <summary>Quotes one argument exactly as ProcessStartInfo.ArgumentList would (CommandLineToArgvW rules).</summary>
     private static string Quote(string argument)
@@ -266,15 +286,18 @@ public sealed class StdioMcpConnector : JsonRpcMcpConnector
         return quoted.Append('"').ToString();
     }
 
+    /// <summary>Kills the process and its descendants, also when the process itself (say, a .cmd launcher) already exited.</summary>
+    private static void KillTree(Process process)
+    {
+        try { process.Kill(entireProcessTree: true); } catch (Exception) { }
+        try { process.Dispose(); } catch (Exception) { }
+    }
+
     public override void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         try { _lifetime.Cancel(); } catch (ObjectDisposedException) { }
-        if (_process is { } process)
-        {
-            try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch (Exception) { }
-            try { process.Dispose(); } catch (Exception) { }
-        }
+        if (Volatile.Read(ref _process) is { } process) KillTree(process);
         else
         {
             try { _input?.Dispose(); } catch (Exception) { }

@@ -153,8 +153,34 @@ public class StdioMcpConnectorTests
             Assert.StartsWith("/d /s /c \"", launch.Value.Arguments);
             Assert.Equal($"/d /s /c \"\"{launcher}\" \"--port\" \"3000\"\"", launch.Value.Arguments);
 
-            // A path with a directory is used as is.
+            // A full path is used as is.
             Assert.Equal(launch, StdioMcpConnector.Launch(launcher, ["--port", "3000"], null, null, out _));
+
+            // Trailing backslashes are doubled before the closing quote so the forwarded program still reads C:\Notes\;
+            // inner backslashes stay as typed.
+            var vault = StdioMcpConnector.Launch("mytool", [@"C:\Notes\", @"C:\a\b", @"x\\"], folder, ".CMD", out _);
+            Assert.Equal($"/d /s /c \"\"{launcher}\" \"C:\\Notes\\\\\" \"C:\\a\\b\" \"x\\\\\\\\\"\"", vault!.Value.Arguments);
+        }
+        finally { Directory.Delete(folder, recursive: true); }
+    }
+
+    [Fact]
+    public void SearchesPathOnlyAndRefusesRelativeFolders()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "openclicky-cwd-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            File.WriteAllText(Path.Combine(folder, "planted.cmd"), "@echo off\r\n");
+            Assert.NotNull(StdioMcpConnector.Launch("planted", [], folder, ".CMD", out _));
+            Assert.Null(StdioMcpConnector.Launch("planted", [], "", ".CMD", out var missing));
+            Assert.Equal("OpenClicky couldn't find planted. Check the command, or give its full path.", missing);
+
+            foreach (var relative in new[] { @".\planted.cmd", "./planted.cmd", @"sub\planted.cmd", @"C:planted.cmd", @"\planted.cmd" })
+            {
+                Assert.Null(StdioMcpConnector.Launch(relative, [], folder, ".CMD", out var error));
+                Assert.Equal("Give the program's full path, like C:\\Tools\\server.exe, or just its name.", error);
+            }
         }
         finally { Directory.Delete(folder, recursive: true); }
     }
