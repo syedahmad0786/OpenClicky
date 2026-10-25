@@ -56,6 +56,13 @@ internal sealed class SpeechOutput : ITtsClient
     }
 
     /// <summary>
+    /// Says a job announcement. It ignores <see cref="Enabled"/> (Settings → Voice "read replies aloud"): the announcement toggle is its own.
+    /// It is not a reply, so no word reaches the captions bar and no speaker check runs.
+    /// </summary>
+    public Task AnnounceAsync(string text, CancellationToken cancellationToken = default) =>
+        string.IsNullOrWhiteSpace(text) ? Task.CompletedTask : SpeakCoreAsync(text, null, cancellationToken, captions: false);
+
+    /// <summary>
     /// Says the preview line with <paramref name="voiceId"/> at the current speed. Like the test sound, it stops whatever is
     /// playing first: a reply's current sentence and every sentence of it still waiting to play are dropped.
     /// </summary>
@@ -103,7 +110,7 @@ internal sealed class SpeechOutput : ITtsClient
 
     private CancellationToken StopToken() { lock (_gate) return _stop.Token; }
 
-    private async Task SpeakCoreAsync(string text, string? voiceOverride, CancellationToken cancellationToken)
+    private async Task SpeakCoreAsync(string text, string? voiceOverride, CancellationToken cancellationToken, bool captions = true)
     {
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, StopToken());
         var token = linked.Token;
@@ -122,7 +129,7 @@ internal sealed class SpeechOutput : ITtsClient
                     if (gap > TimeSpan.Zero) await Task.Delay(gap, token).ConfigureAwait(false);
                     var device = RenderDevices.WaveOutNumber(settings.OutputDeviceId);
                     _log($"speech_play_start voice={voice} device={device} audio_ms={(int)clip.Info.Duration.TotalMilliseconds}");
-                    try { await RenderDevices.PlayAsync(clip, device, voiceOverride is null ? WordSpoken : null, token).ConfigureAwait(false); }
+                    try { await RenderDevices.PlayAsync(clip, device, voiceOverride is null && captions ? WordSpoken : null, token).ConfigureAwait(false); }
                     finally { Interlocked.Exchange(ref _lastEndTicks, Environment.TickCount64); }
                     _log("speech_play_end");
                 }

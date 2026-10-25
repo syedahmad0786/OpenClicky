@@ -46,8 +46,8 @@ internal static class QuietDetector
         return false;
     }
 
-    // ponytail: an app that crashed with the mic open leaves start > stop forever; add a staleness cutoff if that shows up.
-    /// <summary>Windows stamps a start time when an app opens the microphone and a stop time (0 while open) when it closes it.</summary>
+    /// <summary>Windows stamps a start time when an app opens the microphone and a stop time (0 while open) when it closes it; a start older
+    /// than 12 hours is an app that crashed with it open (<see cref="QuietState.MicHeldOpen"/>).</summary>
     private static bool InUse(RegistryKey key) =>
-        key.GetValue("LastUsedTimeStart") is long start && (key.GetValue("LastUsedTimeStop") is not long stop || start > stop);
+        key.GetValue("LastUsedTimeStart") is long start && QuietState.MicHeldOpen(start, key.GetValue("LastUsedTimeStop") is long stop ? stop : 0, DateTimeOffset.UtcNow);
 }

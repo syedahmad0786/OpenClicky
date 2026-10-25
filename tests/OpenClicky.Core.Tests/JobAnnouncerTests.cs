@@ -8,8 +8,9 @@ public sealed class JobAnnouncerTests
     private static readonly QuietState Calm = new(false, null);
     private static readonly QuietState Presenting = new(true, "Presenting");
 
-    private static Announcement For(JobEvent e, string title = "Tidy my desktop", bool speak = true, bool bubble = true, QuietState? quiet = null, bool talkBusy = false) =>
-        JobAnnouncer.For(e, title, "job1", speak, bubble, quiet ?? Calm, talkBusy);
+    private static Announcement For(JobEvent e, string title = "Tidy my desktop", bool speak = true, bool bubble = true, QuietState? quiet = null, bool talkBusy = false,
+        bool replyDelivered = false, bool scheduled = false) =>
+        JobAnnouncer.For(e, title, "job1", speak, bubble, quiet ?? Calm, talkBusy, replyDelivered, scheduled);
 
     [Theory]
     [InlineData(JobEvent.Started, "On it: Tidy my desktop.")]
@@ -93,5 +94,38 @@ public sealed class JobAnnouncerTests
     {
         Assert.Equal("a b is ready.", For(JobEvent.Done, "  a\r\nb ").Speak);
         Assert.Equal("Your job is ready.", For(JobEvent.Done, "  ").Speak);
+    }
+
+    [Theory]
+    [InlineData(JobEvent.Done)]
+    [InlineData(JobEvent.Failed)]
+    public void ATalkJobWhoseReplyWasDeliveredKeepsOnlyTheCard(JobEvent e)
+    {
+        var a = For(e, replyDelivered: true);
+        Assert.Null(a.Speak);
+        Assert.Null(a.Bubble);
+        Assert.NotNull(a.Card);
+    }
+
+    [Theory]
+    [InlineData(JobEvent.Started)]
+    [InlineData(JobEvent.NeedsYou)]
+    public void ADeliveredReplyDoesNotSilenceOtherEvents(JobEvent e)
+    {
+        var a = For(e, replyDelivered: true);
+        Assert.NotNull(a.Speak);
+        Assert.NotNull(a.Bubble);
+    }
+
+    [Fact]
+    public void ScheduledRunsDoNotAnnounceStartedButStillAnnounceTheEnd()
+    {
+        var started = For(JobEvent.Started, scheduled: true);
+        Assert.Null(started.Speak);
+        Assert.Null(started.Bubble);
+        var done = For(JobEvent.Done, scheduled: true);
+        Assert.NotNull(done.Speak);
+        Assert.NotNull(done.Bubble);
+        Assert.NotNull(done.Card);
     }
 }

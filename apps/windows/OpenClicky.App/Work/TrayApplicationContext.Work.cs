@@ -218,18 +218,18 @@ internal sealed partial class TrayApplicationContext
         if (routineId is not null) KeepAwake(true);
         _home.RefreshWork();
         RequestShellPush();
-        AnnounceJob(JobEvent.Started, run.Job.Title, run.Job.Id);
+        AnnounceJob(JobEvent.Started, run.Job.Title, run.Job.Id, scheduled: routineId is not null);
         return true;
     }
 
     /// <summary>UI thread: says a job event as its settings and the user's focus allow (see <see cref="JobAnnouncer"/>). The card always shows.
     /// The title is untrusted and the announcement is never logged. A job that needs the user (E8) calls this with <see cref="JobEvent.NeedsYou"/>.</summary>
-    private void AnnounceJob(JobEvent e, string title, string jobId)
+    private void AnnounceJob(JobEvent e, string title, string jobId, bool replyDelivered = false, bool scheduled = false)
     {
         try
         {
             var talkBusy = _talk.State != CompanionVoiceState.Idle || _tts.IsSpeaking;
-            var said = JobAnnouncer.For(e, title, jobId, _settings.SpeakJobAnnouncements, _settings.CursorJobUpdates, QuietDetector.Current(), talkBusy);
+            var said = JobAnnouncer.For(e, title, jobId, _settings.SpeakJobAnnouncements, _settings.CursorJobUpdates, QuietDetector.Current(), talkBusy, replyDelivered, scheduled);
             if (said.Card is { } card) _shell?.AddCard(card);
             else _shell?.RemoveCard(JobAnnouncer.CardId(jobId)); // a new run or a stop: the last run's card is out of date
             if (said.Bubble is { } bubble) _overlay.ShowUpdate(bubble);
@@ -240,7 +240,8 @@ internal sealed partial class TrayApplicationContext
 
     private async Task SpeakAnnouncementAsync(string line)
     {
-        try { await _tts.SpeakAsync(line).ConfigureAwait(false); }
+        try { await _tts.AnnounceAsync(line).ConfigureAwait(false); }
+        catch (OperationCanceledException) { } // Stop or Esc cut it off
         catch (Exception ex) when (ex is not OutOfMemoryException) { Log("job_announce_speech_error=" + ex.GetType().Name); }
     }
 
@@ -316,8 +317,8 @@ internal sealed partial class TrayApplicationContext
 
     /// <summary>Records a finished run. <paramref name="text"/> is the reply without its result block; <paramref name="result"/> is stored
     /// for the job card (a run without one clears the last run's). The routine, user step and lessons it names are only stored here.
-    /// A Talk job takes its result's title.</summary>
-    private void FinishJob(JobRun work, string status, string text, JobResult? result = null)
+    /// A Talk job takes its result's title. <paramref name="replyDelivered"/>: the run's end was already given to Talk as its reply.</summary>
+    private void FinishJob(JobRun work, string status, string text, JobResult? result = null, bool replyDelivered = false)
     {
         var summary = status == AgentProgressStates.Completed ? result?.Summary ?? JobPrompt.FirstSentence(text) : text;
         // The run's last checklist is stored with its result so the card keeps it after the run (even a stopped or failed one).
@@ -342,7 +343,7 @@ internal sealed partial class TrayApplicationContext
             _jobOutputs.Remove(work.Job.Id);
             RequestShellPush();
             AnnounceJob(status == AgentProgressStates.Completed ? JobEvent.Done : status == AgentProgressStates.Failed ? JobEvent.Failed : JobEvent.Stopped,
-                shownTitle, work.Job.Id);
+                shownTitle, work.Job.Id, replyDelivered: work.FromTalk && replyDelivered);
         });
     }
 

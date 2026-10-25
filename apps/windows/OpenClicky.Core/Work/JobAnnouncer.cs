@@ -19,6 +19,17 @@ public sealed record QuietState(bool Quiet, string? Reason)
         _ when micInUseByOtherApp => new(true, "On a call"),
         _ => new(false, null),
     };
+
+    /// <summary>How long a microphone start with no stop can stand for a live call; older ones are an app that crashed with it open.</summary>
+    public static readonly TimeSpan MicHolderMaxAge = TimeSpan.FromHours(12);
+
+    /// <summary>Windows' consent store stamps a start and a stop time (FILETIME; 0 stop while open) per app. The mic is held open when the start
+    /// is newer than the stop and not older than <see cref="MicHolderMaxAge"/>.</summary>
+    public static bool MicHeldOpen(long startFileTime, long stopFileTime, DateTimeOffset now)
+    {
+        if (startFileTime <= 0 || startFileTime > DateTime.MaxValue.ToFileTimeUtc() || startFileTime <= stopFileTime) return false;
+        return now - DateTimeOffset.FromFileTime(startFileTime) <= MicHolderMaxAge;
+    }
 }
 
 /// <summary>What a job event says: a spoken line, a cursor bubble and a notch card. Quiet and a talk in progress mute the voice (and,
@@ -34,7 +45,10 @@ public static class JobAnnouncer
 
     /// <param name="title">Untrusted (model or user text): cut to <see cref="MaxTitle"/>. Never log the announcement.</param>
     /// <param name="talkBusy">A talk turn or a spoken reply is in progress: nothing else is spoken over it.</param>
-    public static Announcement For(JobEvent e, string title, string jobId, bool speakSetting, bool bubbleSetting, QuietState quiet, bool talkBusy)
+    /// <param name="replyDelivered">The job was started by Talk and its end (Done or Failed) was already delivered as the reply: only the card is added.</param>
+    /// <param name="scheduled">A routine started this run: its start is not announced (its end is).</param>
+    public static Announcement For(JobEvent e, string title, string jobId, bool speakSetting, bool bubbleSetting, QuietState quiet, bool talkBusy,
+        bool replyDelivered = false, bool scheduled = false)
     {
         ArgumentNullException.ThrowIfNull(quiet);
         title = Clean(title);
@@ -53,6 +67,7 @@ public static class JobAnnouncer
             JobEvent.NeedsYou => Card(NotchCardKind.NeedsYou, "Needs you", null),
             _ => null,
         };
+        if (replyDelivered && (e is JobEvent.Done or JobEvent.Failed) || scheduled && e == JobEvent.Started) line = null;
         return new(line is not null && speakSetting && !quiet.Quiet && !talkBusy ? line : null,
             line is not null && bubbleSetting && !quiet.Quiet ? line : null, card);
 

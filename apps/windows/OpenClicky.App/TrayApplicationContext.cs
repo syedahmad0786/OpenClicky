@@ -841,7 +841,8 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
                     _talk.ReportTaskResult(work.Display, shown);
                     taskResultCommitted = true;
                 }
-                FinishJob(work, AgentProgressStates.Completed, string.IsNullOrWhiteSpace(shown) ? "Finished without a written reply." : shown, parsed);
+                FinishJob(work, AgentProgressStates.Completed, string.IsNullOrWhiteSpace(shown) ? "Finished without a written reply." : shown, parsed,
+                    replyDelivered: taskResultCommitted);
                 jobRecorded = true;
                 RecordProgress(id, new(0, "completed", "OpenWork returned its result. Session: " + result.SessionId));
                 return;
@@ -885,7 +886,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             RecordProgress(id, new(0, "failed", failure));
             if (taskResultCommitted) _talk.ReportAssistantMessage(failure);
             else _talk.ReportLocalReply(work?.Display ?? task, failure);
-            if (work is not null && !jobRecorded) { FinishJob(work, AgentProgressStates.Failed, failure); jobRecorded = true; }
+            if (work is not null && !jobRecorded) { FinishJob(work, AgentProgressStates.Failed, failure, replyDelivered: true); jobRecorded = true; }
         }
         finally
         {

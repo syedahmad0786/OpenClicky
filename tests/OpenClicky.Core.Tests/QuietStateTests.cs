@@ -25,4 +25,25 @@ public sealed class QuietStateTests
     [InlineData(7)]
     [InlineData(99)]
     public void OtherwiseNotQuiet(int state) => Assert.Equal(new QuietState(false, null), QuietState.From(state, false));
+
+    private static readonly DateTimeOffset Now = new(2026, 10, 25, 12, 0, 0, TimeSpan.Zero);
+
+    [Fact]
+    public void MicOpenWithinTwelveHoursCounts()
+    {
+        Assert.True(QuietState.MicHeldOpen(Now.AddMinutes(-5).ToFileTime(), 0, Now));
+        Assert.True(QuietState.MicHeldOpen(Now.AddHours(-11).ToFileTime(), Now.AddHours(-12).ToFileTime(), Now));
+    }
+
+    [Fact]
+    public void MicOpenSinceBeforeTwelveHoursIsACrashedHolder() =>
+        Assert.False(QuietState.MicHeldOpen(Now.AddHours(-13).ToFileTime(), 0, Now));
+
+    [Fact]
+    public void MicThatWasStoppedOrNeverStartedDoesNotCount()
+    {
+        Assert.False(QuietState.MicHeldOpen(Now.AddMinutes(-5).ToFileTime(), Now.AddMinutes(-1).ToFileTime(), Now));
+        Assert.False(QuietState.MicHeldOpen(0, 0, Now));
+        Assert.False(QuietState.MicHeldOpen(long.MaxValue, 0, Now));
+    }
 }
