@@ -3,6 +3,7 @@ using System.IO;
 using System.Windows.Automation;
 using OpenClicky.Agent;
 using OpenClicky.Core;
+using OpenClicky.Core.Dictation;
 
 namespace OpenClicky.Agent.Smoke;
 
@@ -289,7 +290,84 @@ internal static class Program
             return 23;
         }
 
+        var flowCode = await RunDictationFlowAsync(edit, executor).ConfigureAwait(true);
+        if (flowCode != 0) return flowCode;
+
         Console.WriteLine($"PASS dictation target={target.ControlName} raw={draft.RawTranscript} final={result.FinalText}");
+        return 0;
+    }
+
+    private sealed class FakeCleaner(string answer) : IDictationCleaner
+    {
+        public Task<string?> CleanAsync(string raw, DictationFieldContext? context, IReadOnlyList<string> dictionary, CancellationToken ct) =>
+            Task.FromResult<string?>(answer);
+    }
+
+    /// <summary>The smoke's own IDictationField over the fixture's captured target (the App's UiaDictationField lives in OpenClicky.App, which this project does not reference).</summary>
+    private sealed class FixtureField(DictationTarget target, IAgentActionExecutor executor) : IDictationField
+    {
+        public Task<DictationFieldContext?> ReadContextAsync(CancellationToken ct) =>
+            DictationContextReader.ReadAsync(target, TimeSpan.FromMilliseconds(400), ct);
+
+        public async Task<FieldInsertOutcome> InsertAsync(string text, CancellationToken ct)
+        {
+            var r = await target.InsertAsync(text, executor, ct).ConfigureAwait(false);
+            return new(r.Verified, r.ValueBefore, r.FinalText, r.Message);
+        }
+    }
+
+    /// <summary>Clipboard access needs an STA thread; this console's continuations run on the pool.</summary>
+    private static T OnSta<T>(Func<T> work)
+    {
+        T? value = default; Exception? failure = null;
+        var thread = new Thread(() => { try { value = work(); } catch (Exception ex) { failure = ex; } });
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        thread.Join();
+        return failure is null ? value! : throw new InvalidOperationException("Clipboard access failed: " + failure.Message, failure);
+    }
+
+    /// <summary>
+    /// DictationFlow.DeliverAsync against the sandbox fixture only: with "Say:" typed, a fake cleaner's "Hello, world." must land
+    /// in the real control as "Say: Hello, world."; with no field the same text must reach the real clipboard (the user's own
+    /// clipboard text is saved first and restored afterwards).
+    /// </summary>
+    private static async Task<int> RunDictationFlowAsync(AutomationElement edit, IAgentActionExecutor executor)
+    {
+        foreach (var keys in new[] { "ctrl+a", "backspace" })
+            await executor.ExecuteAsync(new AgentActionRequest(AgentToolNames.Hotkey, new Dictionary<string, string> { ["keys"] = keys }, "clear fixture"), userConfirmed: true).ConfigureAwait(true);
+        var say = await executor.ExecuteAsync(new AgentActionRequest(AgentToolNames.TypeText, new Dictionary<string, string> { ["text"] = "Say:" }, "type flow fixture prefix"), userConfirmed: true).ConfigureAwait(true);
+        if (!say.Success) { Console.Error.WriteLine("FAIL: " + say.Message); return 30; }
+        await Task.Delay(150).ConfigureAwait(true);
+        if (!DictationTarget.TryCapture(out var flowTarget, out var flowError) || flowTarget is null)
+        { Console.Error.WriteLine("FAIL: dictation flow capture: " + flowError); return 31; }
+
+        const string raw = "um hello world there", cleaned = "Hello, world.", expected = "Say: Hello, world.";
+        var options = new DictationOptions(Cleanup: true, Dictionary: []);
+        string? copied = null;
+        var delivery = await DictationFlow.DeliverAsync(raw, new FixtureField(flowTarget, executor), new FakeCleaner(cleaned), options, t => copied = t, CancellationToken.None).ConfigureAwait(true);
+        var value = ReadEditValue(edit);
+        Console.WriteLine($"dictation_flow kind={delivery.Kind} text='{delivery.Text}' control='{value}' copied={(copied is null ? "no" : "yes")}");
+        if (delivery.Kind != DictationDeliveryKind.Inserted || copied is not null || value != expected)
+        { Console.Error.WriteLine($"FAIL: expected Inserted and the control to read '{expected}', got {delivery.Kind} / '{value}'"); return 32; }
+
+        // Clipboard fallback: no field. Keep the user's clipboard text safe; skip rather than clobber non-text content.
+        var (hadText, saved, hasOther) = OnSta(() => (Clipboard.ContainsText(), Clipboard.ContainsText() ? Clipboard.GetText() : null,
+            !Clipboard.ContainsText() && (Clipboard.GetDataObject()?.GetFormats().Length ?? 0) > 0));
+        if (hasOther) { Console.WriteLine("dictation_flow_clipboard=SKIPPED (the clipboard holds non-text content that would not be restored)"); return 0; }
+        try
+        {
+            var fallback = await DictationFlow.DeliverAsync(raw, null, new FakeCleaner(cleaned), options, t => OnSta(() => { Clipboard.SetText(t); return 0; }), CancellationToken.None).ConfigureAwait(true);
+            var onClipboard = OnSta(() => Clipboard.GetText());
+            Console.WriteLine($"dictation_flow_clipboard kind={fallback.Kind} clipboard='{onClipboard}'");
+            if (fallback.Kind != DictationDeliveryKind.Clipboard || fallback.Text != cleaned || onClipboard != cleaned)
+            { Console.Error.WriteLine($"FAIL: expected Clipboard with '{cleaned}', got {fallback.Kind} / '{onClipboard}'"); return 33; }
+        }
+        finally
+        {
+            OnSta(() => { if (hadText) Clipboard.SetText(saved!); else Clipboard.Clear(); return 0; });
+        }
+        Console.WriteLine("PASS dictation_flow inserted='" + expected + "' clipboard='" + cleaned + "' (clipboard restored)");
         return 0;
     }
 
