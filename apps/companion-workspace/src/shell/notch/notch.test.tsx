@@ -198,7 +198,7 @@ it.each(["failed", "stopped"] as const)("a %s job offers Try again, which posts 
 it("tabs post notch.tab; the gear opens Settings, which grows the panel; the apps pill opens Settings", () => {
   const host = mockHost();
   render(<Notch state={open()} />);
-  fireEvent.click(screen.getByRole("button", { name: "Chat" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Chat" }));
   expect(host.posts("notch.tab")).toEqual([{ kind: "notch.tab", tab: "chat" }]);
   expect(screen.getByPlaceholderText("Ask OpenClicky…")).toBeInTheDocument();
   expect(root()).not.toHaveClass("notch--settings");
@@ -208,7 +208,7 @@ it("tabs post notch.tab; the gear opens Settings, which grows the panel; the app
   expect(screen.getByRole("navigation", { name: "Settings sections" })).toBeInTheDocument();
   expect(root()).toHaveClass("notch--settings");
 
-  fireEvent.click(screen.getByRole("button", { name: "Home" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Home" }));
   fireEvent.click(screen.getByRole("button", { name: "2 apps +" }));
   expect(host.posts("notch.tab").at(-1)).toEqual({ kind: "notch.tab", tab: "settings" });
 });
@@ -358,7 +358,7 @@ it("a composer that unmounts while focused (tab switch) gives the keyboard focus
   const input = screen.getByPlaceholderText("Ask OpenClicky…");
   input.focus();
   expect(host.posts("surface.focus").at(-1)).toEqual({ kind: "surface.focus", wanted: true });
-  fireEvent.click(screen.getByRole("button", { name: "Home" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Home" }));
   expect(screen.queryByPlaceholderText("Ask OpenClicky…")).toBeNull();
   expect(host.posts("surface.focus").at(-1)).toEqual({ kind: "surface.focus", wanted: false });
 
@@ -402,8 +402,8 @@ it("the draft survives switching tabs and collapsing", () => {
   mockHost();
   render(<Notch state={open("chat")} />);
   fireEvent.change(screen.getByPlaceholderText("Ask OpenClicky…"), { target: { value: "half a thought" } });
-  fireEvent.click(screen.getByRole("button", { name: "Home" }));
-  fireEvent.click(screen.getByRole("button", { name: "Chat" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Home" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Chat" }));
   expect(screen.getByPlaceholderText("Ask OpenClicky…")).toHaveValue("half a thought");
   fireEvent.pointerLeave(root());
   act(() => { vi.advanceTimersByTime(450); });
@@ -477,8 +477,8 @@ it("composer.focus (text mode) focuses the chat field, also when it arrives befo
   expect(host.posts("surface.focus").at(-1)).toEqual({ kind: "surface.focus", wanted: true });
 
   field.blur();
-  fireEvent.click(screen.getByRole("button", { name: "Home" }));
-  fireEvent.click(screen.getByRole("button", { name: "Chat" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Home" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Chat" }));
   expect(screen.getByRole("textbox", { name: "Message OpenClicky" })).not.toHaveFocus(); // taken once, not on every visit
   host.send({ kind: "composer.focus" });
   expect(screen.getByRole("textbox", { name: "Message OpenClicky" })).toHaveFocus();
