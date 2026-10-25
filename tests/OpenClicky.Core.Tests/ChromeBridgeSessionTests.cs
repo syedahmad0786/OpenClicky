@@ -267,79 +267,12 @@ public sealed class ChromeBridgeSessionTests
         Assert.False(ChromeBridgeSession.TryMapToolName("openclicky_browser_click", out _));
     }
 
-    // Legacy content-script transport; G9 removes these with ChromeBridgeHost.
+    // The frame cap is still live: the native host and bridge server read every message through it.
     [Fact]
     public async Task NativeProtocolRejectsOversizedMessageBeforeAllocation()
     {
         var header = BitConverter.GetBytes(ChromeBridgeNativeProtocol.MaxMessageBytes + 1);
         await Assert.ThrowsAsync<InvalidDataException>(() => ChromeBridgeNativeProtocol.ReadAsync(new MemoryStream(header), default));
-    }
-
-    [Fact]
-    public async Task NativeRelayAuthenticatesAndCarriesOneRequestResponse()
-    {
-        var secret = Enumerable.Range(0, 32).Select(i => (byte)i).ToArray();
-        await using var server = new ChromeBridgePipeTransport(secret);
-        using var chromeInput = new MemoryStream();
-        await ChromeBridgeNativeProtocol.WriteAsync(chromeInput, new { response = "ok" }, default);
-        chromeInput.Position = 0;
-        using var chromeOutput = new MemoryStream();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var relay = ChromeBridgeNativeRelay.RunAsync(chromeInput, chromeOutput, secret, cts.Token);
-        await server.WaitForNativeHostAsync(cts.Token);
-
-        using var response = await server.RequestAsync(new { requestId = "one", command = new { name = "contextActive" } }, cts.Token);
-        Assert.Equal("ok", response.RootElement.GetProperty("response").GetString());
-        chromeOutput.Position = 0;
-        using var forwarded = await ChromeBridgeNativeProtocol.ReadAsync(chromeOutput, default);
-        Assert.Equal("one", forwarded!.RootElement.GetProperty("requestId").GetString());
-        cts.Cancel();
-        try { await relay; } catch (OperationCanceledException) { }
-        var disconnected = await Record.ExceptionAsync(() => server.RequestAsync(new { requestId = "after-disconnect" }, default));
-        Assert.True(disconnected is IOException or InvalidOperationException);
-        Assert.False(server.IsConnected);
-        Assert.True(server.ConnectionEnded.IsCompletedSuccessfully);
-    }
-
-    [Fact]
-    public async Task ConcreteHostMapsSyntheticExtensionContextAndObservation()
-    {
-        var secret = Enumerable.Range(32, 32).Select(i => (byte)i).ToArray();
-        await using var server = new ChromeBridgePipeTransport(secret);
-        using var chromeInput = new MemoryStream();
-        await ChromeBridgeNativeProtocol.WriteAsync(chromeInput, new { tabId = 4, frameId = 0, response = new { ok = true, url = "https://allowed.example/page", title = "Fixture", revision = 700L } }, default);
-        await ChromeBridgeNativeProtocol.WriteAsync(chromeInput, new { tabId = 4, frameId = 0, response = new { ok = true, observation = new { url = "https://allowed.example/page", title = "Fixture", revision = 700L, controls = new[] { new { id = "e1", tag = "a", text = "Help" } }, links = new Dictionary<string, string> { ["e1"] = "https://allowed.example/help" } } } }, default);
-        chromeInput.Position = 0;
-        using var chromeOutput = new MemoryStream();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        var relay = ChromeBridgeNativeRelay.RunAsync(chromeInput, chromeOutput, secret, cts.Token);
-        await server.WaitForNativeHostAsync(cts.Token);
-        var host = new ChromeBridgeHost(server);
-
-        var context = await host.GetCurrentContextAsync(cts.Token);
-        var observation = await host.ObserveAsync(cts.Token);
-
-        Assert.Equal(new BrowserContext("4", "0", 700, "https://allowed.example/", "Fixture"), context);
-        Assert.Equal("https://allowed.example/help", observation.Links["e1"]);
-        cts.Cancel();
-        try { await relay; } catch (OperationCanceledException) { }
-    }
-
-    [Fact]
-    public void ConfigurationLoadsOnlyExactOriginsAndExpectedExtension()
-    {
-        var path = Path.GetTempFileName();
-        try
-        {
-            File.WriteAllText(path, """{"extensionOrigin":"chrome-extension://demdidhcdmmfbpidanflhknhplklkcja/","allowedOrigins":["https://allowed.example/","https://allowed.example/"]}""");
-            var config = ChromeBridgeConfiguration.Load(path);
-            Assert.Equal(["https://allowed.example/"], config.AllowedOrigins);
-            File.WriteAllText(path, """{"extensionOrigin":"chrome-extension://demdidhcdmmfbpidanflhknhplklkcja/","allowedOrigins":["https://allowed.example/path"]}""");
-            Assert.Throws<InvalidDataException>(() => ChromeBridgeConfiguration.Load(path));
-            File.WriteAllText(path, """{"extensionOrigin":"chrome-extension://demdidhcdmmfbpidanflhknhplklkcja/","allowedOrigins":null}""");
-            Assert.Throws<InvalidDataException>(() => ChromeBridgeConfiguration.Load(path));
-        }
-        finally { File.Delete(path); }
     }
 
     private static (ChromeBridgeSession, FakeBridge, FakeBroker) Create(AgentAccessMode access, bool approve = true,

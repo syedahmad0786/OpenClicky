@@ -31,7 +31,7 @@ internal sealed partial class TrayApplicationContext
         ConfirmAccessMode, text => _shell?.AddToast(text), RequestShellPush, OnNotchSettingApplied, Log);
 
     private SettingsRuntimeProbe SettingsProbe => _settingsProbe ??= new SettingsRuntimeProbe(_secrets, () => _settings,
-        () => _chromePipe?.IsConnected == true, _work.RootDirectory, () => OnUi(RequestShellPush));
+        BrowserCardState, _work.RootDirectory, () => OnUi(RequestShellPush));
 
     /// <summary>Tray "Settings": the notch Settings tab when the shell runs, else the classic form.</summary>
     private void ShowNotchSettings()
@@ -120,16 +120,6 @@ internal sealed partial class TrayApplicationContext
         if (wasRunning) _shell?.AddToast("Your task is paused while the classic window is open. Resume it from Tasks.");
     }
 
-    /// <summary>As <see cref="ShowChromeSetup"/>, but owned by a top-most window so it never opens behind the notch.</summary>
-    private void ShowChromeSetupFromNotch()
-    {
-        PauseTask();
-        using var owner = NativeSettings.TopMostOwner();
-        using var setup = new ChromeBridgeSetupForm(Application.ExecutablePath, RuntimePath("chrome-extension"));
-        setup.ShowDialog(owner);
-        if (_chromePipe is null && File.Exists(ChromeBridgeConfiguration.DefaultPath)) _ = ConnectChromeAsync();
-    }
-
     private void RunSettingsAction(string action, string? arg)
     {
         switch (action)
@@ -159,10 +149,7 @@ internal sealed partial class TrayApplicationContext
             case "connector.add": AddConnector(arg); break;
             case "connector.test": _ = TestConnectorAsync(arg); break;
             case "connector.remove": RemoveConnector(arg); break;
-            case "chrome.setup":
-                if (arg == "disconnect") _shell?.AddToast("Remove the extension from Chrome to disconnect.");
-                else if (Modal(() => { ShowChromeSetupFromNotch(); return true; }, false)) SettingsProbe.Refresh();
-                break;
+            case "chrome.setup": RunBrowserSetup(arg); break;
             case "recordHotkey": RecordHotkey(arg); break;
             case "resetHotkeys":
                 if (NotchSettings.Change(SettingsActionArgs.ResetHotkeys)) { ApplyShortcutBindings(); _shell?.AddToast("Shortcuts reset."); }

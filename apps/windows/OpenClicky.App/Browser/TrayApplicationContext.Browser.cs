@@ -1,0 +1,193 @@
+using System.Diagnostics;
+using Microsoft.Win32;
+using OpenClicky.Core;
+using OpenClicky.Core.Agent;
+using OpenClicky.Core.Browser;
+using OpenClicky.Core.Shell;
+using OpenClicky.Providers;
+
+namespace OpenClicky.App;
+
+/// <summary>
+/// The browser bridge: one supervised <see cref="BrowserBridgeServer"/>, a <see cref="ChromeBridgeSession"/> per task while a
+/// browser is connected, and the browser card's buttons (chrome.setup). Registration writes only our own HKCU native-host key,
+/// on the user's Connect click; install help opens pages and copies the path, it never clicks or installs anything.
+/// </summary>
+internal sealed partial class TrayApplicationContext
+{
+    private BrowserBridgeServer? _browserBridge;
+
+    private static string BrowserManifestPath =>
+        Path.Combine(BrowserNativeHostRegistrar.DefaultBridgeFolder, BrowserNativeHostRegistrar.HostName + ".json");
+
+    private static string ExtensionManifestPath => Path.Combine(BrowserNativeHostRegistrar.DefaultExtensionFolder, "manifest.json");
+
+    private void StartBrowserBridge() => _ = Task.Run(SuperviseBrowserBridgeAsync);
+
+    /// <summary>A server instance runs once; when one faults, the next starts 2 s later.</summary>
+    private async Task SuperviseBrowserBridgeAsync()
+    {
+        byte[] secret;
+        try { secret = ChromeBridgeSecretStore.LoadOrCreate(); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Log("browser_secret_error=" + ex.GetType().Name); return; }
+        while (!_lifetime.IsCancellationRequested)
+        {
+            var server = new BrowserBridgeServer(secret, BrowserBridgeServer.PipeName,
+                () => BrowserConnectionStore.Load(BrowserConnectionStore.DefaultPath).SelectedInstance,
+                id => SaveBrowserConnection(c => c with { SelectedInstance = id }));
+            server.Changed += OnBrowserChanged;
+            server.StopRequested += OnBrowserStopRequested;
+            _browserBridge = server;
+            try
+            {
+                await server.RunAsync(_lifetime.Token).ConfigureAwait(false);
+                return; // only cancellation ends RunAsync without an exception
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { Log("browser_bridge_error=" + ex.GetType().Name); }
+            server.Changed -= OnBrowserChanged;
+            server.StopRequested -= OnBrowserStopRequested;
+            try { await server.DisposeAsync().ConfigureAwait(false); } catch (Exception ex) when (ex is not OutOfMemoryException) { }
+            OnBrowserChanged(); // its profiles are gone from the card
+            try { await Task.Delay(TimeSpan.FromSeconds(2), _lifetime.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException) { return; }
+        }
+    }
+
+    // Raised on pipe threads: never throw back into the server.
+    private void OnBrowserChanged()
+    {
+        try { OnUi(() => SettingsProbe.Refresh()); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Log("browser_changed_error=" + ex.GetType().Name); }
+    }
+
+    /// <summary>Stop from the extension: its popup sends no task (stop whatever runs); a group's Stop names its task.</summary>
+    private void OnBrowserStopRequested(string? task)
+    {
+        try { OnUi(() => { if (task is null || task == _runningTaskId) CancelTask(); }); }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Log("browser_stop_error=" + ex.GetType().Name); }
+    }
+
+    /// <summary>The task's browser gate, on its access snapshot; null when no browser is connected. Its owner calls EndAsync on every exit.</summary>
+    private ChromeBridgeSession? CreateBrowserSession(AgentAccessMode access, JobRun? work, string runId)
+    {
+        if (_browserBridge is not { IsConnected: true } bridge) return null;
+        var identity = new BrowserTaskIdentity(runId, work?.Job.Id ?? "task-" + runId, work?.Job.Title ?? "OpenClicky task", work?.Job.Colour ?? "blue");
+        return new ChromeBridgeSession(bridge, new BrowserApprovalBroker(_confirm, _taskControl), access, identity,
+            AgentDenyList.Fragments(AgentDenyList.ParseExtraFragments(_settings.AgentDenyListExtra)),
+            work is null ? null : _work.OutputFolder(work.Job));
+    }
+
+    /// <summary>Settings → Integrations, where the browser card lives (the classic "Set up Chrome tabs" button).</summary>
+    private void ShowBrowserSettings()
+    {
+        if (_shell is { IsActive: true }) _shell.OpenNotch(NotchTab.Settings, "integrations");
+        else ShowSettings();
+    }
+
+    /// <summary>The browser card's buttons. Runs on the UI thread; failures toast through the settings action handler.</summary>
+    private void RunBrowserSetup(string? arg)
+    {
+        if (BrowserSetupArgs.Parse(arg) is not { } request) { Log("settings: unknown browser setup arg"); return; }
+        switch (request.Op)
+        {
+            case "connect": ConnectBrowser(request.Browser!, request.Profile!); break;
+            case "openExtensions":
+                var stored = BrowserConnectionStore.Load(BrowserConnectionStore.DefaultPath);
+                if (FindBrowser(stored.BrowserId, stored.ProfileDirectory ?? "") is { } found) OpenExtensionsPage(found.Browser, found.Profile);
+                else _shell?.AddToast("That browser or profile wasn't found.");
+                break;
+            case "showFolder": ShowExtensionFolder(); break;
+            case "copyPath":
+                Clipboard.SetText(BrowserNativeHostRegistrar.DefaultExtensionFolder);
+                _shell?.AddToast("Extension folder path copied.");
+                break;
+            case "select": _browserBridge?.Select(request.Id!); break;
+            case "get":
+                OpenUrl(request.Browser switch
+                {
+                    "edge" => "https://www.microsoft.com/edge/download",
+                    "brave" => "https://brave.com/download/",
+                    _ => "https://www.google.com/chrome/",
+                });
+                break;
+            case "disconnect": DisconnectBrowser(); break;
+        }
+        SettingsProbe.Refresh();
+    }
+
+    private void ConnectBrowser(string browserId, string profileDir)
+    {
+        if (FindBrowser(browserId, profileDir) is not { } found) { _shell?.AddToast("That browser or profile wasn't found."); return; }
+        var (browser, profile) = found;
+        BrowserNativeHostRegistrar.InstallExtension(DeploymentPathResolver.ResolveDirectory("chrome-extension"), BrowserNativeHostRegistrar.DefaultExtensionFolder);
+        var manifest = BrowserNativeHostRegistrar.WriteManifest(BrowserNativeHostRegistrar.DefaultBridgeFolder, Application.ExecutablePath);
+        BrowserNativeHostRegistrar.Register(Registry.CurrentUser, browser.Kind.VendorKey, manifest);
+        SaveBrowserConnection(c => c with { BrowserId = browser.Kind.Id, ProfileDirectory = profile.Directory, Registered = true });
+        OpenExtensionsPage(browser, profile);
+        ShowExtensionFolder();
+    }
+
+    /// <summary>Unregisters every vendor key that points at our manifest; the extension itself stays until the user removes it.</summary>
+    private void DisconnectBrowser()
+    {
+        foreach (var vendorKey in BrowserCatalog.Known.Select(k => k.VendorKey).Distinct(StringComparer.OrdinalIgnoreCase))
+            if (BrowserNativeHostRegistrar.IsRegistered(Registry.CurrentUser, vendorKey, BrowserManifestPath))
+                BrowserNativeHostRegistrar.Unregister(Registry.CurrentUser, vendorKey);
+        SaveBrowserConnection(c => c with { Registered = false });
+        _shell?.AddToast("The browser is disconnected. You can remove the OpenClicky extension from your browser's extensions page.");
+    }
+
+    /// <summary>The detected browser and its profile; "" picks the first profile (Default).</summary>
+    private static (DetectedBrowser Browser, BrowserProfile Profile)? FindBrowser(string? browserId, string profileDir)
+    {
+        if (BrowserCatalog.Detect(new WindowsBrowserProbe()).FirstOrDefault(b => b.Kind.Id == browserId) is not { } browser) return null;
+        var profile = profileDir.Length == 0 ? browser.Profiles.FirstOrDefault() : browser.Profiles.FirstOrDefault(p => p.Directory == profileDir);
+        return profile is null ? null : (browser, profile);
+    }
+
+    private static void OpenExtensionsPage(DetectedBrowser browser, BrowserProfile profile)
+    {
+        var start = new ProcessStartInfo(browser.ExePath) { UseShellExecute = false };
+        start.ArgumentList.Add("--profile-directory=" + profile.Directory);
+        start.ArgumentList.Add("chrome://extensions/");
+        Launch(start);
+    }
+
+    private static void ShowExtensionFolder() => Launch(new ProcessStartInfo("explorer.exe", $"/select,\"{ExtensionManifestPath}\""));
+
+    private static void SaveBrowserConnection(Func<BrowserConnection, BrowserConnection> change) =>
+        BrowserConnectionStore.Save(BrowserConnectionStore.DefaultPath, change(BrowserConnectionStore.Load(BrowserConnectionStore.DefaultPath)));
+
+    /// <summary>The card's state and view for the settings probe; called on its worker thread (detection reads the disk and registry).</summary>
+    private (ChromeState Chrome, BrowserCardView Browser) BrowserCardState()
+    {
+        var detected = BrowserCatalog.Detect(new WindowsBrowserProbe());
+        var connection = BrowserConnectionStore.Load(BrowserConnectionStore.DefaultPath);
+        var bridge = _browserBridge;
+        var instances = bridge?.Instances ?? Array.Empty<BrowserInstance>();
+        var view = new BrowserCardView(connection.BrowserId, connection.ProfileDirectory,
+            detected.Select(b => new BrowserOptionView(b.Kind.Id, b.Kind.Name, b.Profiles.Select(p => new BrowserProfileView(p.Directory, p.Name)).ToList())).ToList(),
+            instances.Select(i => new BrowserInstanceView(i.Id, i.Brand + " · " + i.Id[..Math.Min(8, i.Id.Length)], i.Selected)).ToList(),
+            BrowserNativeHostRegistrar.DefaultExtensionFolder);
+        var kind = BrowserCatalog.Known.FirstOrDefault(k => k.Id == connection.BrowserId);
+        var registered = connection.Registered && kind is not null
+            && BrowserNativeHostRegistrar.IsRegistered(Registry.CurrentUser, kind.VendorKey, BrowserManifestPath);
+        var state = detected.Count == 0 ? ChromeState.NoBrowser
+            : !registered ? ChromeState.NotInstalled
+            : instances.Count == 0 ? ChromeState.Waiting
+            : bridge!.IsWorking ? ChromeState.Working
+            : ChromeState.Connected;
+        return (state, view);
+    }
+
+    /// <summary>Approvals wait for a paused task first, then ask with the request's tool, rationale and arguments.</summary>
+    private sealed class BrowserApprovalBroker(WinFormsAgentConfirm confirm, AgentTaskControl control) : IChromeActionBroker
+    {
+        public async Task<bool> ApproveAsync(ActionRequest request, CancellationToken token)
+        {
+            await control.WaitAsync(token).ConfigureAwait(false);
+            return await confirm.ConfirmNonInputAsync(request.ToolName + "\n" + request.Rationale + "\n"
+                + string.Join("\n", request.Arguments.Select(argument => argument.Key + ": " + argument.Value)), token).ConfigureAwait(false);
+        }
+    }
+}
