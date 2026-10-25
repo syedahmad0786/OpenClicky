@@ -52,6 +52,9 @@ public class OnboardingContractTests
         public void SubmitText(string text) { }
         public void StopJob(string id) { }
         public void OpenJob(string id) { }
+        public void SteerJob(string id, string text) { }
+        public void FollowUpJob(string id, string text) { }
+        public void RetryJob(string id) { }
         public void SetGeneral(string key, bool value) { }
         public void OpenFile(string path) { }
         public void RevealFile(string path) { }
