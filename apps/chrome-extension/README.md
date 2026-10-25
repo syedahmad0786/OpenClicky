@@ -1,15 +1,38 @@
-# Optional Chrome bridge
+# OpenClicky Browser Companion
 
-This unpacked MV3 extension lets one local OpenClicky companion inspect and act in existing signed-in Chrome tabs. Page titles, visible control text, typed text, and requested actions leave Chrome through Chrome native messaging and are available to the local OpenClicky process. The extension contains no provider credential or pairing secret.
+An unpacked Chrome/Edge extension that lets OpenClicky agents work in your signed-in browser. Each job gets its own tab group; an agent reads pages as accessibility snapshots, clicks, fills and types through Chrome's debugging protocol (`chrome.debugger`), and reports what changed after every action. The popup shows the connection, the jobs at work and their tabs, and a **Stop** button that hands every tab back to you and closes nothing.
 
-1. Build/publish OpenClicky with native-host mode wired to `ChromeBridgeNativeProtocol`.
-2. Run `setup-local.ps1 -NativeHostPath <absolute OpenClicky host exe> -AllowedOrigins https://example.com/`.
-3. Open `chrome://extensions`, enable Developer mode, choose **Load unpacked**, and select `%LOCALAPPDATA%\OpenClicky\ChromeBridge`.
+## Permissions and why
 
-The checked-in public extension key gives local builds the stable ID `demdidhcdmmfbpidanflhknhplklkcja`; it is identity, not a secret. Setup writes a per-user Chrome native-host registration and generates exact site matches plus that exact `chrome-extension://…/` native-host allowlist. Add each required origin explicitly. It does not install, enable, or authorize the extension for you.
+| Permission | Why |
+| --- | --- |
+| `debugger` | Read pages and act in them (snapshots, clicks, typing, screenshots). Chrome shows its "started debugging this browser" bar while it is attached; cancelling that bar stops the job. |
+| `tabs`, `tabGroups` | List tabs, open new ones and keep each job's tabs in its own group. |
+| `nativeMessaging` | Talk to OpenClicky on this PC through the `com.openclicky.chrome_bridge` native host. |
+| `storage` | A random profile id (so OpenClicky can tell browser profiles apart) and which tabs belong to which job. |
+| `alarms` | Reconnect to OpenClicky every 30 seconds when the connection drops. |
+| `downloads` | Save files an agent downloads under `Downloads/OpenClicky/<job>/`. |
 
-Setup also writes non-secret `%LOCALAPPDATA%\OpenClicky\ChromeBridge\bridge-config.json`. The application loads it with `ChromeBridgeConfiguration.Load()` so its runtime origin policy exactly matches the generated extension permissions.
+There are no host permissions and no content scripts. Incognito windows are off limits.
 
-The application must reject excluded origins/titles before requesting an observation and immediately before every action. Actions use only element/link IDs from the current tab, frame, and navigation revision; there is no raw URL, selector, file, or shell command surface.
+## What leaves the machine
 
-Native request contract: send `{ requestId, command: { name: "observeActive" } }`; the extension returns the exact active `tabId`, top `frameId`, and synthetic page observation. Follow-up commands must repeat those IDs and the returned revision. The application owns monotonic navigation revision tracking and must discard a snapshot after every attempted mutation.
+When an agent uses the browser, the page text, snapshots, screenshots, tab titles and addresses, and the agent's requests go to your model provider, like any other agent turn. Uploads send the files you approved to the website. Nothing else: native messaging and the pipe to OpenClicky stay on this PC.
+
+## What it never does
+
+- It never types into a password field: `fill`, `type`, batch steps and scripts are refused there. Ask the user to type passwords, codes and card numbers themselves.
+- It never reads cookies or saved passwords. Agent scripts run in an isolated world where cookies and site storage are unavailable and password values read as empty.
+- Sites on the blocked list (OpenClicky's defaults plus your own fragments) are refused before anything is read or changed. The list is a convenience, not a guarantee.
+
+## Load it unpacked
+
+1. In OpenClicky, open **Settings → Integrations → Browser** and follow the steps; it registers the native host for your user and shows this folder.
+2. Open `chrome://extensions` (or `edge://extensions`), turn on **Developer mode** and choose **Load unpacked**.
+3. Select this folder. The card in OpenClicky turns green when the extension says hello.
+
+The `key` in `manifest.json` gives the extension the stable id `demdidhcdmmfbpidanflhknhplklkcja`, which the native host allows. It is an identity, not a secret.
+
+## Files
+
+`service-worker.js` connects to the native host and the popup; `core.mjs` validates and runs each command; `page.mjs`, `inpage.mjs` and `snapshot.mjs` work inside one tab; `tabs.mjs` owns the tab groups. Tests live in `apps/companion-workspace/src/chrome-extension/`.
