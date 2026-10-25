@@ -169,7 +169,8 @@ internal sealed partial class TrayApplicationContext
                 _ = FinishHandsFreeDictationAsync();
                 return true;
             case (DictationCards.LearnedId, DictationCards.UndoAction):
-                return false; // D6: forget the learned word
+                UndoLearnedWord();
+                return false;
             default:
                 Log("shell: card action not handled: " + actionId);
                 return false;

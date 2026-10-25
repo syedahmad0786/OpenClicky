@@ -154,6 +154,22 @@ public sealed class DictationTarget
         catch (InvalidOperationException) { return false; }
     }
 
+    /// <summary>
+    /// For the learned-correction watch (any thread, read-only): the field's current value, or null once the field is gone,
+    /// is no longer focused, turned into a password field or stopped exposing text.
+    /// </summary>
+    public string? ReadValueWhileFocused()
+    {
+        try
+        {
+            var focused = AutomationElement.FocusedElement;
+            if (focused is null || !focused.GetRuntimeId().SequenceEqual(_runtimeId) || _element.Current.IsPassword) return null;
+            return ReadText();
+        }
+        catch (ElementNotAvailableException) { return null; }
+        catch (InvalidOperationException) { return null; }
+    }
+
     private string? ReadText()
     {
         try

@@ -1,6 +1,7 @@
 using OpenClicky.Agent;
 using OpenClicky.Core;
 using OpenClicky.Core.Dictation;
+using OpenClicky.Core.Settings;
 using OpenClicky.Providers;
 
 namespace OpenClicky.App;
@@ -78,6 +79,7 @@ internal sealed partial class TrayApplicationContext
         _dictationActive = true;
         _dictationHandsFree = handsFree;
         _dictationSession = new object();
+        StopDictationWatch();
         _dictationClipboard = "";
         _dictationClipboardNoticed = false;
     }
@@ -191,7 +193,7 @@ internal sealed partial class TrayApplicationContext
         switch (delivery.Kind)
         {
             case DictationDeliveryKind.Inserted:
-                if (target is not null) OnDictationInserted(target, delivery);
+                if (target is not null) OnDictationInserted(session, target, delivery);
                 if (current)
                 {
                     _home.AcceptDictationTranscript(delivery.Text);
@@ -225,10 +227,76 @@ internal sealed partial class TrayApplicationContext
         }
     }
 
-    /// <summary>A verified insert (any thread's delivery, posted to the UI thread). D6 watches the field for a learned correction.</summary>
-    private void OnDictationInserted(DictationTarget target, DictationDelivery delivery)
+    private const int DictationWatchPollMs = 750, DictationWatchMaxMs = 15_000;
+    /// <summary>UI thread: cancels the running correction watch (a new dictation, a newer insert, a learned word).</summary>
+    private CancellationTokenSource? _dictationWatch;
+    private string? _learnedWord;
+
+    private void StopDictationWatch()
     {
+        _dictationWatch?.Cancel();
+        _dictationWatch = null;
     }
+
+    /// <summary>
+    /// UI thread, after a verified insert: for 15 s, watches the field (locally; its text is never logged or sent) for the user
+    /// fixing one misheard word, and learns that word. A newer dictation, or the field changing hands, ends the watch.
+    /// </summary>
+    private void OnDictationInserted(object? session, DictationTarget target, DictationDelivery delivery)
+    {
+        StopDictationWatch();
+        var words = _settings.DictionaryWords ?? [];
+        if (_dictationSession is not null && !ReferenceEquals(session, _dictationSession)) return; // a newer dictation owns the field now
+        if (words.Count >= SettingsCatalog.MaxDictionaryWords) return;
+        if (delivery.Insert is not { Verified: true, ValueBefore: { } before, ValueAfter: { } after }) return;
+        var detector = new DictationCorrectionDetector(before, after, delivery.Text, [.. words]);
+        var cts = _dictationWatch = new CancellationTokenSource();
+        var token = cts.Token;
+        _ = Task.Run(async () =>
+        {
+            var reason = "timeout";
+            try
+            {
+                for (var waited = 0; waited < DictationWatchMaxMs; waited += DictationWatchPollMs)
+                {
+                    await Task.Delay(DictationWatchPollMs, token).ConfigureAwait(false);
+                    if (target.ReadValueWhileFocused() is not { } value) { reason = "field_left"; break; }
+                    if (detector.Observe(value) is not { } word) continue;
+                    reason = "learned";
+                    OnUi(() => LearnDictationWord(word, token));
+                    break;
+                }
+            }
+            catch (OperationCanceledException) { reason = "cancelled"; }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { reason = ex.GetType().Name; }
+            Log("dictation_watch_end reason=" + reason);
+        }, token);
+    }
+
+    /// <summary>UI thread: adds the word through the settings patch (cap and cleaning apply, the page updates) and offers Undo.</summary>
+    private void LearnDictationWord(string word, CancellationToken token)
+    {
+        if (token.IsCancellationRequested) return;
+        var words = _settings.DictionaryWords ?? [];
+        if (words.Count >= SettingsCatalog.MaxDictionaryWords || words.Contains(word, StringComparer.OrdinalIgnoreCase)) return;
+        if (!SetDictationDictionary([.. words, word]) || !(_settings.DictionaryWords ?? []).Contains(word, StringComparer.Ordinal)) return;
+        _learnedWord = word;
+        Log("dictation_word_learned");
+        if (_shell is { IsActive: true } shell) shell.AddCard(DictationCards.Learned(word));
+        else _tray.ShowBalloonTip(DictationCards.LearnedMs, "New dictionary word", word + " (remove it in Settings → Dictation)", ToolTipIcon.Info);
+    }
+
+    /// <summary>UI thread: the Undo on the learned-word card forgets the word again.</summary>
+    private void UndoLearnedWord()
+    {
+        var word = _learnedWord;
+        _learnedWord = null;
+        if (word is null) return;
+        SetDictationDictionary((_settings.DictionaryWords ?? []).Where(w => !string.Equals(w, word, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private bool SetDictationDictionary(IEnumerable<string> words) =>
+        NotchSettings.Patch("dictation.dictionary", System.Text.Json.JsonSerializer.SerializeToElement(words.ToArray())) == PatchResult.Applied;
 
     /// <summary>
     /// Dictate shortcut down: check and capture the target and record, all silently. The dictation UI (or why it cannot
