@@ -49,10 +49,10 @@ it("Integrations: browser card follows the Chrome state and posts chrome.setup",
 
 it("Integrations: connector rows show status and tools, search filters by name or host, Test posts the key", () => {
   const posts = host();
-  render(<SettingsPanel state={make("integrations", (s) => { s.settings.integrations.connectors.push({ key: "gh", name: "GitHub", host: "api.github.com", status: "error", toolCount: 1 }); })} />);
+  render(<SettingsPanel state={make("integrations", (s) => { s.settings.integrations.connectors.push({ key: "gh", name: "GitHub", host: "api.github.com", status: "error", toolCount: 1, app: null, label: null, kind: "remote", auth: "apiKey", since: null }); })} />);
   expect(screen.getByText("12 tools")).toBeInTheDocument();
   expect(screen.getByText("1 tool")).toBeInTheDocument();
-  expect(screen.getByText("Needs sign-in")).toBeInTheDocument();
+  expect(screen.getByText("Reconnect required")).toBeInTheDocument();
   expect(screen.getByText("Error")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Test Notion" }));
   expect(posts("settings.action")).toEqual([{ kind: "settings.action", action: "connector.test", arg: "notion" }]);
@@ -122,7 +122,7 @@ it("Integrations: the add form closes once a connector with that name arrives in
   expect(posts("settings.action")).toHaveLength(1);
   rerender(<SettingsPanel state={make("integrations")} />); // a push without the connector changes nothing
   expect(screen.getByRole("textbox", { name: "Name" })).toBeInTheDocument();
-  rerender(<SettingsPanel state={make("integrations", (s) => { s.settings.integrations.connectors.push({ key: "linear", name: "Linear", host: "mcp.linear.app", status: "connected", toolCount: null }); })} />);
+  rerender(<SettingsPanel state={make("integrations", (s) => { s.settings.integrations.connectors.push({ key: "linear", name: "Linear", host: "mcp.linear.app", status: "connected", toolCount: null, app: null, label: null, kind: "remote", auth: "none", since: null }); })} />);
   expect(screen.queryByRole("textbox", { name: "Name" })).toBeNull();
   expect(screen.getByText("mcp.linear.app")).toBeInTheDocument();
 });

@@ -28,6 +28,8 @@ public sealed record SettingsRuntime
     public double MultilingualProgress { get; init; }
     public ChromeState Chrome { get; init; } = ChromeState.NotInstalled;
     public IReadOnlyList<ConnectorView> Connectors { get; init; } = [];
+    /// <summary>The built-in apps for the Integrations page; empty means <see cref="ConnectorCatalog.Apps"/>.</summary>
+    public IReadOnlyList<CatalogView> Catalog { get; init; } = [];
     public IReadOnlyList<RoutineView> Routines { get; init; } = [];
     /// <summary>Windows privacy consent states (documents, pictures, contacts, calendar, microphone, camera, location).</summary>
     public IReadOnlyList<ReachItem> Reach { get; init; } = [];
@@ -38,7 +40,7 @@ public sealed record SettingsRuntime
 /// <summary>Maps AppSettings plus <see cref="SettingsRuntime"/> to the contract's <see cref="SettingsView"/>, and clamps any view to the contract caps.</summary>
 public static class ShellSettingsBuilder
 {
-    public const int MaxModels = 64, MaxVoices = 64, MaxDevices = 32, MaxLanguages = 128, MaxConnectors = 64, MaxReach = 16, MaxRoutines = 100, MaxHotkeyKeys = 6;
+    public const int MaxModels = 64, MaxVoices = 64, MaxDevices = 32, MaxLanguages = 128, MaxConnectors = 64, MaxCatalog = 32, MaxReach = 16, MaxRoutines = 100, MaxHotkeyKeys = 6;
     private const string UnavailableMicrophone = "Unavailable microphone";
     private const string UnavailableOutput = "Unavailable speaker";
 
@@ -66,7 +68,11 @@ public static class ShellSettingsBuilder
                 HotkeyBinding.OrDefault(s.DictateHotkey, HotkeyBinding.DefaultDictate).ToView(),
                 HotkeyBinding.OrDefault(s.HandsFreeHotkey, HotkeyBinding.DefaultHandsFree).ToView()),
             new SettingsCursor(SettingsCatalog.SnapAccent(s.AccentColor), s.CursorHidden, s.ScreenHighlight, s.ShakeToDetach),
-            new SettingsIntegrations(runtime.Chrome, runtime.Connectors),
+            new SettingsIntegrations(runtime.Chrome, runtime.Connectors)
+            {
+                Catalog = runtime.Catalog.Count > 0 ? runtime.Catalog
+                    : [.. ConnectorCatalog.Apps.Select(a => new CatalogView(a.Id, a.Name, a.Description, a.Setup, a.MultiAccount))],
+            },
             new SettingsAgents(
                 string.IsNullOrWhiteSpace(s.AgentFolder) ? runtime.DefaultAgentFolder : s.AgentFolder,
                 string.IsNullOrWhiteSpace(s.AgentFolder), s.SpeakJobAnnouncements, s.CursorJobUpdates, runtime.Reach),
@@ -149,7 +155,14 @@ public static class ShellSettingsBuilder
             new SettingsCursor(ShellStateBuilder.IsHex(cursor.Colour) ? cursor.Colour!.ToUpperInvariant() : ShellStateBuilder.DefaultAccent,
                 cursor.Hidden, cursor.ScreenHighlight, cursor.ShakeToDetach),
             new SettingsIntegrations(integrations.Chrome, WithId(integrations.Connectors, c => c.Key, MaxConnectors)
-                .Select(c => new ConnectorView(Cut(c.Key, 160), Cut(c.Name, 80), Cut(c.Host, 255), c.Status, c.ToolCount is < 0 ? null : c.ToolCount)).ToList()),
+                .Select(c => new ConnectorView(Cut(c.Key, 160), Cut(c.Name, 80), Cut(c.Host, 255), c.Status, c.ToolCount is < 0 ? null : c.ToolCount)
+                {
+                    App = CutOrNull(c.App, 160), Label = CutOrNull(c.Label, 30), Kind = c.Kind, Auth = c.Auth, Since = Iso(c.Since),
+                }).ToList())
+            {
+                Catalog = Take(integrations.Catalog, MaxCatalog)
+                    .Select(a => new CatalogView(Cut(a.Id, 160), Cut(a.Name, 80), Cut(a.Description, 200), a.Setup, a.MultiAccount)).ToList(),
+            },
             new SettingsAgents(Cut(agents.Folder, 4_096), agents.FolderIsDefault, agents.SpeakAnnouncements, agents.CursorUpdates,
                 WithId(agents.Reach, r => r.Id, MaxReach)
                     .Select(r => new ReachItem(Cut(r.Id, 160), Cut(r.Label, 160), r.State)).ToList()),

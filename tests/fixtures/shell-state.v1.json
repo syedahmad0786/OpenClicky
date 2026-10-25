@@ -142,8 +142,12 @@
     "integrations": {
       "chrome": "waiting",
       "connectors": [
-        { "key": "notion", "name": "Notion", "host": "mcp.notion.com", "status": "connected", "toolCount": 12 },
-        { "key": "slack", "name": "Slack", "host": "mcp.slack.com", "status": "needsSignIn", "toolCount": null }
+        { "key": "notion", "name": "Notion", "host": "mcp.notion.com", "status": "connected", "toolCount": 12, "app": "notion", "label": "Work", "kind": "remote", "auth": "browser", "since": "2026-10-20T09:00:00Z" },
+        { "key": "slack", "name": "Slack", "host": "mcp.slack.com", "status": "reconnect", "toolCount": null, "app": null, "label": null, "kind": "remote", "auth": "browser", "since": null }
+      ],
+      "catalog": [
+        { "id": "linear", "name": "Linear", "description": "Issues, projects and cycles.", "setup": "signIn", "multiAccount": true },
+        { "id": "obsidian", "name": "Obsidian", "description": "Notes in a vault on this PC. No account needed.", "setup": "folder", "multiAccount": false }
       ]
     },
     "agents": {

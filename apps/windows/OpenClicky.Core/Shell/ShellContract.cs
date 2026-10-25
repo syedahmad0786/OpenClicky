@@ -99,7 +99,7 @@ public sealed record Device(string Id, string Name, DeviceState State);
 public sealed record Hotkey(IReadOnlyList<string> Keys, HotkeyTrigger Trigger);
 public sealed record VoiceOption(string Id, string Name, string Detail, bool Available);
 public sealed record DictationLanguage(string Code, string Name, string Native);
-public sealed record ConnectorView(string Key, string Name, string Host, ConnectorStatus Status, int? ToolCount);
+public sealed partial record ConnectorView(string Key, string Name, string Host, ConnectorStatus Status, int? ToolCount);
 public sealed record ReachItem(string Id, string Label, ReachState State);
 public sealed record RoutineView(string Id, string Title, string Schedule, string? Next, string? Last, RoutineStatus Status);
 
@@ -119,7 +119,7 @@ public sealed record SettingsDictation(
 
 public sealed record SettingsShortcuts(Hotkey Talk, Hotkey Text, Hotkey Dictate, Hotkey HandsFree);
 public sealed record SettingsCursor(string Colour, bool Hidden, bool ScreenHighlight, bool ShakeToDetach);
-public sealed record SettingsIntegrations(ChromeState Chrome, IReadOnlyList<ConnectorView> Connectors);
+public sealed partial record SettingsIntegrations(ChromeState Chrome, IReadOnlyList<ConnectorView> Connectors);
 
 public sealed record SettingsAgents(
     string Folder, bool FolderIsDefault, bool SpeakAnnouncements, bool CursorUpdates, IReadOnlyList<ReachItem> Reach);
@@ -211,7 +211,7 @@ public static class ShellIntentParser
         "signIn", "signOut", "refreshModels", "manageUsage", "secret.edit", "testMic", "downloadWhisper", "downloadWhisperMultilingual", "playTestSound",
         "previewVoice", "clearHistory", "exportMemory", "openNotes", "openClipboard", "openTasks", "chooseAgentFolder",
         "resetAgentFolder", "openPrivacySetting", "routine.run", "routine.pause", "routine.resume", "routine.delete",
-        "connector.add", "connector.test", "connector.remove", "chrome.setup", "recordHotkey", "resetHotkeys", "openLogs",
+        "connector.add", "connector.test", "connector.remove", "connector.signIn", "connector.label", "chrome.setup", "recordHotkey", "resetHotkeys", "openLogs",
     ];
 
     public static bool TryParse(string? json, out ShellIntent intent)
@@ -262,7 +262,8 @@ public static class ShellIntentParser
         "link.open" => OneOf(m, "target", LinkTargets),
         "settings.section" => OneOf(m, "section", ShellContract.Sections),
         "settings.patch" => Patch(m),
-        "settings.action" => OneOf(m, "action", SettingsActions) && OptionalStr(m, "arg", MaxActionArgLength),
+        "settings.action" => OneOf(m, "action", SettingsActions)
+            && OptionalStr(m, "arg", m.GetProperty("action").GetString() == "connector.add" ? ConnectorRequest.MaxArg : MaxActionArgLength),
         _ => false,
     };
 

@@ -207,7 +207,7 @@ public class ShellContractTests
         Assert.Equal(WhisperState.Missing, s.Dictation.Multilingual);
         Assert.Equal(HotkeyTrigger.DoubleTap, s.Shortcuts.HandsFree.Trigger);
         Assert.Equal(ChromeState.Waiting, s.Integrations.Chrome);
-        Assert.Equal([ConnectorStatus.Connected, ConnectorStatus.NeedsSignIn], s.Integrations.Connectors.Select(c => c.Status));
+        Assert.Equal([ConnectorStatus.Connected, ConnectorStatus.Reconnect], s.Integrations.Connectors.Select(c => c.Status));
         Assert.Null(s.Integrations.Connectors[1].ToolCount);
         Assert.Equal([ReachState.Allowed, ReachState.Unknown], s.Agents.Reach.Select(r => r.State));
         Assert.Equal([RoutineStatus.Scheduled, RoutineStatus.Paused], s.Routines.Select(r => r.Status));
@@ -220,7 +220,7 @@ public class ShellContractTests
     public void EverySidebarSectionAndActionIsAccepted()
     {
         Assert.Equal(16, ShellContract.Sections.Count);
-        Assert.Equal(29, ShellIntentParser.SettingsActions.Count);
+        Assert.Equal(31, ShellIntentParser.SettingsActions.Count);
         foreach (var section in ShellContract.Sections)
             Assert.True(ShellIntentParser.TryParse($$"""{"kind":"settings.section","section":"{{section}}"}""", out _), section);
         foreach (var action in ShellIntentParser.SettingsActions)
@@ -280,6 +280,9 @@ public class ShellContractTests
             ["hotkeyTrigger"] = Values<HotkeyTrigger>(),
             ["chromeState"] = Values<ChromeState>(),
             ["connectorStatus"] = Values<ConnectorStatus>(),
+            ["connectorKind"] = Values<ConnectorViewKind>(),
+            ["connectorAuth"] = Values<ConnectorViewAuth>(),
+            ["catalogSetup"] = Values<CatalogSetup>(),
             ["reachState"] = Values<ReachState>(),
             ["routineStatus"] = Values<RoutineStatus>(),
             ["accessMode"] = Values<AccessModeView>(),
@@ -288,6 +291,33 @@ public class ShellContractTests
         Assert.Equal(shared.Select(p => p.Key).Order(), actual.Keys.Order());
         foreach (var (name, values) in actual)
             Assert.True(shared[name]!.AsArray().Select(v => v!.GetValue<string>()).SequenceEqual(values), name + ": " + string.Join(",", values));
+    }
+
+    [Fact]
+    public void ConnectorFixtureCarriesAccountsKindsAndCatalog()
+    {
+        var s = ShellContract.Deserialize(FixtureJson())!.Settings.Integrations;
+        Assert.Equal(["notion", "slack"], s.Connectors.Select(c => c.Key));
+        Assert.Equal(("notion", "Work", ConnectorViewKind.Remote, ConnectorViewAuth.Browser), (s.Connectors[0].App, s.Connectors[0].Label, s.Connectors[0].Kind, s.Connectors[0].Auth));
+        Assert.Equal(ConnectorStatus.Reconnect, s.Connectors[1].Status);
+        Assert.Null(s.Connectors[1].App);
+        Assert.Null(s.Connectors[1].Since);
+        Assert.Equal([CatalogSetup.SignIn, CatalogSetup.Folder], s.Catalog.Select(c => c.Setup));
+        Assert.Equal([true, false], s.Catalog.Select(c => c.MultiAccount));
+    }
+
+    [Fact]
+    public void ConnectorAddAllowsALongArgButOtherActionsStayShort()
+    {
+        static string Action(string action, int n) => "{\"kind\":\"settings.action\",\"action\":\"" + action + "\",\"arg\":\"" + new string('x', n) + "\"}";
+        Assert.True(ShellIntentParser.TryParse(Action("connector.add", 7_999), out _));
+        Assert.True(ShellIntentParser.TryParse(Action("connector.add", 8_000), out _));
+        Assert.False(ShellIntentParser.TryParse(Action("connector.add", 8_001), out _));
+        Assert.True(ShellIntentParser.TryParse(Action("connector.test", 512), out _));
+        Assert.False(ShellIntentParser.TryParse(Action("connector.test", 513), out _));
+        Assert.True(ShellIntentParser.TryParse(Action("connector.signIn", 10), out _));
+        Assert.True(ShellIntentParser.TryParse(Action("connector.label", 10), out _));
+        Assert.False(ShellIntentParser.TryParse(Action("connector.label", 513), out _));
     }
 
     [Fact]
