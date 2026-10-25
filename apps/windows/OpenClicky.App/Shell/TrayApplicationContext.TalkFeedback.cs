@@ -183,6 +183,9 @@ internal sealed partial class TrayApplicationContext
             // The user's own step: Open page keeps the card up for I'm done.
             case (var id, JobCards.OpenPageAction or JobCards.DoneAction) when JobCards.JobIdOf(id) is { } jobId:
                 return UserStepCardAction(jobId, actionId);
+            // Schedule makes the routine; Not now drops the request. Either way the card goes.
+            case (var id, RoutineRequests.ScheduleAction or RoutineRequests.DismissAction) when RoutineRequests.RequestIdOf(id) is { } requestId:
+                return RoutineConfirmAction(requestId, actionId);
             default:
                 Log("shell: card action not handled: " + actionId);
                 return false;
@@ -194,6 +197,7 @@ internal sealed partial class TrayApplicationContext
     {
         if (cardId == CompanionCards.DriveConsentId) AnswerDriveConsent(false);
         else if (cardId == DictationCards.ActivityId && _dictationActive && !_dictationHeld) _ = FinishHandsFreeDictationAsync();
+        else if (RoutineRequests.RequestIdOf(cardId) is { } requestId) DiscardRoutineRequest(requestId); // closing the card is Not now
     }
 
     /// <summary>The NAudio recorder that is capturing now (the shared one, else the local recognizer's), if any has a level.</summary>

@@ -107,7 +107,7 @@ public sealed record JobResult(string Reply, string? Title, string? Summary, IRe
         catch (Exception ex) when (ex is JsonException or NotSupportedException) { return null; }
     }
 
-    private static RoutineRequest? ReadRoutine(JsonElement? element)
+    internal static RoutineRequest? ReadRoutine(JsonElement? element)
     {
         if (element is not { ValueKind: JsonValueKind.Object } routine
             || Text(Get(routine, "title"), WorkStore.MaxTitleLength) is not { } title

@@ -16,7 +16,7 @@ public sealed class DrawingCueTracker
     {
         ArgumentNullException.ThrowIfNull(rawPartial);
         // Figure blocks go first, as in StreamingReplySpeech.Clean: a DRAW tag inside figure JSON never becomes an op.
-        var text = FigureBlockParser.Strip(rawPartial);
+        var text = FigureBlockParser.Strip(Work.RoutineRequests.Strip(rawPartial));
         var ops = DrawCommandParser.Parse(text, partial: true).Ops;
         lock (_gate)
             for (var i = _ops.Count; i < ops.Count; i++)

@@ -40,7 +40,7 @@ internal sealed class StreamingReplySpeech
     public static string Clean(string raw)
     {
         // Figure blocks go first, so their JSON never reaches a tag parser.
-        var text = ScreenAnnotations.Parse(VisualArtifactReply.Parse(IntelligentUiParser.Parse(DrawCommandParser.Parse(TalkActionParser.Parse(FigureBlockParser.Strip(raw), partial: true).Text, partial: true).Text).PlainText).PlainText).Text;
+        var text = ScreenAnnotations.Parse(VisualArtifactReply.Parse(IntelligentUiParser.Parse(DrawCommandParser.Parse(TalkActionParser.Parse(FigureBlockParser.Strip(Work.RoutineRequests.Strip(raw)), partial: true).Text, partial: true).Text).PlainText).PlainText).Text;
         var command = text.LastIndexOf('[');
         if (command >= 0 && text.IndexOf(']', command) < 0) text = text[..command];
         return PointParser.Parse(text).SpokenText.Trim();

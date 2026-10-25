@@ -328,9 +328,62 @@ internal sealed partial class TrayApplicationContext
         RequestShellPush();
     }
 
+    /// <summary>UI thread: schedules the model asked for and the user has not answered yet, oldest first. In memory only: a restart drops
+    /// them. <c>JobId</c> is the job whose result asked (null for Talk, which gets a new job when the user presses Schedule).</summary>
+    private readonly List<(string Id, RoutineRequest Request, string? JobId)> _routineRequests = [];
+    private const int MaxRoutineRequests = 5;
+
+    /// <summary>UI thread: shows the Schedule card for a request. Nothing is scheduled until the user presses Schedule; a newer request
+    /// from the same job replaces its older one, and past five the oldest unanswered one goes.</summary>
+    private void OfferRoutine(RoutineRequest request, string? jobId)
+    {
+        if (_shell is null) return;
+        if (jobId is not null) DiscardRoutineRequest(_routineRequests.FirstOrDefault(r => r.JobId == jobId).Id);
+        while (_routineRequests.Count >= MaxRoutineRequests) DiscardRoutineRequest(_routineRequests[0].Id);
+        var id = Guid.NewGuid().ToString("N");
+        _routineRequests.Add((id, request, jobId));
+        _shell.AddCard(RoutineRequests.ConfirmCard(id, request));
+    }
+
+    private void DiscardRoutineRequest(string? requestId)
+    {
+        if (requestId is null || _routineRequests.RemoveAll(r => r.Id == requestId) == 0) return;
+        _shell?.RemoveCard(RoutineRequests.CardId(requestId));
+    }
+
+    /// <summary>UI thread, the Schedule card's actions. Schedule makes the routine (for Talk, on a new job under the built-in companion);
+    /// Not now drops the request. Returns false: the card goes either way. Request text is untrusted and never logged.</summary>
+    private bool RoutineConfirmAction(string requestId, string actionId)
+    {
+        var index = _routineRequests.FindIndex(r => r.Id == requestId);
+        if (index < 0) { _shell?.AddToast("That schedule request is gone."); return false; }
+        var (_, request, jobId) = _routineRequests[index];
+        _routineRequests.RemoveAt(index);
+        if (actionId != RoutineRequests.ScheduleAction) return false;
+        string? created = null;
+        try
+        {
+            if (jobId is null) jobId = created = _work.CreateJob(WorkStore.DefaultCompanionSlug, request.Title, request.Task).Id;
+            var routine = RoutineRequests.ToRoutine(request, jobId, DateTimeOffset.UtcNow);
+            _work.AddRoutine(jobId, routine.Cadence, routine.MinuteOfDay, routine.WeekdayMask, routine.IntervalMinutes, routine.NextRunAt);
+            _shell?.AddToast(RoutineRequests.ScheduledToast(request));
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Log("routine_schedule_error=" + ex.GetType().Name);
+            if (created is not null) try { _work.DeleteJob(created); } catch (Exception cleanup) when (cleanup is not OutOfMemoryException) { }
+            _shell?.AddToast(ex is KeyNotFoundException ? "That job no longer exists, so I couldn't schedule it." : "I couldn't schedule that. Try again.");
+        }
+        IndexWork();
+        _home.RefreshWork();
+        RequestShellPush(); // the Settings Routines list
+        return false;
+    }
+
     /// <summary>UI thread, at start-up: the routine tick, the wake hold and the keep-awake re-check on a power change.</summary>
     private void StartRoutines()
     {
+        _talk.RoutineRequested += request => OnUi(() => OfferRoutine(request, null));
         _routineTimer.Tick += (_, _) => { RunDueRoutines(); RequestShellPush(); };
         _routineTimer.Start();
         Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerModeChanged;
@@ -447,6 +500,8 @@ internal sealed partial class TrayApplicationContext
             _home.RefreshWork();
             _jobOutputs.Remove(work.Job.Id);
             RequestShellPush();
+            // A scheduled run does not ask to be scheduled again; for any other, the user is asked once the result is in.
+            if (status == AgentProgressStates.Completed && work.RoutineId is null && result?.Routine is { } asked) OfferRoutine(asked, work.Job.Id);
             if (step is not null) { BeginUserStep(work.Job with { Title = shownTitle }, step); return; }
             AnnounceJob(status == AgentProgressStates.Completed ? JobEvent.Done : status == AgentProgressStates.Failed ? JobEvent.Failed : JobEvent.Stopped,
                 shownTitle, work.Job.Id, replyDelivered: work.FromTalk && replyDelivered);

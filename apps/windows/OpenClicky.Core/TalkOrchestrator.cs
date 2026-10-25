@@ -1,5 +1,6 @@
 using OpenClicky.Core.CompanionCursor;
 using OpenClicky.Core.Drawing;
+using OpenClicky.Core.Work;
 
 namespace OpenClicky.Core;
 
@@ -174,6 +175,8 @@ public sealed class TalkOrchestrator : IDisposable
     /// (the host narrows it by the current mode, never widens it); the host decides whether to run them.
     /// </summary>
     public event Action<IReadOnlyList<TalkAction>, AgentAccessMode>? ActionsRequested;
+    /// <summary>The reply asked for a schedule (E11). Only a request: nothing is scheduled until the user confirms.</summary>
+    public event Action<RoutineRequest>? RoutineRequested;
 
     public void Start()
     {
@@ -892,7 +895,7 @@ public sealed class TalkOrchestrator : IDisposable
             var prompt = (selfContainedVisual ? VisualArtifactReply.CreatorSystemInstructions(userContext, history)
                     : CompanionPrompts.TalkSystemPrompt + context + userContext)
                 + (Walkthrough.View.Active ? "\nThis is an advisory walkthrough. Explain only; do not claim to click, type, save notes, or change anything.\n" : "")
-                + (selfContainedVisual ? "" : walkthrough is null ? "\n" + VisualArtifactReply.Instructions : "\n\n" + GuidedWalkthrough.ResponseInstructions);
+                + (selfContainedVisual ? "" : walkthrough is null ? "\n" + VisualArtifactReply.Instructions + "\n" + RoutineRequests.TalkInstructions : "\n\n" + GuidedWalkthrough.ResponseInstructions);
             if (selfContainedVisual) history = [];
             // What this turn says and draws, for the save offer. A walkthrough step starts clean and is not offered.
             LastDrawingTurn = null;
@@ -1024,7 +1027,9 @@ public sealed class TalkOrchestrator : IDisposable
                 raw = accepted;
             }
             // Figure blocks first, as in StreamingReplySpeech.Clean: their JSON never reaches a tag parser.
-            var figured = FigureBlockParser.Parse(raw);
+            // A routine request comes out first: it is never spoken, shown or read as a visual (E11).
+            var (withoutRoutine, routine) = walkthrough is null ? RoutineRequests.Extract(raw) : (raw, (RoutineRequest?)null);
+            var figured = FigureBlockParser.Parse(withoutRoutine);
             var requested = TalkActionParser.Parse(figured.Text);
             var replyAccess = _settings().AgentAccess;
             // DRAW goes right after the action tags, as in StreamingReplySpeech.Clean, so the final text matches what was spoken.
@@ -1078,6 +1083,7 @@ public sealed class TalkOrchestrator : IDisposable
             token.ThrowIfCancellationRequested();
             if (recorder is not null) PublishDrawingTurn(recorder);
             if (walkthrough is null && !selfContainedVisual && requested.Actions.Count > 0) ActionsRequested?.Invoke(requested.Actions, replyAccess);
+            if (walkthrough is null && !selfContainedVisual && routine is not null) RoutineRequested?.Invoke(routine);
         }
         catch (OperationCanceledException) { _log("turn_cancelled"); }
         catch (Exception ex)
