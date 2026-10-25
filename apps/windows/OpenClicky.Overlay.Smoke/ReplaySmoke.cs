@@ -149,6 +149,16 @@ internal static partial class Program
         PumpUntil(() => !window.IsOpen, TimeSpan.FromSeconds(2));
         if (window.IsOpen || closed != 2 || NativeMethods.IsWindow(form)) return "window: Esc did not close the replay";
 
+        // 2b. Alt+F4 (WM_CLOSE to the form): the replay closes once, without closing the form again from inside FormClosed.
+        var alt = new DrawingReplayWindow(drawing, ReplayMode.Window, Options());
+        var altClosed = 0;
+        alt.Closed += () => altClosed++;
+        PumpUntil(() => false, TimeSpan.FromMilliseconds(300));
+        var altForm = alt.Handles[0];
+        ReplayNative.PostMessage(altForm, 0x0010, IntPtr.Zero, IntPtr.Zero);
+        PumpUntil(() => !alt.IsOpen, TimeSpan.FromSeconds(2));
+        if (alt.IsOpen || altClosed != 1 || NativeMethods.IsWindow(altForm)) return "window: Alt+F4 did not close the replay exactly once";
+
         // 3. Board: the whole monitor.
         var board = new DrawingReplayWindow(drawing, ReplayMode.Board, Options());
         PumpUntil(() => false, TimeSpan.FromMilliseconds(500));

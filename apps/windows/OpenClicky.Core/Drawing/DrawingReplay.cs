@@ -9,6 +9,7 @@ public sealed class DrawingTurnRecorder
 {
     private readonly List<SavedLine> _lines = [];
     private IReadOnlyList<Box> _monitors = [];
+    private int _total;
 
     /// <summary>The screens the turn captured, in screenshot order.</summary>
     public void SetMonitors(IReadOnlyList<ScreenCaptureResult> screens) =>
@@ -18,8 +19,21 @@ public sealed class DrawingTurnRecorder
     public void AddLine(string spoken, TimeSpan duration, IReadOnlyList<(DrawOp Virtual, DrawOp Source, float Scale)> mapped)
     {
         if (_lines.Count >= DrawingStore.MaxLines) return;
+        var kept = Keep(mapped, DrawingStore.MaxOpsPerLine);
         _lines.Add(new(DrawingStore.CleanText(spoken, DrawingStore.MaxSpoken), Math.Round(duration.TotalSeconds, 2),
-            mapped.Take(DrawingStore.MaxOpsPerLine).Select(m => m.Virtual).ToArray(), mapped.Take(DrawingStore.MaxOpsPerLine).Select(m => m.Scale).ToArray()));
+            kept.Select(m => m.Virtual).ToArray(), kept.Select(m => m.Scale).ToArray()));
+    }
+
+    /// <summary>
+    /// The ops the store would accept, at most <paramref name="room"/> and within the drawing's total: one it would refuse (a bidi
+    /// character in a MARK label, say) is left out of the saved copy rather than making the whole save fail.
+    /// </summary>
+    private (DrawOp Virtual, float Scale)[] Keep(IReadOnlyList<(DrawOp Virtual, DrawOp Source, float Scale)> mapped, int room)
+    {
+        var kept = mapped.Where(m => m.Scale is >= 0.01f and <= 100f && DrawingStore.IsStorable(m.Virtual))
+            .Take(Math.Max(0, Math.Min(room, DrawingStore.MaxOps - _total))).Select(m => (m.Virtual, m.Scale)).ToArray();
+        _total += kept.Length;
+        return kept;
     }
 
     /// <summary>Ops that showed with the last line after it was queued (what is left of the reply). A turn with no line yet gets a silent one.</summary>
@@ -28,8 +42,7 @@ public sealed class DrawingTurnRecorder
         if (mapped.Count == 0) return;
         if (_lines.Count == 0) { AddLine("", duration, mapped); return; }
         var last = _lines[^1];
-        var room = DrawingStore.MaxOpsPerLine - last.Ops.Count;
-        var more = mapped.Take(Math.Max(0, room)).ToArray();
+        var more = Keep(mapped, DrawingStore.MaxOpsPerLine - last.Ops.Count);
         _lines[^1] = last with
         {
             Ops = [.. last.Ops, .. more.Select(m => m.Virtual)],

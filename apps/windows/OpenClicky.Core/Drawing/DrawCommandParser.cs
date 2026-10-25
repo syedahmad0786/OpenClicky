@@ -246,7 +246,7 @@ public static class DrawCommandParser
         return Flush() && letters.Length > 0 ? (points.ToArray(), letters.ToString()) : null;
     }
 
-    private static bool ValidSeries(string? series)
+    internal static bool ValidSeries(string? series)
     {
         if (series?.Split(';') is not { Length: <= 4 } lines) return false;
         foreach (var line in lines)

@@ -60,22 +60,46 @@ public sealed class DrawingReplayWindow : IDisposable
         _drawing = drawing;
         _mode = mode;
         _options = options;
-        nint owner = 0;
-        if (mode != ReplayMode.FullScreen)
+        try
         {
-            var cursor = Cursor.Position;
-            var screen = Screen.FromPoint(cursor);
-            _form = new ReplayForm(mode, drawing.Title, DpiScale.ForPoint(cursor), screen, Close, TogglePause);
-            _fit = _form.InkTarget;
-            owner = _form.Handle;
-            if (options.ExcludeFromCapture) Exclude(owner);
+            nint owner = 0;
+            if (mode != ReplayMode.FullScreen)
+            {
+                var cursor = Cursor.Position;
+                var screen = Screen.FromPoint(cursor);
+                _form = new ReplayForm(mode, drawing.Title, DpiScale.ForPoint(cursor), screen, Close, TogglePause);
+                _fit = _form.InkTarget;
+                owner = _form.Handle;
+                if (options.ExcludeFromCapture) Exclude(owner);
+            }
+            _ink = new DrawingWindow(options.Log, owner) { LayoutBounds = _form?.PaperRect }; // pills stay on the paper
+            if (options.ExcludeFromCapture) Exclude(_ink.Handle);
+            _form?.ShowReplay();
+            _frame.Tick += (_, _) => Frame();
+            _frame.Start();
         }
-        _ink = new DrawingWindow(options.Log, owner);
-        if (options.ExcludeFromCapture) Exclude(_ink.Handle);
-        _form?.ShowReplay();
-        _frame.Tick += (_, _) => _ink.Render(Now, options.Accent, options.ReducedMotion);
-        _frame.Start();
+        catch
+        {
+            // Nothing is left half open when a window cannot be made.
+            _frame.Dispose();
+            _ink?.Dispose();
+            _form?.Dispose();
+            _ui.Dispose();
+            _stop.Dispose();
+            throw;
+        }
         _ = PlayAsync();
+    }
+
+    /// <summary>One frame of ink. A drawing the renderer cannot paint (a stored file is untrusted) closes the replay instead of crashing the app.</summary>
+    private void Frame()
+    {
+        try { _ink.Render(Now, _options.Accent, _options.ReducedMotion); }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            _options.Log?.Invoke("replay_render_error=" + ex.GetType().Name);
+            Close();
+        }
     }
 
     public bool IsOpen => !_closed;
@@ -109,6 +133,7 @@ public sealed class DrawingReplayWindow : IDisposable
         _frame.Dispose();
         _ui.Dispose();
         _form?.CloseReplay();
+        _stop.Dispose(); // cancelled above; a loop still unwinding sees OperationCanceled or ObjectDisposed, both ends it
         Closed?.Invoke();
     }
 
@@ -128,7 +153,7 @@ public sealed class DrawingReplayWindow : IDisposable
                 if (_options.Speak is { } speak && line.Spoken.Length > 0)
                 {
                     try { await speak(line.Spoken, _stop.Token); }
-                    catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException)
+                    catch (Exception ex) when (ex is not OperationCanceledException and not ObjectDisposedException and not OutOfMemoryException)
                     {
                         _options.Log?.Invoke("replay_speak_error=" + ex.GetType().Name);
                         await DelayAsync(line.Duration.TotalSeconds);
@@ -143,7 +168,7 @@ public sealed class DrawingReplayWindow : IDisposable
                 Close();
             }
         }
-        catch (OperationCanceledException) { }
+        catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException) { }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             _options.Log?.Invoke("replay_error=" + ex.GetType().Name);
@@ -202,7 +227,7 @@ public sealed class DrawingReplayWindow : IDisposable
         private readonly float _dip;
         private readonly Action _close, _togglePause;
         private readonly Rectangle _bounds;
-        private bool _paused, _overClose;
+        private bool _paused, _overClose, _gone;
 
         public ReplayForm(ReplayMode mode, string title, float dip, Screen screen, Action close, Action togglePause)
         {
@@ -228,7 +253,7 @@ public sealed class DrawingReplayWindow : IDisposable
             Text = "OpenClicky replay";
             BackColor = Paper;
             Bounds = _bounds;
-            FormClosed += (_, _) => _close(); // Alt+F4 or any other way the form goes
+            FormClosed += (_, _) => { _gone = true; _close(); }; // Alt+F4 or any other way the form goes: the replay closes, without closing the form again
             if (mode == ReplayMode.Window)
             {
                 using var path = RoundedPath(new RectangleF(0, 0, _bounds.Width, _bounds.Height), CornerDip * dip);
@@ -247,13 +272,23 @@ public sealed class DrawingReplayWindow : IDisposable
             }
         }
 
+        /// <summary>The paper in virtual-screen pixels (below the title bar in Window mode): the ink is laid out inside it.</summary>
+        public Rectangle PaperRect
+        {
+            get
+            {
+                var top = _mode == ReplayMode.Window ? (int)(TitleBarDip * _dip) : 0;
+                return new Rectangle(_bounds.X, _bounds.Y + top, _bounds.Width, _bounds.Height - top);
+            }
+        }
+
         public void ShowReplay()
         {
             Show();
             Activate();
         }
 
-        public void CloseReplay() => Close();
+        public void CloseReplay() { if (!_gone && !IsDisposed) Close(); }
 
         public void SetPaused(bool paused)
         {
@@ -272,7 +307,8 @@ public sealed class DrawingReplayWindow : IDisposable
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
             using var semibold = new Font("Segoe UI Semibold", 13 * _dip, FontStyle.Regular, GraphicsUnit.Pixel);
             using var small = new Font("Segoe UI", 12 * _dip, FontStyle.Regular, GraphicsUnit.Pixel);
-            var middle = new StringFormat { LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
+            using var middle = new StringFormat { LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap };
+            using var centre = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
             var close = CloseRect;
             if (_mode == ReplayMode.Window)
             {
@@ -289,7 +325,7 @@ public sealed class DrawingReplayWindow : IDisposable
                 using var faint = new SolidBrush(Color.FromArgb(0x8A, 0x86, 0x7C));
                 g.DrawString(_paused ? _title + "  ·  paused" : _title, semibold, ink, new RectangleF(BoardMarginDip * _dip, 12 * _dip, close.Left - 2 * BoardMarginDip * _dip, 36 * _dip), middle);
                 g.DrawString("Space pauses or resumes · Esc closes", small, faint,
-                    new RectangleF(0, Height - 40 * _dip, Width, 28 * _dip), new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center });
+                    new RectangleF(0, Height - 40 * _dip, Width, 28 * _dip), centre);
                 DrawClose(g, close, ink, hover: _overClose);
             }
         }

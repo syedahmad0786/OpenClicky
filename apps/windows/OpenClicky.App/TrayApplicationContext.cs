@@ -688,7 +688,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
 
     private Task StartAgentTask(string task, JobRun? work)
     {
-        OnUi(CloseReplay); // the agent may be started off the UI thread; a replay is not left up under its screenshots
+        CloseReplayNow(); // the agent may be started off the UI thread; a replay is not left up in its first screenshot
         var planner = _sandboxDemo && _sandbox is not null
             ? new SandboxPlanner(_sandbox)
             : ProviderFactory.CreateAgentPlanner(_settings, _secrets, Log);

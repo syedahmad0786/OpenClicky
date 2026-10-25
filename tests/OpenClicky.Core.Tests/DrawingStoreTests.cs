@@ -205,6 +205,110 @@ public sealed class DrawingStoreTests : IDisposable
     }
 
     [Fact]
+    public void LoadAndListSurviveNullsWhereTheModelHasNone()
+    {
+        var store = new DrawingStore(_folder);
+        store.Save(Drawing("keeper", T0, Line("Fine.", "[DRAW:dot x=5 y=5]")));
+        store.Save(Drawing("fig", T0, Line("Look.", "[DRAW:dot x=5 y=5]", FigureOp())));
+        var plain = File.ReadAllText(Path.Combine(_folder, "keeper.json"));
+        var withFigure = File.ReadAllText(Path.Combine(_folder, "fig.json"));
+        void Plant(string name, string text) => File.WriteAllText(Path.Combine(_folder, name + ".json"), text.Replace("\"id\":\"fig\"", $"\"id\":\"{name}\"").Replace("\"id\":\"keeper\"", $"\"id\":\"{name}\""));
+
+        var parts = withFigure[(withFigure.IndexOf("\"parts\":[", StringComparison.Ordinal) + 8)..];
+        var partsEnd = parts.IndexOf("]}", StringComparison.Ordinal); // the end of the parts array, before the figure's own close
+        Plant("parts-null", withFigure.Replace(withFigure.Substring(withFigure.IndexOf("\"parts\":[", StringComparison.Ordinal), 8 + partsEnd + 1), "\"parts\":null"));
+        Plant("parts-null-element", withFigure.Replace("\"parts\":[", "\"parts\":[null,"));
+        Plant("lines-null", plain.Replace("\"lines\":[", "\"lines\":null,\"x\":["));
+        Plant("ops-null", plain.Replace("\"ops\":[", "\"ops\":null,\"x\":["));
+        Plant("op-null-element", plain.Replace("\"ops\":[", "\"ops\":[null,"));
+        Plant("args-null", plain.Replace("\"args\":{", "\"args\":null,\"zz\":{"));
+        Plant("monitors-null", plain.Replace("\"monitors\":[", "\"monitors\":null,\"x\":["));
+        Plant("profile-null-point", withFigure.Replace("\"profile\":[", "\"profile\":[null,"));
+
+        var names = new[] { "parts-null", "parts-null-element", "lines-null", "ops-null", "op-null-element", "args-null", "monitors-null" };
+        foreach (var name in names) Assert.True(store.Load(name) is null, name + " was accepted");
+        _ = store.Load("profile-null-point"); // a non-fatal answer either way, never an exception
+        var listed = store.List(); // no exception, and the good drawings are still there
+        Assert.Contains(listed, l => l.Id == "keeper");
+        Assert.Contains(listed, l => l.Id == "fig");
+    }
+
+    [Fact]
+    public void LoadRevalidatesEditAndShapeArguments()
+    {
+        var store = new DrawingStore(_folder);
+        store.Save(Drawing("edits", T0, Line("Draw.", "[DRAW:rect x=5 y=5 w=20 h=10 id=box][DRAW:badge x=9 y=9 n=3][DRAW:text x=6 y=6 text=\"Hi\" size=20][DRAW:path d=\"M 5 5 L 20 20\"]"),
+            Line("Edit.", "[DRAW:move id=box dx=10 dy=-4][DRAW:moveto id=box x=7 y=8][DRAW:scale id=box factor=1.5][DRAW:recolor id=box color=#00FF00][DRAW:erase id=box]")));
+        var json = File.ReadAllText(Path.Combine(_folder, "edits.json"));
+        void Plant(string name, string text) => File.WriteAllText(Path.Combine(_folder, name + ".json"), text.Replace("\"id\":\"edits\"", $"\"id\":\"{name}\""));
+        Assert.Contains("\"dx\":\"10\"", json);
+        Assert.Contains("\"factor\":\"1.5\"", json);
+
+        var bad = new Dictionary<string, string>
+        {
+            ["move-no-dx"] = json.Replace("\"dx\":\"10\",", ""),
+            ["move-dx-abc"] = json.Replace("\"dx\":\"10\"", "\"dx\":\"abc\""),
+            ["move-dy-huge"] = json.Replace("\"dy\":\"-4\"", "\"dy\":\"9999999\""),
+            ["moveto-no-y"] = json.Replace("\"y\":\"8\"", "\"z\":\"8\""),
+            ["scale-too-big"] = json.Replace("\"factor\":\"1.5\"", "\"factor\":\"9\""),
+            ["scale-nan"] = json.Replace("\"factor\":\"1.5\"", "\"factor\":\"NaN\""),
+            ["recolor-no-colour"] = json.Replace("\"color\":\"#00FF00\"", "\"color\":null"),
+            ["erase-no-id"] = json.Replace("\"id\":\"box\",\"points\":[],\"box\":{\"x\":0,\"y\":0,\"w\":0,\"h\":0}", "\"points\":[],\"box\":{\"x\":0,\"y\":0,\"w\":0,\"h\":0}"),
+            ["badge-n-abc"] = json.Replace("\"n\":\"3\"", "\"n\":\"abc\""),
+            ["text-size-huge"] = json.Replace("\"size\":\"20\"", "\"size\":\"9999\""),
+            ["path-letters"] = json.Replace("\"d\":\"ML\"", "\"d\":\"MLC\""),
+        };
+        foreach (var (name, text) in bad) Plant(name, text);
+        Assert.NotNull(store.Load("edits"));
+        foreach (var name in bad.Keys) Assert.True(store.Load(name) is null, name + " was accepted");
+    }
+
+    [Fact]
+    public void IdsEndExactlyAtTheEnd()
+    {
+        var store = new DrawingStore(_folder);
+        store.Save(Drawing("good", T0, Line("Fine.", "[DRAW:dot x=5 y=5]")));
+        Assert.False(DrawingStore.IsValidId("good\n"));
+        Assert.Null(store.Load("good\n"));
+    }
+
+    [Fact]
+    public void SaveTellsInvalidFromTooBig()
+    {
+        var store = new DrawingStore(_folder);
+        var bidi = Drawing("bidi", T0, Line("Hi.", "[DRAW:dot x=5 y=5]")) with { Title = "bad ‮ title" };
+        var invalid = Assert.Throws<ArgumentException>(() => store.Save(bidi));
+        Assert.Contains("will not keep", invalid.Message);
+        var big = new string('x', 1_900);
+        var ops = Enumerable.Range(0, 60).Select(_ => new DrawOp(DrawOpKind.Dot, null, [new Pt(5, 5)], new Box(5, 5, 0, 0), null, null, 1,
+            new Dictionary<string, string> { ["label"] = big, ["prompt"] = big, ["items"] = big, ["series"] = big, ["title"] = big }, 0)).ToArray();
+        var tooBig = Assert.Throws<InvalidDataException>(() => store.Save(Drawing("big", T0, Enumerable.Range(0, 8).Select(_ => new SavedLine("Many.", 1, ops)).ToArray())));
+        Assert.Contains("too large", tooBig.Message);
+    }
+
+    [Fact]
+    public void RecorderLeavesOutOpsTheStoreWouldRefuseAndCapsTheTotal()
+    {
+        // A MARK label with a bidi character becomes an op the store refuses; the recorded drawing leaves just that op out.
+        var marked = DrawCommandParser.FromMarks([new ScreenAnnotation("rect", 5, 5, 20, 10, "tricky ‮ label", 1)]);
+        var fine = DrawCommandParser.Parse("[DRAW:dot x=5 y=5]").Ops;
+        var recorder = new DrawingTurnRecorder();
+        recorder.SetMonitors(Screens);
+        recorder.AddLine("Two ops.", TimeSpan.FromSeconds(1), DrawingMapper.ToVirtual([.. marked, .. fine], Screens));
+        var built = recorder.Build(T0)!;
+        Assert.Equal([DrawOpKind.Dot], built.Lines[0].Ops.Select(o => o.Kind));
+        Assert.True(DrawingStore.Validate(built));
+
+        var many = DrawingMapper.ToVirtual(Enumerable.Repeat(fine[0], 60).ToArray(), Screens);
+        var capped = new DrawingTurnRecorder();
+        capped.SetMonitors(Screens);
+        for (var i = 0; i < 12; i++) capped.AddLine("Line " + i, TimeSpan.FromSeconds(1), many);
+        var total = capped.Build(T0)!.Lines.Sum(l => l.Ops.Count);
+        Assert.Equal(DrawingStore.MaxOps, total);
+        Assert.True(DrawingStore.Validate(capped.Build(T0)!));
+    }
+
+    [Fact]
     public void RecorderTitlesFromTheFirstSpokenLineAndNeedsAPart()
     {
         var recorder = new DrawingTurnRecorder();

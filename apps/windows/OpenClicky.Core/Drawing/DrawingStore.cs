@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -52,11 +53,12 @@ public sealed partial class DrawingStore
     /// Writes <paramref name="d"/> atomically (temp file, then a replacing move) and prunes the oldest files beyond
     /// <see cref="MaxFiles"/>. Returns the drawing's id.
     /// </summary>
-    /// <exception cref="InvalidDataException">The drawing breaks a limit (bad text or numbers) or is over <see cref="MaxBytes"/>.</exception>
+    /// <exception cref="InvalidDataException">The drawing is over <see cref="MaxBytes"/>.</exception>
+    /// <exception cref="ArgumentException">The drawing breaks a limit the store enforces (bad ids, text, numbers or arguments).</exception>
     public string Save(SavedDrawing d)
     {
         ArgumentNullException.ThrowIfNull(d);
-        if (!Validate(d)) throw new InvalidDataException("The drawing is not valid.");
+        if (!Validate(d)) throw new ArgumentException("The drawing holds content the store will not keep.", nameof(d));
         var bytes = JsonSerializer.SerializeToUtf8Bytes(d, Json);
         if (bytes.Length > MaxBytes) throw new InvalidDataException("The drawing is too large to keep.");
         Directory.CreateDirectory(_folder);
@@ -80,13 +82,20 @@ public sealed partial class DrawingStore
         if (!IsValidId(id)) return null;
         try
         {
-            var path = PathOf(id);
-            var info = new FileInfo(path);
-            if (!info.Exists || info.Length > MaxBytes) return null;
-            var d = JsonSerializer.Deserialize<SavedDrawing>(File.ReadAllBytes(path), Json);
-            return d is not null && d.Id == id && Validate(d) ? d : null;
+            // Read through a stream capped at one byte over the limit: the file cannot grow between a size check and the read.
+            using var stream = new FileStream(PathOf(id), FileMode.Open, FileAccess.Read, FileShare.Read);
+            var buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(MaxBytes + 1);
+            try
+            {
+                var length = stream.ReadAtLeast(buffer.AsSpan(0, MaxBytes + 1), MaxBytes + 1, throwOnEndOfStream: false);
+                if (length > MaxBytes) return null;
+                var d = JsonSerializer.Deserialize<SavedDrawing>(buffer.AsSpan(0, length), Json);
+                return d is not null && d.Id == id && Validate(d) ? d : null;
+            }
+            finally { System.Buffers.ArrayPool<byte>.Shared.Return(buffer); }
         }
-        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException or NotSupportedException or ArgumentException or InvalidOperationException)
+        // A hostile file can fail in many ways (bad JSON, nulls where the model has none): any non-fatal one just skips the file.
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             return null;
         }
@@ -97,14 +106,9 @@ public sealed partial class DrawingStore
     {
         if (!Directory.Exists(_folder)) return [];
         var found = new List<(string Id, string Title, DateTimeOffset CreatedAt)>();
-        try
-        {
-            foreach (var file in Directory.EnumerateFiles(_folder, "*" + Extension))
-            {
-                if (Load(Path.GetFileNameWithoutExtension(file)) is { } d) found.Add((d.Id, d.Title, d.CreatedAt));
-            }
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { /* a folder that vanishes mid-listing lists what was read */ }
+        // A bad file is skipped by Load; a folder that cannot be listed throws, so the caller can tell it from an empty one.
+        foreach (var file in Directory.EnumerateFiles(_folder, "*" + Extension))
+            if (Load(Path.GetFileNameWithoutExtension(file)) is { } d) found.Add((d.Id, d.Title, d.CreatedAt));
         return found.OrderByDescending(f => f.CreatedAt).ThenBy(f => f.Id, StringComparer.Ordinal).ToList();
     }
 
@@ -206,11 +210,67 @@ public sealed partial class DrawingStore
         if (op.Screen is < 1 or > MaxMonitors) return false;
         if (!DrawingDocument.Sane(op) || op.Box.W < 0 || op.Box.H < 0) return false;
         if (op.Args.Count > MaxArgs || op.Args.Any(a => !ArgKeyPattern().IsMatch(a.Key) || !IsSafeText(a.Value, MaxArgValue, allowEmpty: true))) return false;
+        if (!ValidShape(op)) return false;
         return op.Kind == DrawOpKind.Figure ? op.Figure is { } f && FigureBlockParser.IsValid(f) : op.Figure is null;
     }
 
-    [GeneratedRegex("^[A-Za-z0-9_-]{1,64}$")] private static partial Regex IdPattern();
-    [GeneratedRegex("^[a-z0-9_-]{1,24}$")] private static partial Regex OpIdPattern();
-    [GeneratedRegex("^#[0-9A-Fa-f]{6}$")] private static partial Regex ColorPattern();
-    [GeneratedRegex("^[a-z]{1,12}$")] private static partial Regex ArgKeyPattern();
+    /// <summary>Whether a stored op could have come out of <see cref="DrawCommandParser"/> (or the recorder): the stored points are never indexed blind.</summary>
+    internal static bool IsStorable(DrawOp op) => ValidOp(op);
+
+    /// <summary>Points and arguments per kind, as the parser requires them; anything the document or renderer would index or parse must be there.</summary>
+    private static bool ValidShape(DrawOp op)
+    {
+        var points = op.Points.Count;
+        var (min, max) = op.Kind switch
+        {
+            DrawOpKind.Line or DrawOpKind.Arrow or DrawOpKind.Trace => (2, DrawCommandParser.MaxPoints), // a freehand MARK may have just two
+            DrawOpKind.Poly => (3, DrawCommandParser.MaxPoints),
+            DrawOpKind.Curve => (4, 4),
+            DrawOpKind.Tie or DrawOpKind.Timeline or DrawOpKind.Underline or DrawOpKind.Strike => (2, 2),
+            DrawOpKind.Path => (1, DrawCommandParser.MaxPoints),
+            DrawOpKind.Circle => (0, 1),
+            DrawOpKind.Ring or DrawOpKind.Dot or DrawOpKind.Point or DrawOpKind.Text or DrawOpKind.Label or DrawOpKind.Cross or DrawOpKind.Check
+                or DrawOpKind.Star or DrawOpKind.Scroll or DrawOpKind.Badge or DrawOpKind.Button or DrawOpKind.Card or DrawOpKind.Sticky => (1, 1),
+            _ => (0, 0), // boxes, graph, figure and every edit carry none
+        };
+        if (points < min || points > max) return false;
+        string? Arg(string key) => op.Args.GetValueOrDefault(key);
+        bool Int(string key, bool signed, int lo, int hi) =>
+            int.TryParse(Arg(key), signed ? NumberStyles.AllowLeadingSign : NumberStyles.None, CultureInfo.InvariantCulture, out var n) && n >= lo && n <= hi;
+        bool OptionalInt(string key, int lo, int hi) => !op.Args.ContainsKey(key) || Int(key, false, lo, hi);
+        const int Limit = 99_999;
+        switch (op.Kind)
+        {
+            case DrawOpKind.Move: return op.Id is not null && Int("dx", true, -Limit, Limit) && Int("dy", true, -Limit, Limit);
+            case DrawOpKind.MoveTo: return op.Id is not null && Int("x", false, 0, Limit) && Int("y", false, 0, Limit);
+            case DrawOpKind.Scale:
+                return op.Id is not null && double.TryParse(Arg("factor"), NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var factor) && factor is >= 0.25 and <= 4;
+            case DrawOpKind.Recolor: return op.Id is not null && op.Color is not null;
+            case DrawOpKind.Erase: return op.Id is not null;
+            case DrawOpKind.Text: return OptionalInt("size", 10, 48);
+            case DrawOpKind.Cross or DrawOpKind.Check or DrawOpKind.Star: return OptionalInt("size", 1, DrawCommandParser.MaxSize);
+            case DrawOpKind.Badge: return Int("n", false, 1, 15);
+            case DrawOpKind.Graph: return DrawCommandParser.ValidSeries(Arg("series"));
+            case DrawOpKind.Timeline: return Arg("items")?.Split(';') is { Length: <= 8 } items && items.All(i => !string.IsNullOrWhiteSpace(i));
+            case DrawOpKind.Path:
+            {
+                // d is reduced to command letters; M and L take one point, Q two, C three.
+                if (Arg("d") is not { Length: > 0 and <= DrawCommandParser.MaxPathCommands } letters || letters[0] != 'M') return false;
+                var needed = 0;
+                foreach (var c in letters)
+                {
+                    var arity = c switch { 'M' or 'L' => 1, 'Q' => 2, 'C' => 3, 'Z' => 0, _ => -1 };
+                    if (arity < 0) return false;
+                    needed += arity;
+                }
+                return needed == points;
+            }
+            default: return true;
+        }
+    }
+
+    [GeneratedRegex("^[A-Za-z0-9_-]{1,64}\\z")] private static partial Regex IdPattern();
+    [GeneratedRegex("^[a-z0-9_-]{1,24}\\z")] private static partial Regex OpIdPattern();
+    [GeneratedRegex("^#[0-9A-Fa-f]{6}\\z")] private static partial Regex ColorPattern();
+    [GeneratedRegex("^[a-z]{1,12}\\z")] private static partial Regex ArgKeyPattern();
 }

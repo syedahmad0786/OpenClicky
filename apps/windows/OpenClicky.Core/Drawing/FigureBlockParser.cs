@@ -40,11 +40,11 @@ public static partial class FigureBlockParser
         if (f.Screen is < 1 or > 16 || !Good(f.Title)) return false;
         if (!(float.IsFinite(b.X) && float.IsFinite(b.Y) && b.X >= 0 && b.Y >= 0 && b.X <= MaxBoxValue && b.Y <= MaxBoxValue
             && b.W >= MinBoxSide && b.H >= MinBoxSide && b.W <= MaxBoxValue && b.H <= MaxBoxValue)) return false;
-        if (f.Parts.Count is 0 or > MaxParts) return false;
+        if (f.Parts is null || f.Parts.Count is 0 or > MaxParts) return false;
         var triangles = 0;
         foreach (var p in f.Parts)
         {
-            if (!Enum.IsDefined(p.Kind) || !Within(p.Size, v => v is >= (float)MinSize and <= (float)MaxSize)
+            if (p is null || !Enum.IsDefined(p.Kind) || !Within(p.Size, v => v is >= (float)MinSize and <= (float)MaxSize)
                 || !Within(p.At, v => Math.Abs(v) <= MaxAt) || !Within(p.RotateDegrees, v => Math.Abs(v) <= MaxDegrees)) return false;
             if (p.Color is null || p.Color.Length != 0 && !(p.Color.Length == 7 && p.Color[0] == '#' && p.Color.Skip(1).All(char.IsAsciiHexDigit))) return false;
             if (!Good(p.Label) || p.Params is null || p.Params.Count > ParamKeys.Length
@@ -205,6 +205,6 @@ public static partial class FigureBlockParser
         return text is { Length: > 0 and <= DrawCommandParser.MaxLabel } && !text.Any(c => c == '`' || char.IsControl(c) || DrawCommandParser.IsBidiControl(c));
     }
 
-    [GeneratedRegex("^[a-z0-9_-]{1,24}$")]
+    [GeneratedRegex("^[a-z0-9_-]{1,24}\\z")]
     private static partial Regex IdPattern();
 }

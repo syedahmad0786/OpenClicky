@@ -47,7 +47,8 @@ internal static class DrawingPrinter
             if (!started)
             {
                 started = true;
-                g.DrawString(drawing.Title, title, Brushes.Black, new RectangleF(page.Left, top, page.Width, TitleUnits), new StringFormat { Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap });
+                using (var line = new StringFormat { Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap })
+                    g.DrawString(drawing.Title, title, Brushes.Black, new RectangleF(page.Left, top, page.Width, TitleUnits), line);
                 top += TitleUnits;
                 var area = new Rectangle(page.Left, top, page.Width, (int)((page.Bottom - top) * DrawingShare));
                 using var picture = Render(drawing, new Size((int)(area.Width * Quality), (int)(area.Height * Quality)), accent);
@@ -59,7 +60,7 @@ internal static class DrawingPrinter
             }
             if (written < text.Length)
             {
-                var format = new StringFormat { Trimming = StringTrimming.Word };
+                using var format = new StringFormat { Trimming = StringTrimming.Word };
                 var rest = text[written..];
                 var box = new SizeF(page.Width, Math.Max(0, page.Bottom - top));
                 g.MeasureString(rest, body, box, format, out var fitted, out int _);
@@ -92,12 +93,13 @@ internal static class DrawingPrinter
         return document.IsEmpty ? null : DrawingRenderer.RenderStill(document.Parts, size, Color.White, accent, Quality);
     }
 
-    private static string HandFamily
+    /// <summary>Looked up once: asking Windows for its installed fonts on every print is slow.</summary>
+    private static string HandFamily => _handFamily ??= FindHandFamily();
+    private static string? _handFamily;
+
+    private static string FindHandFamily()
     {
-        get
-        {
-            using var fonts = new InstalledFontCollection();
-            return fonts.Families.Any(f => f.Name == "Segoe Print") ? "Segoe Print" : "Segoe UI";
-        }
+        using var fonts = new InstalledFontCollection();
+        return fonts.Families.Any(f => f.Name == "Segoe Print") ? "Segoe Print" : "Segoe UI";
     }
 }

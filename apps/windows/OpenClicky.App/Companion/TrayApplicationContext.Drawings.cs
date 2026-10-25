@@ -19,8 +19,17 @@ internal sealed partial class TrayApplicationContext
     private void WireDrawings() => _talk.DrawingTurnCompleted += _ => OnUi(OfferToSaveDrawing);
 
     /// <summary>The Chat rows' source: a store that cannot be read is an empty list, never a failed push.</summary>
-    private IReadOnlyList<(string Id, string Title, DateTimeOffset CreatedAt)> SavedDrawings() =>
-        _savedDrawings ??= ShellSource("drawings", _drawings.List, []);
+    private IReadOnlyList<(string Id, string Title, DateTimeOffset CreatedAt)> SavedDrawings()
+    {
+        if (_savedDrawings is not null) return _savedDrawings;
+        try { return _savedDrawings = _drawings.List(); }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // Not cached: a folder that could not be read this time is read again on the next push, so rows do not vanish for good.
+            Log("drawing_list_failed=" + ex.GetType().Name);
+            return [];
+        }
+    }
 
     /// <summary>UI thread: a turn that drew has ended with its drawing still on screen. Dismissing the card leaves it there, unsaved.</summary>
     private void OfferToSaveDrawing()
@@ -43,15 +52,31 @@ internal sealed partial class TrayApplicationContext
             _shell?.AddToast("Saved. You'll find it in Chat.");
             RequestShellPush();
         }
-        catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is InvalidDataException or ArgumentException or IOException or UnauthorizedAccessException)
         {
             Log("drawing_save_failed=" + ex.GetType().Name);
-            _shell?.AddToast(ex is InvalidDataException ? "This drawing is too big to keep." : "I couldn't save the drawing.");
+            _shell?.AddToast(ex switch
+            {
+                InvalidDataException => "This drawing is too big to keep.",
+                ArgumentException => "This drawing has something in it I can't keep.",
+                _ => "I couldn't save the drawing.",
+            });
         }
     }
 
     /// <summary>UI thread: a button on a drawing row. The id was checked against the pushed state; the action is allow-listed.</summary>
     void IShellHost.DrawingAction(string id, string action)
+    {
+        try { RunDrawingAction(id, action); }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            // Nothing a row's button does may throw into the shell's message handler.
+            Log($"drawing_action_failed action={action} {ex.GetType().Name}");
+            _shell?.AddToast("I couldn't do that with the drawing.");
+        }
+    }
+
+    private void RunDrawingAction(string id, string action)
     {
         if (action == "remove")
         {
@@ -98,6 +123,7 @@ internal sealed partial class TrayApplicationContext
             _shell?.AddToast("I couldn't replay that drawing.");
             return;
         }
+        if (!replay.IsOpen) { _shell?.AddToast("I couldn't replay that drawing."); return; } // it closed itself on a file it could not play
         _replay = replay;
         replay.Closed += () =>
         {
@@ -109,15 +135,29 @@ internal sealed partial class TrayApplicationContext
     /// <summary>UI thread: closes an open replay (Esc, Stop, a new turn or task, quitting).</summary>
     private void CloseReplay() => _replay?.Close();
 
-    /// <summary>The user asked for the print dialog; nothing is sent to a printer until they choose one and confirm.</summary>
+    /// <summary>
+    /// Any thread: closes an open replay and returns once it is gone (the agent starts off the UI thread and captures right after,
+    /// so a Post would leave the replay in its first screenshot).
+    /// </summary>
+    private void CloseReplayNow()
+    {
+        try { _uiContext.Send(_ => CloseReplay(), null); }
+        catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException) { /* shutting down: nothing to close */ }
+    }
+
+    /// <summary>
+    /// The user asked for the print dialog; nothing is sent to a printer until they choose one and confirm. The dialog is owned by
+    /// the notch's window (the replay form when no shell is up), so it does not open behind the topmost notch.
+    /// </summary>
     private void PrintDrawing(SavedDrawing drawing)
     {
         try
         {
             var style = CompanionStyle.From(_settings, reducedMotion: false);
-            DrawingPrinter.Print(null, drawing, System.Drawing.ColorTranslator.FromHtml(style.AccentHex));
+            IWin32Window? owner = _shellSurface is { Window.IsDisposed: false } surface ? surface.Window : _home.IsDisposed ? null : _home;
+            DrawingPrinter.Print(owner, drawing, System.Drawing.ColorTranslator.FromHtml(style.AccentHex));
         }
-        catch (Exception ex) when (ex is System.Drawing.Printing.InvalidPrinterException or InvalidOperationException or System.ComponentModel.Win32Exception)
+        catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             Log("drawing_print_failed=" + ex.GetType().Name);
             _shell?.AddToast("I couldn't print that. Check the printer and try again.");

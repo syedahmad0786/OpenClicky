@@ -45,6 +45,9 @@ internal sealed class DrawingWindow : IDisposable
 
     public nint Handle => _window.Handle;
 
+    /// <summary>Replay on a paper that is not the live screen: parts are laid out (and their pills kept) inside this rectangle. Null is the live screen.</summary>
+    public Rectangle? LayoutBounds { get; set; }
+
     public bool HasParts => _layouts.Count > 0;
 
     /// <summary>True while a button is drawn (revealed or not), whether or not its click target may be up.</summary>
@@ -56,14 +59,14 @@ internal sealed class DrawingWindow : IDisposable
     /// <summary>Replaces the drawing. Animation starts are relative to <paramref name="now"/> (seconds).</summary>
     public void Show(IReadOnlyList<DrawPart> parts, IReadOnlyList<PartAnimation> animations, double now)
     {
-        _layouts = DrawingRenderer.Layout(parts);
+        _layouts = DrawingRenderer.Layout(parts, LayoutBounds);
         TrackSpotlight(now);
         foreach (var animation in animations)
         {
             var start = now + animation.Start.TotalSeconds;
             if (animation.Erase)
             {
-                if (DrawingRenderer.Layout([animation.Part]) is [var erased]) _erasing.Add((erased, start, animation.Duration.TotalSeconds));
+                if (DrawingRenderer.Layout([animation.Part], LayoutBounds) is [var erased]) _erasing.Add((erased, start, animation.Duration.TotalSeconds));
             }
             else _reveals[(animation.Part.Id, animation.Part.Seq)] = (start, animation.Duration.TotalSeconds);
         }
