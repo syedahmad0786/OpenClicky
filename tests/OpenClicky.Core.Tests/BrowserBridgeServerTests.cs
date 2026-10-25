@@ -79,6 +79,45 @@ public sealed class BrowserBridgeServerTests
     }
 
     [Fact]
+    public async Task StoredProfileWinsTheSelectionBack()
+    {
+        var pipe = NewPipe();
+        await using var rig = new ServerRig(pipe, stored: "profile-a");
+        await using var b = new FakeChrome(pipe);
+        await b.HelloAsync("profile-b");
+        Assert.True((await b.ReadyAsync()).GetProperty("selected").GetBoolean());
+        Assert.Equal("profile-a", rig.Stored); // a fallback is never saved over a stored choice
+
+        await using var a = new FakeChrome(pipe);
+        await a.HelloAsync("profile-a");
+        Assert.True((await a.ReadyAsync()).GetProperty("selected").GetBoolean());
+        Assert.False((await b.ReadyAsync()).GetProperty("selected").GetBoolean());
+        Assert.Equal("profile-a", Assert.Single(rig.Server.Instances, i => i.Selected).Id);
+        Assert.Equal("profile-a", rig.Stored);
+    }
+
+    [Fact]
+    public async Task PreCancelledCallerLeavesOtherCommandsRunning()
+    {
+        var pipe = NewPipe();
+        await using var rig = new ServerRig(pipe);
+        await using var chrome = new FakeChrome(pipe);
+        await chrome.HelloAsync("profile-a");
+        await chrome.ReadyAsync();
+
+        var inFlight = rig.Server.SendAsync(Cmd("snapshot"), T, default);
+        var cmd = await chrome.CommandAsync("snapshot");
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => rig.Server.SendAsync(Cmd("extract", "task-2"), T, cancelled.Token));
+        await rig.Server.EndTaskAsync("task-2", true, cancelled.Token).WaitAsync(T);
+
+        await chrome.SendAsync(new { type = "result", id = cmd.GetProperty("id").GetString(), ok = true, result = new { text = "still here" } });
+        Assert.Equal(new BrowserReply(true, "still here"), await inFlight.WaitAsync(T));
+        Assert.True(rig.Server.IsConnected);
+    }
+
+    [Fact]
     public async Task HostWithoutAppReportsAppFalseThenConnects()
     {
         var pipe = NewPipe();
@@ -242,8 +281,9 @@ public sealed class BrowserBridgeServerTests
         public string? Stored;
         public BrowserBridgeServer Server { get; }
 
-        public ServerRig(string pipe)
+        public ServerRig(string pipe, string? stored = null)
         {
+            Stored = stored;
             Server = new BrowserBridgeServer(Secret, pipe, () => Stored, id => Stored = id);
             _run = Server.RunAsync(_cts.Token);
         }

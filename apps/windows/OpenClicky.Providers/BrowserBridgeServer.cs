@@ -35,8 +35,9 @@ public sealed class BrowserBridgeServer : IBrowserBridge, IAsyncDisposable
     private readonly object _sync = new();
     private readonly List<Connection> _connections = [];
     private readonly Dictionary<string, int> _running = new(StringComparer.Ordinal);
-    private string? _selectedId; // preferred profile (stored); may be offline
-    private string? _effective;  // the connected, selected profile
+    private string? _preferred; // the stored (or user-selected) profile; may be offline
+    private string? _effective; // the connected, selected profile
+    private volatile bool _stopping;
     private long _nextId;
     private long _helloOrder;
 
@@ -88,6 +89,7 @@ public sealed class BrowserBridgeServer : IBrowserBridge, IAsyncDisposable
         catch (OperationCanceledException) when (run.IsCancellationRequested) { }
         finally
         {
+            _stopping = true; // closing connections one by one must not move or save the selection
             Connection[] open;
             lock (_sync) open = _connections.ToArray();
             foreach (var connection in open) connection.Pipe.Dispose();
@@ -97,6 +99,7 @@ public sealed class BrowserBridgeServer : IBrowserBridge, IAsyncDisposable
 
     public async Task<BrowserReply> SendAsync(BrowserCommand command, TimeSpan timeout, CancellationToken token)
     {
+        token.ThrowIfCancellationRequested();
         Connection? connection;
         lock (_sync) connection = Selected();
         if (connection is null) return new BrowserReply(false, NotConnected);
@@ -109,7 +112,6 @@ public sealed class BrowserBridgeServer : IBrowserBridge, IAsyncDisposable
             if (connection.Closed) return new BrowserReply(false, Disconnected);
             using var timer = CancellationTokenSource.CreateLinkedTokenSource(token);
             timer.CancelAfter(timeout);
-            var written = false;
             try
             {
                 await connection.WriteAsync(new
@@ -118,15 +120,9 @@ public sealed class BrowserBridgeServer : IBrowserBridge, IAsyncDisposable
                     color = command.Color, deny = command.Deny, say = command.Say,
                     args = command.Args.ValueKind == JsonValueKind.Undefined ? EmptyArgs : command.Args,
                 }, timer.Token).ConfigureAwait(false);
-                written = true;
                 return await pending.Task.WaitAsync(timer.Token).ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
-            {
-                if (!written) connection.Pipe.Dispose(); // a browser that stopped reading, or a half-written frame
-                if (token.IsCancellationRequested) throw;
-                return new BrowserReply(false, NoAnswer);
-            }
+            catch (OperationCanceledException) when (!token.IsCancellationRequested) { return new BrowserReply(false, NoAnswer); }
             catch (Exception e) when (e is IOException or ObjectDisposedException or InvalidOperationException)
             {
                 connection.Pipe.Dispose(); // its read loop cleans up
@@ -147,9 +143,10 @@ public sealed class BrowserBridgeServer : IBrowserBridge, IAsyncDisposable
     {
         lock (_sync)
         {
-            if (!Named().Any(c => c.ProfileId == instanceId) || _effective == instanceId) return;
-            _selectedId = instanceId;
+            if (!Named().Any(c => c.ProfileId == instanceId) || (_preferred == instanceId && _effective == instanceId)) return;
+            _preferred = instanceId;
         }
+        try { _saveSelection(instanceId); } catch { /* settings write failed; the selection still holds in memory */ }
         _ = AnnounceAsync(null);
     }
 
@@ -166,6 +163,7 @@ public sealed class BrowserBridgeServer : IBrowserBridge, IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        _stopping = true;
         _life.Cancel();
         Connection[] open;
         lock (_sync) open = _connections.ToArray();
@@ -257,11 +255,11 @@ public sealed class BrowserBridgeServer : IBrowserBridge, IAsyncDisposable
         string[] running;
         lock (_sync)
         {
-            _selectedId ??= _storedSelection();
+            _preferred ??= _storedSelection();
             named = Named().ToArray();
-            var pick = named.Any(c => c.ProfileId == _selectedId) ? _selectedId : named.FirstOrDefault()?.ProfileId;
-            if (pick is not null && pick != _storedSelection()) save = pick;
-            if (pick is not null) _selectedId = pick;
+            var pick = named.Any(c => c.ProfileId == _preferred) ? _preferred : named.FirstOrDefault()?.ProfileId;
+            // A fallback is saved only when nothing is stored; a stored profile that reconnects wins the selection back.
+            if (_preferred is null && pick is not null) save = _preferred = pick;
             changed = pick != _effective;
             effective = _effective = pick;
             running = _running.Keys.ToArray();
@@ -289,7 +287,7 @@ public sealed class BrowserBridgeServer : IBrowserBridge, IAsyncDisposable
         foreach (var id in connection.Pending.Keys)
             if (connection.Pending.TryRemove(id, out var pending)) pending.TrySetResult(new BrowserReply(false, Disconnected));
         await connection.Pipe.DisposeAsync().ConfigureAwait(false);
-        if (registered && !_life.IsCancellationRequested) await AnnounceAsync(null).ConfigureAwait(false);
+        if (registered && !_stopping) await AnnounceAsync(null).ConfigureAwait(false);
     }
 
     private static async Task TryWriteAsync(Connection connection, object message)
@@ -299,8 +297,7 @@ public sealed class BrowserBridgeServer : IBrowserBridge, IAsyncDisposable
             using var timeout = new CancellationTokenSource(WriteTimeout);
             await connection.WriteAsync(message, timeout.Token).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) { connection.Pipe.Dispose(); } // stopped reading, or a half-written frame
-        catch (Exception e) when (e is IOException or ObjectDisposedException or InvalidOperationException) { }
+        catch (Exception e) when (e is IOException or ObjectDisposedException or InvalidOperationException or OperationCanceledException) { }
     }
 
     private void Untrack(string task)
@@ -341,10 +338,23 @@ public sealed class BrowserBridgeServer : IBrowserBridge, IAsyncDisposable
         public DateTimeOffset ConnectedAt;
         public long HelloOrder;
 
-        public async Task WriteAsync(object message, CancellationToken token)
+        /// <summary>
+        /// <paramref name="gateToken"/> only bounds the wait for the turn to write. Once a frame starts it gets its own
+        /// timeout; an interrupted frame would corrupt the stream, so that drops the connection.
+        /// </summary>
+        public async Task WriteAsync(object message, CancellationToken gateToken)
         {
-            await _writeGate.WaitAsync(token).ConfigureAwait(false);
-            try { await ChromeBridgeNativeProtocol.WriteAsync(Pipe, message, token).ConfigureAwait(false); }
+            await _writeGate.WaitAsync(gateToken).ConfigureAwait(false);
+            try
+            {
+                using var frame = new CancellationTokenSource(WriteTimeout);
+                try { await ChromeBridgeNativeProtocol.WriteAsync(Pipe, message, frame.Token).ConfigureAwait(false); }
+                catch (OperationCanceledException)
+                {
+                    Pipe.Dispose(); // the browser stopped reading, or a half-written frame
+                    throw new IOException("The browser stopped reading.");
+                }
+            }
             finally { _writeGate.Release(); }
         }
     }
