@@ -1201,6 +1201,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         _dictationActive = false;
         _dictationTarget = null;
         _dictationSession = null;
+        _dictationClipboard = "";
         if (EndDictationActivity() || hidden) return; // a dictate hold inside its tap window never showed anything
         _home.EndDictation();
         _home.SetStatus("Dictation closed · microphone stopped");

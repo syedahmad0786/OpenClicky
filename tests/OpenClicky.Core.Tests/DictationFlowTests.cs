@@ -193,4 +193,27 @@ public class DictationFlowTests
             DictationFlow.DeliverAsync("now three words", field, cleaner, On with { CleanupTimeoutMs = 5000 }, _ => { }, cts.Token));
         Assert.DoesNotContain("insert", field.Calls);
     }
+    [Fact]
+    public async Task TwoClipboardDeliveriesInOneSessionAccumulate()
+    {
+        var delivered = ""; // the session's clipboard text, as the tray keeps it
+        string? clipboard = null;
+        void Copy(string fitted) { delivered = DictationTextFit.Append(delivered, fitted); clipboard = delivered; }
+
+        await DictationFlow.DeliverAsync("First phrase.", null, null, On, Copy, CancellationToken.None);
+        // An unverified field fitted the second phrase against its own text: the session's join still applies.
+        await DictationFlow.DeliverAsync("Second phrase.", new FakeField(new("App", null, "x", "y", "", false), verified: false),
+            null, On, Copy, CancellationToken.None);
+
+        Assert.Equal("First phrase. Second phrase.", clipboard);
+    }
+
+    [Fact]
+    public void AppendJoinsWithOneSpace()
+    {
+        Assert.Equal("Hello", DictationTextFit.Append("", " Hello "));
+        Assert.Equal("Hello world", DictationTextFit.Append("Hello", "world"));
+        Assert.Equal("Hello, world", DictationTextFit.Append("Hello", ", world"));
+        Assert.Equal("你好世界", DictationTextFit.Append("你好", "世界"));
+    }
 }

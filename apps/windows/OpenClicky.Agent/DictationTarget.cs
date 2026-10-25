@@ -55,17 +55,18 @@ public sealed class DictationTarget
         {
             var element = AutomationElement.FocusedElement;
             if (element is null) return false;
+            // First, and fail closed: a field whose password flag cannot be read is treated as a password field.
+            if (IsPasswordOrUnknown(element))
+            {
+                failure = DictationCaptureFailure.Password;
+                error = "Dictation is unavailable in password or protected fields.";
+                return false;
+            }
             if (element.Current.ProcessId == Environment.ProcessId) { failure = DictationCaptureFailure.OwnWindow; return false; }
             failure = DictationCaptureFailure.NotWritable;
             if (!element.Current.IsEnabled || !element.Current.IsKeyboardFocusable)
             {
                 error = "The selected control is disabled or cannot accept keyboard input.";
-                return false;
-            }
-            if (element.Current.IsPassword)
-            {
-                failure = DictationCaptureFailure.Password;
-                error = "Dictation is unavailable in password or protected fields.";
                 return false;
             }
 
@@ -161,6 +162,12 @@ public sealed class DictationTarget
         }
         catch (ElementNotAvailableException) { return null; }
         catch (InvalidOperationException) { return null; }
+    }
+
+    private static bool IsPasswordOrUnknown(AutomationElement element)
+    {
+        try { return element.Current.IsPassword; }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return true; }
     }
 
     private static ValuePattern? TryValuePattern(AutomationElement element) =>

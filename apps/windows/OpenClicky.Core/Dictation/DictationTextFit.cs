@@ -27,6 +27,9 @@ public static class DictationTextFit
         return (leading ? " " : "") + text + (trailing ? " " : "");
     }
 
+    /// <summary>A dictation's clipboard text with one more phrase fitted after it (the phrase's own seam spaces are refitted).</summary>
+    public static string Append(string delivered, string phrase) => (delivered ?? "") + Fit(phrase, delivered ?? "", "", singleLine: false);
+
     private static bool StartsSentence(string before)
     {
         var b = before.TrimEnd(' ', '\t');

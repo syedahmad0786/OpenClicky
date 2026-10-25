@@ -24,6 +24,10 @@ internal sealed partial class TrayApplicationContext
     private bool _dictationCardShown;
     private System.Windows.Forms.Timer? _dictationLiveThrottle;
     private string? _dictationLive, _dictationLiveShown;
+    /// <summary>UI thread: everything this dictation has put on the clipboard (a verified insert adds nothing), so a later
+    /// phrase never overwrites an earlier one; and whether the clipboard notice was shown for it.</summary>
+    private string _dictationClipboard = "";
+    private bool _dictationClipboardNoticed;
 
     /// <summary>A dictate hold still inside its tap window: recording silently, nothing shown yet.</summary>
     private bool DictationHidden => _dictationHeld && !_dictationShown;
@@ -74,6 +78,8 @@ internal sealed partial class TrayApplicationContext
         _dictationActive = true;
         _dictationHandsFree = handsFree;
         _dictationSession = new object();
+        _dictationClipboard = "";
+        _dictationClipboardNoticed = false;
     }
 
     /// <summary>The activity card when the shell is active, else the classic dictation panel.</summary>
@@ -142,7 +148,7 @@ internal sealed partial class TrayApplicationContext
         var copied = true;
         var delivery = await DictationFlow.DeliverAsync(text, field, CreateDictationCleaner(),
             new(_settings.DictationCleanup, _settings.DictionaryWords ?? []),
-            words => copied = CopyDictationToClipboard(words), token).ConfigureAwait(false);
+            words => copied = CopyDictationToClipboard(session, words), token).ConfigureAwait(false);
         Log($"dictation_delivery kind={delivery.Kind} verified={delivery.Insert?.Verified} keys_up={keysUp} field={field is not null} copied={copied}");
         OnUi(() => ShowDictationDelivery(session, target, delivery, copied));
         return true;
@@ -154,17 +160,23 @@ internal sealed partial class TrayApplicationContext
             ? new TalkClientDictationCleaner(client, _settings.ResolveTalkModel())
             : null;
 
-    /// <summary>Any thread: sets the clipboard on the UI (STA) thread and waits for it; false when the clipboard refused.</summary>
-    private bool CopyDictationToClipboard(string words)
+    /// <summary>
+    /// Any thread: on the UI (STA) thread, puts this dictation's clipboard text with <paramref name="words"/> fitted after it on
+    /// the clipboard, and waits for it; false when the clipboard refused (the session's text then stays as it was).
+    /// </summary>
+    private bool CopyDictationToClipboard(object? session, string words)
     {
         var copied = false;
         try
         {
             _uiContext.Send(_ =>
             {
-                try { Clipboard.SetText(words, TextDataFormat.UnicodeText); copied = true; }
+                var same = session is not null && ReferenceEquals(session, _dictationSession);
+                var whole = DictationTextFit.Append(same ? _dictationClipboard : "", words);
+                try { Clipboard.SetText(whole, TextDataFormat.UnicodeText); copied = true; }
                 catch (Exception ex) when (ex is System.Runtime.InteropServices.ExternalException or ThreadStateException)
                 { Log("dictation_clipboard_error=" + ex.GetType().Name); }
+                if (copied && same) _dictationClipboard = whole;
             }, null);
         }
         catch (Exception ex) when (ex is System.ComponentModel.InvalidAsynchronousStateException or ObjectDisposedException)
@@ -193,9 +205,17 @@ internal sealed partial class TrayApplicationContext
                 if (current) _home.SetDictationResult(lost);
                 break;
             case DictationDeliveryKind.Clipboard:
+                // Once per dictation: later phrases join the same clipboard text, so the notice is refreshed, never stacked.
                 var card = DictationCards.Clipboard();
-                if (_shell is { IsActive: true } active) active.AddCard(card);
-                else _tray.ShowBalloonTip(card.AutoDismissMs ?? 8000, card.Title, card.Body ?? "", ToolTipIcon.Info);
+                var sameSession = session is not null && ReferenceEquals(session, _dictationSession);
+                var noticed = sameSession && _dictationClipboardNoticed;
+                if (sameSession) _dictationClipboardNoticed = true;
+                if (_shell is { IsActive: true } active)
+                {
+                    if (noticed) active.UpdateCard(card);
+                    else active.AddCard(card);
+                }
+                else if (!noticed) _tray.ShowBalloonTip(card.AutoDismissMs ?? 8000, card.Title, card.Body ?? "", ToolTipIcon.Info);
                 if (current)
                 {
                     _home.AcceptDictationTranscript(delivery.Text);
