@@ -12,7 +12,8 @@ internal static class OpenWorkCompanionRunner
         IDesktopToolHost host, AgentAccessMode access, Action<AgentProgress> progress,
         CancellationToken token, string? runtimeDirectory = null, string? workspaceDirectory = null, ChromeBridgeSession? browser = null,
         JobOutputTools? jobFiles = null, IReadOnlyList<RemoteMcpConnector>? connectors = null, Action<OpenCodeToolCall>? toolUsed = null,
-        DesktopLease? lease = null, string? leaseHolder = null, Action<bool>? waitingForScreen = null)
+        DesktopLease? lease = null, string? leaseHolder = null, Action<bool>? waitingForScreen = null,
+        Action<OpenWorkServerService>? serverStarted = null)
     {
         if (settings.AuthProvider != AuthProvider.ChatGPT || !ProviderFactory.IsChatGptSignedIn(secrets))
             throw new InvalidOperationException("Continue with ChatGPT in Settings before running a task.");
@@ -53,6 +54,7 @@ internal static class OpenWorkCompanionRunner
                 };
                 progress(new(0, "planning", completed ? $"{label} completed in {elapsedMilliseconds} ms" : label));
             });
+        serverStarted?.Invoke(work); // a steer reaches the run through it; once the run ends it sends nothing
         // In order, on the polling thread: a plan update must not be overtaken by an older one (Progress<T> posts to the pool).
         var updates = new InlineProgress<OpenCodeTaskUpdate>(update =>
         {

@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { postPage } from "../bridge";
 import { talkGesture, type JobCard, type ShellState } from "../contract";
 import { STOCK } from "../deck/JobCardView";
@@ -36,6 +37,37 @@ function PlanChecklist({ plan }: { plan: JobCard["plan"] }) {
   );
 }
 
+const MAX_JOB_TEXT = 2_000; // host limit for job.steer / job.followUp
+
+/** Tells a running or queued job something (job.steer), or asks a finished one a follow-up (job.followUp). Enter sends. */
+function JobInput({ id, kind }: { id: string; kind: "job.steer" | "job.followUp" }) {
+  const [draft, setDraft] = useState("");
+  const focused = useRef(false);
+  // A field that unmounts while focused fires no blur: hand the keyboard focus back here.
+  useEffect(() => () => { if (focused.current) postPage({ kind: "surface.focus", wanted: false }); }, []);
+  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+      event.preventDefault();
+      const text = draft.trim();
+      if (!text) return;
+      postPage({ kind, id, text });
+      setDraft("");
+    } else if (event.key === "Escape") {
+      event.currentTarget.blur(); // onBlur gives the focus back
+    }
+  };
+  const placeholder = kind === "job.steer" ? "Tell this job something…" : "Ask a follow-up…";
+  return (
+    <textarea
+      className="notch-job__input" rows={1} maxLength={MAX_JOB_TEXT} placeholder={placeholder} aria-label={placeholder}
+      value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKeyDown}
+      onPointerDown={() => postPage({ kind: "surface.focus", wanted: true })}
+      onFocus={() => { focused.current = true; postPage({ kind: "surface.focus", wanted: true }); }}
+      onBlur={() => { focused.current = false; postPage({ kind: "surface.focus", wanted: false }); }}
+    />
+  );
+}
+
 function FeaturedJob({ job }: { job: JobCard }) {
   const dismissible = !running(job) && job.state !== "needsYou";
   return (
@@ -60,9 +92,13 @@ function FeaturedJob({ job }: { job: JobCard }) {
           ))}
         </div>
       ) : null}
+      {running(job) ? <JobInput key={`steer-${job.id}`} id={job.id} kind="job.steer" />
+        : job.state === "done" ? <JobInput key={`followUp-${job.id}`} id={job.id} kind="job.followUp" /> : null}
       <div className="notch-job__actions">
         <PillButton variant="primary" size="sm" onClick={() => postPage({ kind: "job.open", id: job.id })}>{PRIMARY_LABEL[job.state]}</PillButton>
         {running(job) ? <PillButton variant="outline" size="sm" onClick={() => postPage({ kind: "job.stop", id: job.id })}>Stop</PillButton> : null}
+        {job.state === "failed" || job.state === "stopped"
+          ? <PillButton variant="outline" size="sm" onClick={() => postPage({ kind: "job.retry", id: job.id })}>Try again</PillButton> : null}
       </div>
     </PaperCard>
   );

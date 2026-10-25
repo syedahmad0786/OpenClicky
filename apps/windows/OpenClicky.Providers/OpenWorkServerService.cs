@@ -392,6 +392,15 @@ public sealed class OpenWorkServerService : IAsyncDisposable
         string title, string prompt, IProgress<OpenCodeTaskUpdate>? progress = null,
         CancellationToken cancellationToken = default) => RunAsync(title, prompt, progress, cancellationToken);
 
+    /// <summary>The user's words, sent into the running task's session as a user message ("Update from the user: ..."), which the
+    /// engine takes up at its next step. False when no task session is open (not started yet, finished, or this server is gone).</summary>
+    public async Task<bool> SendToRunningAsync(string text, CancellationToken ct)
+    {
+        if (_disposed || Volatile.Read(ref _activeSessionId) is not { } id) return false;
+        await _client.SendPromptAsync(id, "Update from the user: " + text, ct).ConfigureAwait(false);
+        return true;
+    }
+
     public async Task AbortAsync(CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);

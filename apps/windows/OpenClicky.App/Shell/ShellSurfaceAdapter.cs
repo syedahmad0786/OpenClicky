@@ -15,7 +15,7 @@ internal sealed class ShellSurfaceAdapter : IShellSurface
     private static readonly string[] PageKinds =
     [
         "talk.toggle", "update.check", "update.install", "app.quit", "notch.tab", "notch.open", "text.submit",
-        "general.set", "job.open", "job.stop", "job.dismiss", "file.open", "file.reveal", "card.action",
+        "general.set", "job.open", "job.stop", "job.dismiss", "job.steer", "job.followUp", "job.retry", "file.open", "file.reveal", "card.action",
         "card.dismiss", "link.open", "settings.section", "settings.patch", "settings.action", "drawing.action",
     ];
 

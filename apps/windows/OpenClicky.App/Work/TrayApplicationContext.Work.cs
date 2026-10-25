@@ -31,6 +31,11 @@ internal sealed partial class TrayApplicationContext
     private readonly Dictionary<string, QueuedStart> _queuedStarts = new(StringComparer.Ordinal);
     /// <summary>UI thread: each job card's output files, so a push does not hit the disk; dropped when a job finishes or is opened (also mid-run).</summary>
     private readonly Dictionary<string, IReadOnlyList<string>> _jobOutputs = new(StringComparer.Ordinal);
+    /// <summary>UI thread: the follow-up each job last started with (none: its own request), so Try again asks the same.
+    /// ponytail: in memory only; after a restart Try again runs the job's own request.</summary>
+    private readonly Dictionary<string, string?> _lastFollowUps = new(StringComparer.Ordinal);
+    /// <summary>A queued job's ask grows with each steer up to this.</summary>
+    private const int MaxQueuedAsk = 8_000;
     /// <summary>UI thread: scheduled runs in flight; the PC stays awake while any is.</summary>
     private int _routineRuns;
 
@@ -192,6 +197,7 @@ internal sealed partial class TrayApplicationContext
             try { _work.RetireNote(run.Job); } // the agent starts a fresh note.md; the last one stays readable
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { Log("job_note_error=" + ex.GetType().Name); }
             _work.SetJobState(run.Job.Id, WorkJobStates.Running, DateTimeOffset.UtcNow);
+            _lastFollowUps[jobId] = string.IsNullOrWhiteSpace(followUp) ? null : followUp;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -368,5 +374,38 @@ internal sealed partial class TrayApplicationContext
             return;
         }
         Log("shell: job.stop ignored, that job is not running");
+    }
+
+    /// <summary>UI thread. A running job hears it at its next step; a queued one starts with it as part of its ask.
+    /// The text is the user's own (untrusted) and is never logged.</summary>
+    void IShellHost.SteerJob(string id, string text)
+    {
+        if (_jobRuns.TryGetValue(id, out var run)) { SteerRun(run, text); return; }
+        if (_queuedStarts.TryGetValue(id, out var queued))
+        {
+            var ask = string.IsNullOrWhiteSpace(queued.FollowUp) ? text : queued.FollowUp.Trim() + "\n" + text;
+            if (ask.Length > MaxQueuedAsk) { Log("shell: job.steer ignored, the queued ask is full"); return; }
+            _queuedStarts[id] = queued with { FollowUp = ask };
+            return;
+        }
+        Log("shell: job.steer ignored, that job is not running or queued");
+    }
+
+    /// <summary>A follow-up is a new run of the job (through admission: it may queue).</summary>
+    void IShellHost.FollowUpJob(string id, string text) => StartJob(id, text, routineId: null);
+
+    /// <summary>Try again: a new run asked the same as the last one.</summary>
+    void IShellHost.RetryJob(string id) => StartJob(id, _lastFollowUps.GetValueOrDefault(id), routineId: null);
+
+    /// <summary>Any thread: the steer is kept for the run's desktop observations and sent into its running session, if it has one yet.</summary>
+    private void SteerRun(JobRun run, string text)
+    {
+        run.Steer(text);
+        if (run.Server is not { } server) { Log("job_steer_kept_for_observations"); return; }
+        _ = Task.Run(async () =>
+        {
+            try { if (!await server.SendToRunningAsync(text, run.Cts.Token).ConfigureAwait(false)) Log("job_steer_not_sent"); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { Log("job_steer_error=" + ex.GetType().Name); }
+        });
     }
 }

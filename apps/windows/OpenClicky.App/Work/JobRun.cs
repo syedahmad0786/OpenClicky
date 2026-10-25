@@ -1,6 +1,7 @@
 using OpenClicky.Core;
 using OpenClicky.Core.CompanionCursor;
 using OpenClicky.Core.Work;
+using OpenClicky.Providers;
 
 namespace OpenClicky.App;
 
@@ -14,6 +15,7 @@ internal sealed class JobRun(WorkJob job, string ask, string? routineId, AgentAc
     private JobLiveState _live = JobLiveState.Empty;
     private volatile bool _waitingForScreen;
     private string? _steering;
+    private OpenWorkServerService? _server;
     private int _steeringRevision;
 
     public WorkJob Job { get; } = job;
@@ -39,6 +41,9 @@ internal sealed class JobRun(WorkJob job, string ask, string? routineId, AgentAc
     /// <summary>The user's latest "change task" instruction for this run, if any.</summary>
     public string? Steering => Volatile.Read(ref _steering);
     public int SteeringRevision => Volatile.Read(ref _steeringRevision);
+
+    /// <summary>The run's OpenWork server once it has started; a steer goes into its running session. Set on the run's thread.</summary>
+    public OpenWorkServerService? Server { get => Volatile.Read(ref _server); set => Volatile.Write(ref _server, value); }
 
     public void Steer(string instruction)
     {

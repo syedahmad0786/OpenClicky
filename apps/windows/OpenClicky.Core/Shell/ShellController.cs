@@ -336,6 +336,9 @@ public sealed class ShellController : IDisposable
                 RequestPush();
                 break;
             case "job.stop": _host.StopJob(id!); break;
+            case "job.steer": _host.SteerJob(id!, intent.GetString("text")!.Trim()); break;
+            case "job.followUp": _host.FollowUpJob(id!, intent.GetString("text")!.Trim()); break;
+            case "job.retry": _host.RetryJob(id!); break;
             case "job.dismiss":
                 _dismissed.Add(id!);
                 if (_featuredJobId == id) _featuredJobId = null;

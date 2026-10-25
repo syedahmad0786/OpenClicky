@@ -85,6 +85,12 @@
 .notch-job__file { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; padding: 3px 3px 3px 10px; font-size: 12px; background: rgb(255 255 255 / 0.6); border-radius: 999px; }
 .notch-job__filename { max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .notch-job__actions { display: flex; gap: 8px; margin-top: 10px; }
+.notch-job__input {
+  display: block; box-sizing: border-box; width: 100%; min-height: 34px; max-height: 90px; margin-top: 10px; padding: 7px 14px; resize: none; field-sizing: content;
+  overflow-y: auto; scrollbar-width: none; color: #2a2620; font: 13px/20px var(--font-ui); background: rgb(255 255 255 / 0.6); border: 0; border-radius: 999px; outline: 0;
+}
+.notch-job__input::placeholder { color: rgb(42 38 32 / 0.55); }
+.notch-job__input:focus { box-shadow: 0 0 0 2px rgb(42 38 32 / 0.25); }
 .notch-job .oc-pill--outline { color: #2a2620; border-color: rgb(42 38 32 / 0.3); }
 .notch-job .oc-pill--outline:hover:not(:disabled) { background: rgb(42 38 32 / 0.08); }
 

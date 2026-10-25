@@ -300,6 +300,48 @@ public class OpenCodeTaskClientTests
     }
 
     [Fact]
+    public async Task SendToRunning_PostsTheUpdateAsAUserMessageIntoTheRunningSession()
+    {
+        var prompts = new List<(string Path, string Text)>();
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var steered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var http = new HttpClient(new Handler(async (request, token) =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Post && path == "/session") return Json("{\"id\":\"ses_run\",\"title\":\"t\"}");
+            if (path.EndsWith("/prompt_async", StringComparison.Ordinal))
+            {
+                using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(token));
+                var part = Assert.Single(body.RootElement.GetProperty("parts").EnumerateArray());
+                Assert.Equal("text", part.GetProperty("type").GetString());
+                lock (prompts) prompts.Add((path, part.GetProperty("text").GetString()!));
+                (prompts.Count == 1 ? started : steered).TrySetResult();
+                return new HttpResponseMessage(HttpStatusCode.NoContent);
+            }
+            if (path == "/permission") return Json("[]");
+            if (path.EndsWith("/message", StringComparison.Ordinal)) return Json("[]");
+            if (path == "/session/status") return Json("{\"ses_run\":{\"type\":\"busy\"}}");
+            if (path.EndsWith("/abort", StringComparison.Ordinal)) return Json("true");
+            throw new InvalidOperationException("unexpected " + path);
+        }));
+        var process = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("ping.exe", "-n 60 127.0.0.1") { CreateNoWindow = true, UseShellExecute = false })!;
+        await using var service = new OpenWorkServerService(process, new OpenCodeTaskClient("http://127.0.0.1:4096/", null, null, http), "ws", Path.GetTempPath());
+
+        Assert.False(await service.SendToRunningAsync("too early", CancellationToken.None)); // no session yet: nothing is sent
+        using var stop = new CancellationTokenSource();
+        var run = service.RunAsync("t", "the task", cancellationToken: stop.Token);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.True(await service.SendToRunningAsync("use the March figures", CancellationToken.None));
+        await steered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        stop.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => run);
+
+        Assert.Equal([("/session/ses_run/prompt_async", "the task"), ("/session/ses_run/prompt_async", "Update from the user: use the March figures")], prompts);
+        Assert.False(await service.SendToRunningAsync("after the run", CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Cancellation_StopsPendingRequest()
     {
         using var http = new HttpClient(new Handler(async (_, token) =>

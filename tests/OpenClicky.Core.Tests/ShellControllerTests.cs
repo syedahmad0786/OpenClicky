@@ -34,6 +34,9 @@ public class ShellControllerTests
         public void PatchSetting(string key, JsonElement value) => Calls.Add($"patch:{key}={value.GetRawText()}");
         public void SettingsAction(string action, string? arg) => Calls.Add($"action:{action}:{arg}");
         public void DrawingAction(string id, string action) => Calls.Add($"drawing:{id}:{action}");
+        public void SteerJob(string id, string text) => Calls.Add($"steer:{id}:{text}");
+        public void FollowUpJob(string id, string text) => Calls.Add($"followUp:{id}:{text}");
+        public void RetryJob(string id) => Calls.Add("retry:" + id);
         public bool KeepCard { get; set; }
         public bool CardAction(string cardId, string actionId) { Calls.Add($"card:{cardId}:{actionId}"); return KeepCard; }
         public void CardDismissed(string cardId) => Calls.Add("dismissed:" + cardId);
@@ -78,6 +81,18 @@ public class ShellControllerTests
         surface.Send(new { kind = "file.reveal", path = Inside });
         Assert.Contains("open:" + Inside, host.Calls);
         Assert.Contains("reveal:" + Inside, host.Calls);
+    }
+
+    [Fact]
+    public async Task JobSteerFollowUpAndRetryReachTheHost()
+    {
+        var (_, host, surface) = await Started();
+        surface.Send(new { kind = "job.steer", id = "j1", text = "use the March figures" });
+        surface.Send(new { kind = "job.followUp", id = "j1", text = "now make it shorter" });
+        surface.Send(new { kind = "job.retry", id = "j1" });
+        surface.Send(new { kind = "job.steer", id = "j1", text = "" }); // rejected by the parser
+        Assert.Equal(["steer:j1:use the March figures", "followUp:j1:now make it shorter", "retry:j1"],
+            host.Calls.Where(c => c.StartsWith("steer:") || c.StartsWith("followUp:") || c.StartsWith("retry:")));
     }
 
     [Fact]

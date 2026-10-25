@@ -226,7 +226,8 @@ export type PageMessage =
   | { kind: "talk.toggle" }
   | { kind: "text.submit"; text: string }
   | { kind: "general.set"; key: GeneralKey; value: boolean }
-  | { kind: "job.open" | "job.stop" | "job.dismiss"; id: string }
+  | { kind: "job.open" | "job.stop" | "job.dismiss" | "job.retry"; id: string }
+  | { kind: "job.steer" | "job.followUp"; id: string; text: string }
   | { kind: "file.open" | "file.reveal"; path: string }
   | { kind: "card.action"; cardId: string; actionId: string }
   | { kind: "card.dismiss"; cardId: string }

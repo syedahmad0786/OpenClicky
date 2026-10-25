@@ -196,6 +196,8 @@ public static class ShellIntentParser
 {
     public const int MaxMessageLength = 128_000;
     private const int MaxTextLength = 8_000, MaxRects = 64, MaxIdLength = 160, MaxPathLength = 4_096;
+    /// <summary>job.steer / job.followUp text: what the user typed into a job card.</summary>
+    public const int MaxJobTextLength = 2_000;
 
     private static readonly string[] Tabs = ["home", "chat", "settings", "document"];
     private static readonly string[] GeneralKeys = ["showInTaskbar", "showInRecordings", "launchAtLogin", "paused"];
@@ -255,7 +257,8 @@ public static class ShellIntentParser
         "notch.open" => Bool(m, "open"),
         "text.submit" => Str(m, "text", MaxTextLength),
         "general.set" => OneOf(m, "key", GeneralKeys) && Bool(m, "value"),
-        "job.open" or "job.stop" or "job.dismiss" => Str(m, "id", MaxIdLength),
+        "job.open" or "job.stop" or "job.dismiss" or "job.retry" => Str(m, "id", MaxIdLength),
+        "job.steer" or "job.followUp" => Str(m, "id", MaxIdLength) && Str(m, "text", MaxJobTextLength) && !string.IsNullOrWhiteSpace(m.GetProperty("text").GetString()),
         "file.open" or "file.reveal" => Str(m, "path", MaxPathLength),
         "card.action" => Str(m, "cardId", MaxIdLength) && Str(m, "actionId", MaxIdLength),
         "card.dismiss" => Str(m, "cardId", MaxIdLength),

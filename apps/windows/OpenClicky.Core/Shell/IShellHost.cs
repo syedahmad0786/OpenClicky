@@ -10,6 +10,12 @@ public interface IShellHost
     void ToggleTalk();
     void SubmitText(string text);
     void StopJob(string id);
+    /// <summary>The user typed into a running or queued job's card. <paramref name="text"/> is 1-2000 chars, untrusted, never logged.</summary>
+    void SteerJob(string id, string text);
+    /// <summary>The user asked a finished job a follow-up (1-2000 chars, untrusted): a new run of that job.</summary>
+    void FollowUpJob(string id, string text);
+    /// <summary>Try again on a failed or stopped job: a new run with its last ask.</summary>
+    void RetryJob(string id);
     /// <summary>The page opened a job (it is now featured); refresh anything cached about it.</summary>
     void OpenJob(string id);
     void SetGeneral(string key, bool value);

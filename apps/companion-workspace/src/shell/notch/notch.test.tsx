@@ -147,6 +147,40 @@ it("a working job can be stopped", () => {
   expect(host.posts("job.stop")).toEqual([{ kind: "job.stop", id: "job-working" }]);
 });
 
+it.each(["working", "queued"] as const)("a %s job takes an instruction: Enter posts job.steer and clears the box", (state) => {
+  const host = mockHost();
+  render(<Notch state={open("home", { featured: { ...fixture.featured!, state } })} />);
+  const box = screen.getByPlaceholderText("Tell this job something…");
+  fireEvent.change(box, { target: { value: "  use the March figures " } });
+  fireEvent.keyDown(box, { key: "Enter" });
+  expect(host.posts("job.steer")).toEqual([{ kind: "job.steer", id: "job-working", text: "use the March figures" }]);
+  expect(box).toHaveValue("");
+  fireEvent.keyDown(box, { key: "Enter" }); // empty: nothing posts
+  expect(host.posts("job.steer")).toHaveLength(1);
+  expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+});
+
+it("a done job asks for a follow-up: Enter posts job.followUp", () => {
+  const host = mockHost();
+  render(<Notch state={open("home", { featured: { ...fixture.featured!, state: "done" } })} />);
+  expect(screen.queryByPlaceholderText("Tell this job something…")).toBeNull();
+  const box = screen.getByPlaceholderText("Ask a follow-up…");
+  fireEvent.change(box, { target: { value: "now make it shorter" } });
+  fireEvent.keyDown(box, { key: "Enter", shiftKey: true }); // Shift+Enter is a new line
+  expect(host.posts("job.followUp")).toEqual([]);
+  fireEvent.keyDown(box, { key: "Enter" });
+  expect(host.posts("job.followUp")).toEqual([{ kind: "job.followUp", id: "job-working", text: "now make it shorter" }]);
+  expect(host.posts("job.steer")).toEqual([]);
+});
+
+it.each(["failed", "stopped"] as const)("a %s job offers Try again, which posts job.retry", (state) => {
+  const host = mockHost();
+  render(<Notch state={open("home", { featured: { ...fixture.featured!, state } })} />);
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  expect(host.posts("job.retry")).toEqual([{ kind: "job.retry", id: "job-working" }]);
+  expect(screen.queryByPlaceholderText("Tell this job something…")).toBeNull();
+});
+
 it("tabs post notch.tab; the gear opens Settings, which grows the panel; the apps pill opens Settings", () => {
   const host = mockHost();
   render(<Notch state={open()} />);

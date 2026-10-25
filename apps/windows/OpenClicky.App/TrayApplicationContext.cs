@@ -827,7 +827,8 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
                         jobFiles: new JobOutputTools(_work.OutputFolder(work.Job)),
                         connectors: connectors,
                         toolUsed: call => { work.Live = work.Live.Apply(call.Tool, call.Input); OnUi(RequestShellPush); },
-                        lease: _lease, leaseHolder: me.Holder, waitingForScreen: waiting => SetWaitingForScreen(me, waiting)).ConfigureAwait(false);
+                        lease: _lease, leaseHolder: me.Holder, waitingForScreen: waiting => SetWaitingForScreen(me, waiting),
+                        serverStarted: server => work.Server = server).ConfigureAwait(false);
                 }
                 finally { foreach (var connector in connectors) connector.Dispose(); }
                 var answer = result.Messages.LastOrDefault(m => m.Role == "assistant" && !string.IsNullOrWhiteSpace(m.Text))?.Text ?? "";
@@ -1057,7 +1058,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         {
             var instruction = command.Text;
             if (instruction.Length is 0 or > 4000) { Reply("Use change task: followed by a short instruction."); return true; }
-            if (run.Job is { } steered) steered.Steer(instruction);
+            if (run.Job is { } steered) SteerRun(steered, instruction);
             else
             {
                 _taskSteering = instruction;

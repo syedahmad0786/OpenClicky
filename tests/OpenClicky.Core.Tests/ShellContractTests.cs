@@ -51,6 +51,30 @@ public class ShellContractTests
     [InlineData("""{"kind":"drawing.action","id":7,"action":"print"}""", false)]
     public void DrawingActionIntentIsAllowListed(string json, bool valid) => Assert.Equal(valid, ShellIntentParser.TryParse(json, out _));
 
+    [Theory]
+    [InlineData("""{"kind":"job.steer","id":"j1","text":"use the March figures"}""", true)]
+    [InlineData("""{"kind":"job.followUp","id":"j1","text":"now make it shorter"}""", true)]
+    [InlineData("""{"kind":"job.retry","id":"j1"}""", true)]
+    [InlineData("""{"kind":"job.steer","id":"j1","text":""}""", false)]
+    [InlineData("""{"kind":"job.steer","id":"j1","text":"   "}""", false)]
+    [InlineData("""{"kind":"job.steer","id":"j1"}""", false)]
+    [InlineData("""{"kind":"job.steer","text":"hi"}""", false)]
+    [InlineData("""{"kind":"job.followUp","id":"j1","text":5}""", false)]
+    [InlineData("""{"kind":"job.followUp","id":"","text":"hi"}""", false)]
+    [InlineData("""{"kind":"job.retry"}""", false)]
+    [InlineData("""{"kind":"job.retry","id":7}""", false)]
+    public void JobSteerFollowUpAndRetryIntents(string json, bool valid) => Assert.Equal(valid, ShellIntentParser.TryParse(json, out _));
+
+    [Theory]
+    [InlineData("job.steer")]
+    [InlineData("job.followUp")]
+    public void JobTextIsAtMost2000Characters(string kind)
+    {
+        Assert.True(ShellIntentParser.TryParse($"{{\"kind\":\"{kind}\",\"id\":\"j1\",\"text\":\"{new string('a', 2000)}\"}}", out _));
+        Assert.False(ShellIntentParser.TryParse($"{{\"kind\":\"{kind}\",\"id\":\"j1\",\"text\":\"{new string('a', 2001)}\"}}", out _));
+        Assert.False(ShellIntentParser.TryParse($"{{\"kind\":\"{kind}\",\"id\":\"{new string('a', 161)}\",\"text\":\"hi\"}}", out _));
+    }
+
     [Fact]
     public void DrawingActionIdIsBounded()
     {
