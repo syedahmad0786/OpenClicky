@@ -54,7 +54,8 @@ it("GroupsConnectedAndAvailable", () => {
   expect(available.getByText("Composio")).toBeInTheDocument();
   expect(available.queryByText("Notion")).toBeNull();
   expect(connected.getByText("12 tools")).toBeInTheDocument();
-  expect(connected.getByText("Added 20 Oct 2026")).toBeInTheDocument();
+  // The page shows the local date; 2026-10-20T09:00Z is 19, 20 or 21 Oct depending on the machine's time zone.
+  expect(connected.getByText(`Added ${new Date("2026-10-20T09:00:00Z").getDate()} Oct 2026`)).toBeInTheDocument();
 });
 
 it("Empty sections say so", () => {
@@ -172,7 +173,7 @@ it("Vault row disconnects with its own confirm", () => {
   render(<SettingsPanel state={make((s) => { s.settings.integrations.connectors.push(conn({ key: "obsidian", name: "Obsidian", app: "obsidian", kind: "vault", host: "Notes", toolCount: 4 })); })} />);
   expect(within(section("Available")).queryByText("Obsidian")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Disconnect Obsidian" }));
-  expect(screen.getByRole("alert")).toHaveTextContent("Disconnect Obsidian? Agents will lose access to your notes.");
+  expect(screen.getByRole("alert")).toHaveTextContent("Disconnect Obsidian? Agents lose access to your notes from their next task.");
   fireEvent.click(screen.getByRole("button", { name: "Disconnect" }));
   expect(posts()).toEqual([sent("connector.remove", "obsidian")]);
 });
@@ -288,6 +289,32 @@ it("EditorValidation", () => {
   fireEvent.click(add);
   expect(posts()).toEqual([]);
   expect(JSON.stringify({ headers: "x".repeat(MAX_CONNECTOR_ADD_ARG) }).length).toBeGreaterThan(MAX_CONNECTOR_ADD_ARG);
+});
+
+it("A header or variable error stays visible with Advanced collapsed", () => {
+  host();
+  render(<SettingsPanel state={make()} />);
+  openEditor();
+  type("Name", "Mine");
+  type("Server URL", "https://mcp.example.com/mcp");
+  fireEvent.click(screen.getByRole("radio", { name: "None" }));
+  openAdvanced();
+  type("Extra headers", "Authorization: Bearer x");
+  openAdvanced(); // collapse
+  const add = screen.getByRole("button", { name: "Add connector" });
+  expect(add).toBeEnabled();
+  expect(screen.queryByRole("alert")).toBeNull();
+  fireEvent.click(screen.getByRole("radio", { name: "API key" }));
+  expect(screen.getByRole("alert")).toHaveTextContent("Header Authorization can't be set here.");
+  expect(add).toBeDisabled();
+
+  fireEvent.click(screen.getByRole("radio", { name: "Command on this PC" }));
+  type("Command", "npx");
+  openAdvanced();
+  type("Environment variables", "NO_EQUALS");
+  openAdvanced(); // collapse
+  expect(screen.getByRole("alert")).toHaveTextContent("Write each variable as NAME=value on its own line.");
+  expect(add).toBeDisabled();
 });
 
 it("Editor local validation mirrors the host", () => {

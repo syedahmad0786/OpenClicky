@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { integrationsSchema } from "./connectorsContract";
+import { catalogSchema, connectorSchema } from "./connectorsContract";
 
 // Mirror of apps/windows/OpenClicky.Core/Shell/ShellContract.cs. Keep both in step;
 // tests/fixtures/shell-state.v1.json is parsed by both test suites.
@@ -117,7 +117,11 @@ const settingsViewSchema = z.object({
   }).strict(),
   shortcuts: z.object({ talk: hotkey, text: hotkey, dictate: hotkey, handsFree: hotkey }).strict(),
   cursor: z.object({ colour: hex, hidden: z.boolean(), screenHighlight: z.boolean(), shakeToDetach: z.boolean() }).strict(),
-  integrations: integrationsSchema,
+  integrations: z.object({
+    chrome: z.enum(["notInstalled", "waiting", "connected"]),
+    connectors: z.array(connectorSchema).max(64),
+    catalog: z.array(catalogSchema).max(32),
+  }).strict(),
   agents: z.object({
     folder: text(4_096),
     folderIsDefault: z.boolean(),

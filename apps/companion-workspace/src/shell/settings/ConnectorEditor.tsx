@@ -192,6 +192,8 @@ export function ConnectorEditor({ connectors, toasts, preset, onClose }: { conne
       )}
       <div className="settings-field">
         <button type="button" className="settings-disclosure" aria-expanded={advanced} onClick={() => setAdvanced((on) => !on)}>Advanced</button>
+        {/* A collapsed Advanced section still blocks Add: say why (switching auth can make typed headers invalid). */}
+        {!advanced && (headerError ?? envError) ? <span role="alert" className="settings-field__error">{headerError ?? envError}</span> : null}
       </div>
       {advanced ? (
         <>

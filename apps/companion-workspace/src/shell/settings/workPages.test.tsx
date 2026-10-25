@@ -352,7 +352,7 @@ it("Remove confirm: focus goes to Keep, the row is an alert, and Keep returns fo
   render(<SettingsPanel state={make("integrations")} />);
   const remove = screen.getByRole("button", { name: "Remove Notion · Work" });
   fireEvent.click(remove);
-  expect(screen.getByRole("alert")).toHaveTextContent("Remove Notion · Work?");
+  expect(screen.getByRole("alert")).toHaveTextContent("Remove Notion · Work? Agents lose access to it from their next task.");
   expect(screen.getByRole("button", { name: "Keep" })).toHaveFocus();
   fireEvent.click(screen.getByRole("button", { name: "Keep" }));
   expect(screen.queryByRole("alert")).toBeNull();

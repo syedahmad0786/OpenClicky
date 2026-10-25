@@ -32,11 +32,5 @@ export const catalogSchema = z.object({
   multiAccount: z.boolean(),
 }).strict();
 
-export const integrationsSchema = z.object({
-  chrome: z.enum(["notInstalled", "waiting", "connected"]),
-  connectors: z.array(connectorSchema).max(64),
-  catalog: z.array(catalogSchema).max(32),
-}).strict();
-
 export type Connector = z.infer<typeof connectorSchema>;
 export type CatalogItem = z.infer<typeof catalogSchema>;

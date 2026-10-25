@@ -107,7 +107,7 @@ function ConnectorRow({ c, multiAccount, open, setOpen }: { c: Connector; multiA
           onSave={(label) => { setOpen(null); act("connector.label", JSON.stringify({ key: c.key, label })); }} />
       ) : null}
       {removing ? (
-        <ConfirmRow title={vault ? "Disconnect Obsidian? Agents will lose access to your notes." : `Remove ${title}? Agents will lose access to it.`}
+        <ConfirmRow title={vault ? "Disconnect Obsidian? Agents lose access to your notes from their next task." : `Remove ${title}? Agents lose access to it from their next task.`}
           confirmLabel={vault ? "Disconnect" : "Remove connector"}
           onKeep={() => { setOpen(null); trigger.current?.focus(); }}
           onConfirm={() => { setOpen(null); act("connector.remove", c.key); }} />
