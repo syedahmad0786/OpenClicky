@@ -25,7 +25,7 @@ public sealed class ChromeBridgeSetupScriptTests
             // Cold powershell.exe startup under a loaded full-suite run can take well over 10 s; wait generously, and never leave it running.
             using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(90));
             try { await process.WaitForExitAsync(limit.Token); }
-            catch (OperationCanceledException) { process.Kill(entireProcessTree: true); throw new TimeoutException("setup-local.ps1 -GenerationOnly did not finish in 90 s"); }
+            catch (OperationCanceledException) { process.Kill(entireProcessTree: true); process.WaitForExit(5000); throw new TimeoutException("setup-local.ps1 -GenerationOnly did not finish in 90 s"); }
             Assert.Equal(0, process.ExitCode);
 
             var output = Path.Combine(temp, "OpenClicky", "ChromeBridge");

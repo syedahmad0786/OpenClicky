@@ -30,7 +30,8 @@ public class AgentCaptureHidesOverlayTests
         Assert.Equal(2, seen.Count); // two observations, so two captures
         Assert.All(seen, s => Assert.False(s.BeforeIdle, "the companion was visible when the capture ran"));
         Assert.All(seen, s => Assert.False(s.AfterIdle, "ShowIdle put the companion back mid-capture"));
-        Assert.True(overlay.Visible); // released: the deferred show ran, and the reply bubble shows
+        Assert.Equal(2, overlay.Replays); // each capture's mid-capture ShowIdle was deferred and replayed at its release
+        Assert.True(overlay.Visible);
         Assert.False(overlay.Held);
     }
 
@@ -80,7 +81,9 @@ public class AgentCaptureHidesOverlayTests
     {
         private readonly OverlayHoldGate _gate;
         private volatile bool _visible;
-        public GatedOverlay() { _gate = new(() => _visible = true); }
+        private int _replays;
+        public GatedOverlay() { _gate = new(() => { Interlocked.Increment(ref _replays); _visible = true; }); }
+        public int Replays => _replays;
         public bool Visible => _visible;
         public bool Held => _gate.Held;
         private void Show() { if (_gate.Allow()) _visible = true; }

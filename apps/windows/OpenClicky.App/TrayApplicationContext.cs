@@ -1576,10 +1576,15 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             var bounds = ForegroundWindowInfo.GetBounds();
             if (bounds is not { Width: > 0, Height: > 0 } region)
                 throw new InvalidOperationException("Select a visible app before testing capture.");
-            _overlay.Hide();
-            await Task.Delay(IOverlayController.HideSettleMilliseconds);
             ScreenCaptureResult? captured;
-            try { captured = await _capture.CaptureRegionJpegAsync(region); }
+            try
+            {
+                using (((IOverlayController)_overlay).HideForCapture())
+                {
+                    await Task.Delay(IOverlayController.HideSettleMilliseconds);
+                    captured = await _capture.CaptureRegionJpegAsync(region);
+                }
+            }
             finally { if (_talk.State == CompanionVoiceState.Idle && _taskCts is null) _overlay.ShowIdle(); }
             var primary = captured ?? throw new InvalidOperationException("The current window could not be captured.");
             Log($"manual_capture_bytes={primary.JpegBytes.Length} magic={(primary.LooksLikeJpeg ? "FFD8" : "????")} backend={_capture.LastBackend}");

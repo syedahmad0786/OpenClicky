@@ -44,7 +44,8 @@ public interface IOverlayController : IDisposable
     IDisposable HideForCapture()
     {
         var hold = HoldHidden();
-        Hide();
+        try { Hide(); }
+        catch { hold.Dispose(); throw; }
         return hold;
     }
 

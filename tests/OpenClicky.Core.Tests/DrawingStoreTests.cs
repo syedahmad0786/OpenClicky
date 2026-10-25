@@ -215,12 +215,14 @@ public sealed class DrawingStoreTests : IDisposable
         Assert.Equal(DrawOpKind.Path, path.Kind);
         Assert.Equal(1 + 3 * (DrawCommandParser.MaxPathCommands - 1), path.Points.Count);
 
-        // Still bounded: one command more than the parser can produce is refused when the file is read back.
-        var json = File.ReadAllText(Path.Combine(_folder, "long-path.json"));
-        var tooLong = json.Replace("\"id\":\"long-path\"", "\"id\":\"too-long\"").Replace(new string('C', DrawCommandParser.MaxPathCommands - 1), new string('C', DrawCommandParser.MaxPathCommands));
-        Assert.NotEqual(json, tooLong);
-        File.WriteAllText(Path.Combine(_folder, "too-long.json"), tooLong);
-        Assert.Null(store.Load("too-long"));
+        // Still bounded, and only by the length and point limits: 65 commands with a matching 193 points is refused (nothing else is wrong with it).
+        var letters = "M" + new string('C', DrawCommandParser.MaxPathCommands);
+        var points = Enumerable.Range(0, 1 + 3 * DrawCommandParser.MaxPathCommands).Select(i => new Pt(1 + i % 90, 1 + i % 40)).ToArray();
+        Assert.Equal(DrawCommandParser.MaxPathPoints + 1, points.Length);
+        DrawOp Hand(string d, Pt[] p) => new(DrawOpKind.Path, null, p, new Box(1, 1, 90, 40), null, null, 1, new Dictionary<string, string> { ["d"] = d }, 0);
+        store.Save(Drawing("hand-legal", T0, new SavedLine("Legal.", 1, [Hand(letters[..^1], points[..^3])]))); // same construction, 64 commands: kept
+        var tooLong = Hand(letters, points);
+        Assert.Throws<ArgumentException>(() => store.Save(Drawing("too-long", T0, new SavedLine("Too long.", 1, [tooLong]))));
     }
 
     [Fact]

@@ -1065,7 +1065,11 @@ internal static partial class Program
             for (var i = 0; i < 16; i++)
             {
                 Cursor.Position = new Point(at.X + (i % 2 == 0 ? 40 : -40), at.Y);
-                Pump(25);
+                // Hold each position until the frame loop has sampled it twice (not a fixed delay): the single-shake negative
+                // checks below must have been seen by the detector to mean anything. Bounded, so a stopped loop cannot hang the smoke.
+                var seen = overlay.CursorSamples + 2;
+                for (var limit = Environment.TickCount64 + 300; overlay.CursorSamples < seen && Environment.TickCount64 < limit;)
+                { Application.DoEvents(); Thread.Sleep(2); }
             }
         }
         void Shake() => ShakeAt(home);

@@ -33,6 +33,11 @@ public sealed class OverlayHoldGate(Action showDeferred)
         }
     }
 
+    /// <summary>
+    /// Forgets a refused show: a Hide that came later during the hold is the newest request, so the release must not undo it.
+    /// </summary>
+    public void CancelDeferred() { lock (_lock) _deferred = false; }
+
     private void Close()
     {
         bool run;

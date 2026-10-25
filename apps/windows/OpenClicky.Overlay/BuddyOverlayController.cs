@@ -183,6 +183,11 @@ public sealed class BuddyOverlayController : IOverlayController
         _drawing.Wake = WakeFrames;
     }
 
+    private long _cursorSamples;
+
+    /// <summary>How many times the frame loop has sampled the cursor for shake detection. Smoke / diagnostics only.</summary>
+    public long CursorSamples => Interlocked.Read(ref _cursorSamples);
+
     /// <summary>The cursor window. Smoke / diagnostics only.</summary>
     public IntPtr WindowHandle => _cursorWindow.Handle;
 
@@ -454,6 +459,7 @@ public sealed class BuddyOverlayController : IOverlayController
             if (_disposed) return;
             _selectionCancellation?.Cancel();
             _hidden = true;
+            _holds.CancelDeferred(); // a show refused during a capture hold is older than this Hide: do not replay it
             _timer.Stop();
             _cursorWindow.HideWindow();
             _drawingWindow.HideWindow(); // marks and the click ring
@@ -812,6 +818,7 @@ public sealed class BuddyOverlayController : IOverlayController
     /// </summary>
     private void StepDetach(Point cursor, double now, Pt tip)
     {
+        Interlocked.Increment(ref _cursorSamples);
         _detach.Presence = _style.Presence;
         var ms = (long)(now * 1000);
         var eligible = _style.ShakeToDetach && _dock.Phase == DockPhase.None && (_mode is Mode.Idle or Mode.Listening)
