@@ -317,7 +317,7 @@ internal sealed partial class TrayApplicationContext
 
     /// <summary>Records a finished run. <paramref name="text"/> is the reply without its result block; <paramref name="result"/> is stored
     /// for the job card (a run without one clears the last run's). The routine, user step and lessons it names are only stored here.
-    /// A Talk job takes its result's title. <paramref name="replyDelivered"/>: the run's end was already given to Talk as its reply.</summary>
+    /// A Talk job takes its result's title. <paramref name="replyDelivered"/>: the run's reply was spoken aloud (nothing does that yet, so it stays false).</summary>
     private void FinishJob(JobRun work, string status, string text, JobResult? result = null, bool replyDelivered = false)
     {
         var summary = status == AgentProgressStates.Completed ? result?.Summary ?? JobPrompt.FirstSentence(text) : text;

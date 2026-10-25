@@ -28,7 +28,8 @@ public sealed record QuietState(bool Quiet, string? Reason)
     public static bool MicHeldOpen(long startFileTime, long stopFileTime, DateTimeOffset now)
     {
         if (startFileTime <= 0 || startFileTime > DateTime.MaxValue.ToFileTimeUtc() || startFileTime <= stopFileTime) return false;
-        return now - DateTimeOffset.FromFileTime(startFileTime) <= MicHolderMaxAge;
+        try { return (now - new DateTimeOffset(DateTime.FromFileTimeUtc(startFileTime))).Duration() <= MicHolderMaxAge; } // a start far in the future is as corrupt as one long past
+        catch (ArgumentOutOfRangeException) { return false; } // a corrupt value is not a call
     }
 }
 
@@ -45,7 +46,7 @@ public static class JobAnnouncer
 
     /// <param name="title">Untrusted (model or user text): cut to <see cref="MaxTitle"/>. Never log the announcement.</param>
     /// <param name="talkBusy">A talk turn or a spoken reply is in progress: nothing else is spoken over it.</param>
-    /// <param name="replyDelivered">The job was started by Talk and its end (Done or Failed) was already delivered as the reply: only the card is added.</param>
+    /// <param name="replyDelivered">The job's reply (Done or Failed) was actually spoken aloud: only the card is added. Nothing speaks a job's reply yet, so callers pass false.</param>
     /// <param name="scheduled">A routine started this run: its start is not announced (its end is).</param>
     public static Announcement For(JobEvent e, string title, string jobId, bool speakSetting, bool bubbleSetting, QuietState quiet, bool talkBusy,
         bool replyDelivered = false, bool scheduled = false)

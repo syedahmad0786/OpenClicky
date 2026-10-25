@@ -45,5 +45,6 @@ public sealed class QuietStateTests
         Assert.False(QuietState.MicHeldOpen(Now.AddMinutes(-5).ToFileTime(), Now.AddMinutes(-1).ToFileTime(), Now));
         Assert.False(QuietState.MicHeldOpen(0, 0, Now));
         Assert.False(QuietState.MicHeldOpen(long.MaxValue, 0, Now));
+        Assert.False(QuietState.MicHeldOpen(DateTime.MaxValue.ToFileTimeUtc(), 0, Now)); // the edge of the range, however it converts
     }
 }
