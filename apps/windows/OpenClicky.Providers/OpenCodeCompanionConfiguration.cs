@@ -1,4 +1,5 @@
 using System.Text.Json;
+using OpenClicky.Core.Work;
 
 namespace OpenClicky.Providers;
 
@@ -62,6 +63,8 @@ public sealed class OpenCodeCompanionConfiguration
                 "Do not automate authentication, secrets, or security settings. Verify each desktop action using a fresh observation; verify memory answers against returned source records. " +
                 "An input receipt is not proof that the requested result happened. Explain uncertainty and stop after a failed or declined action. " +
                 "Respect pause and steering returned with observations. Use concise progress and a final factual result. " +
+                "When the run asks for a fenced " + JobResult.FenceTag + " block, end with exactly one, after the readable result; " +
+                "never put secrets in it. " +
                 "Never claim the task is completed unless its destination state confirms it." } }
     });
 

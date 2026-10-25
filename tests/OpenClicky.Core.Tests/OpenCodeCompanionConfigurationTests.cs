@@ -21,6 +21,16 @@ public class OpenCodeCompanionConfigurationTests
         Assert.DoesNotContain("ephemeral", profile.ToString());
     }
 
+    [Fact]
+    public void PromptAsksForTheResultBlockOnlyWhenTheRunDoes()
+    {
+        var profile = new OpenCodeCompanionConfiguration(new("http://127.0.0.1:31234/"), "a", new("http://127.0.0.1:31235/mcp"), "b", "gpt-6-luna");
+        using var doc = JsonDocument.Parse(profile.ToConfigJson());
+        var prompt = doc.RootElement.GetProperty("agent").GetProperty("companion").GetProperty("prompt").GetString()!;
+        Assert.Contains(OpenClicky.Core.Work.JobResult.FenceTag, prompt);
+        Assert.Contains("exactly one", prompt);
+    }
+
     [Theory]
     [InlineData("https://example.com/")]
     [InlineData("http://127.0.0.1:4321/?secret=x")]

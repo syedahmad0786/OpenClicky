@@ -44,13 +44,13 @@ public sealed record ShellInputs(
 }
 
 /// <summary>
-/// Maps app data to the shell contract and enforces its caps (jobs 80, chat rows 200, cards 6, bullets 4,
+/// Maps app data to the shell contract and enforces its caps (jobs 80, chat rows 200, cards 6, bullets 4, next steps 3,
 /// files 6, card actions 3, document 200,000 chars). Job states: running→working, queued→queued, needs-you→needs you,
 /// completed→done, failed→failed, stopped→stopped, ready→queued when a routine is due, otherwise new.
 /// </summary>
 public static class ShellStateBuilder
 {
-    public const int MaxJobs = 80, MaxChatRows = 200, MaxCards = 6, MaxBullets = 4, MaxFiles = 6, MaxCardActions = 3, MaxDocument = 200_000;
+    public const int MaxJobs = 80, MaxChatRows = 200, MaxCards = 6, MaxBullets = 4, MaxNext = 3, MaxFiles = 6, MaxCardActions = 3, MaxDocument = 200_000;
     /// <summary>Per chat row in state (longer text ends in "…"), and the whole serialized state (oldest chat rows dropped first).</summary>
     public const int MaxRowText = 8_000, MaxStateChars = 1_000_000;
     /// <summary>Longest file path the page schema accepts; longer paths are dropped, never cut (the open allow-list needs them exact).</summary>
@@ -105,15 +105,18 @@ public static class ShellStateBuilder
                 WorkJobStates.Ready when input.HasDueRoutine => JobState.Queued,
                 _ => JobState.New,
             };
+            // The last run's stored result; a run in progress shows its own live steps instead of the last run's points.
+            var result = state == JobState.Working ? null : JobResult.FromJson(job.ResultJson);
             return new JobCard(
                 Cut(job.Id, 160),
                 Cut(string.IsNullOrWhiteSpace(job.Title) ? "Job" : job.Title.Trim(), 160),
                 state,
                 Colour(job),
                 string.IsNullOrWhiteSpace(job.Summary) ? null : Cut(job.Summary, 2_000),
-                null,
-                input.Bullets.Take(MaxBullets).Select(b => Cut(b, 400)).ToList(),
-                UsableFiles(input.Files).Select(path => new JobFile(Cut(Path.GetFileName(path), 260), path, FileKind(path))).ToList(),
+                result?.Stat is { } stat ? new JobStat(Cut(stat.Value, 40), Cut(stat.Label, 80)) : null,
+                (result is { Points.Count: > 0 } ? result.Points : input.Bullets).Take(MaxBullets).Select(b => Cut(b, 400)).ToList(),
+                (result?.Next ?? []).Take(MaxNext).Select(n => Cut(n, 160)).ToList(),
+                UsableFiles(JobFiles(input)).Select(path => new JobFile(Cut(Path.GetFileName(path), 260), path, FileKind(path))).ToList(),
                 state == JobState.Working && !string.IsNullOrWhiteSpace(input.LiveLine) ? Cut(input.LiveLine, 400) : null,
                 [],
                 Iso(job.LastRunAt ?? job.CreatedAt));
@@ -135,6 +138,10 @@ public static class ShellStateBuilder
         return state;
     }
 
+    /// <summary>The files the job's stored result named (checked inside the job folder when it was parsed), else today's output listing.</summary>
+    private static IReadOnlyList<string> JobFiles(ShellJobInput input) =>
+        JobResult.FromJson(input.Job.ResultJson) is { Files.Count: > 0 } result ? result.Files : input.Files;
+
     private static IEnumerable<string> UsableFiles(IReadOnlyList<string> files) =>
         files.Where(path => path.Length is > 0 and <= MaxPath).Take(MaxFiles);
 
@@ -150,7 +157,7 @@ public static class ShellStateBuilder
     {
         if (inputs.FeaturedJobId is { } chosen && cards.FirstOrDefault(c => c.Id == chosen) is { } picked) return picked;
         return inputs.Jobs
-            .Where(j => !string.IsNullOrEmpty(j.Job.Id) && j.Job.LastRunAt is not null && UsableFiles(j.Files).Any() && !inputs.DismissedJobIds.Contains(j.Job.Id))
+            .Where(j => !string.IsNullOrEmpty(j.Job.Id) && j.Job.LastRunAt is not null && UsableFiles(JobFiles(j)).Any() && !inputs.DismissedJobIds.Contains(j.Job.Id))
             .OrderByDescending(j => j.Job.LastRunAt)
             .Select(j => cards.First(c => c.Id == Cut(j.Job.Id, 160)))
             .FirstOrDefault();

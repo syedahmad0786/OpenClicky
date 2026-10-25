@@ -26,6 +26,8 @@ describe("shell contract", () => {
     const job = fixture.jobs[0];
     expect(shellStateSchema.safeParse({ ...fixture, jobs: Array(81).fill(job) }).success).toBe(false);
     expect(shellStateSchema.safeParse({ ...fixture, jobs: [{ ...job, bullets: ["a", "b", "c", "d", "e"] }] }).success).toBe(false);
+    expect(shellStateSchema.safeParse({ ...fixture, jobs: [{ ...job, next: ["a", "b", "c", "d"] }] }).success).toBe(false);
+    expect(shellStateSchema.safeParse({ ...fixture, jobs: [{ ...job, next: ["x".repeat(161)] }] }).success).toBe(false);
     const file = fixture.jobs[0].files[0];
     expect(shellStateSchema.safeParse({ ...fixture, jobs: [{ ...job, files: Array(7).fill(file) }] }).success).toBe(false);
     const row = fixture.chat.rows[0];

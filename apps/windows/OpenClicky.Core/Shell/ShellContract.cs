@@ -45,6 +45,7 @@ public sealed record JobCard(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Summary,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] JobStat? Stat,
     IReadOnlyList<string> Bullets,
+    IReadOnlyList<string> Next,
     IReadOnlyList<JobFile> Files,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? LiveLine,
     IReadOnlyList<PlanStep> Plan,

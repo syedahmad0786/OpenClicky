@@ -117,6 +117,7 @@ it("the featured job card shows its parts, caps bullets and posts its intents", 
   expect(screen.getByText("Summarise the quarterly report")).toBeInTheDocument();
   expect(screen.getByText("3 of 5")).toBeInTheDocument();
   expect(screen.getAllByRole("listitem")).toHaveLength(4);
+  expect(screen.getByText("Email the summary to the team")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Open q3-report.pdf" }));
   expect(host.posts("file.open")).toEqual([{ kind: "file.open", path: "C:\\Users\\demo\\Documents\\q3-report.pdf" }]);
   fireEvent.click(screen.getByRole("button", { name: "View result" }));

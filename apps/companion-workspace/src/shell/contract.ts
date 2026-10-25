@@ -39,6 +39,8 @@ const jobCardSchema = z.object({
   summary: text(2_000).optional(),
   stat: z.object({ value: text(40), label: text(80) }).strict().optional(),
   bullets: z.array(text(400)).max(4),
+  /** Suggested next steps from the job's last result, shown as plain lines. */
+  next: z.array(text(160)).max(3),
   files: z.array(z.object({
     name: text(260),
     path: text(4_096),

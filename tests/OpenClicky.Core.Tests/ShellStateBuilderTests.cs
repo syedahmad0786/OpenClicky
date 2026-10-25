@@ -160,6 +160,39 @@ public class ShellStateBuilderTests
     }
 
     [Fact]
+    public void CardShowsTheStoredResult()
+    {
+        var folder = Path.Combine(Path.GetTempPath(), "openclicky-card-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(folder, "output"));
+        try
+        {
+            File.WriteAllText(Path.Combine(folder, "output", "kept.md"), "x");
+            File.WriteAllText(Path.Combine(folder, "output", "gone.md"), "x");
+            var result = Work.JobResult.Parse("Done.\n```openclicky-result\n" + """
+                {"title":"Model title","points":["Found it"],"stat":{"value":"3","label":"files"},"next":["Share it","Print it"],
+                 "files":["output/kept.md","output/gone.md"]}
+                """ + "\n```", folder);
+            var job = Job("r", "completed", Now) with { FolderPath = folder, ResultJson = result.ToJson() };
+            var state = ShellStateBuilder.Build(Inputs([new ShellJobInput(job, [@"C:\o\listing.md"], ["Live step"])]));
+            var card = state.Jobs.Single();
+            Assert.Equal("Job r", card.Title);
+            Assert.Equal(["Found it"], card.Bullets);
+            Assert.Equal(new JobStat("3", "files"), card.Stat);
+            Assert.Equal(["Share it", "Print it"], card.Next);
+            Assert.Equal([Path.Combine(folder, "output", "kept.md"), Path.Combine(folder, "output", "gone.md")], card.Files.Select(f => f.Path));
+            Assert.Equal("r", state.Featured!.Id);
+
+            var noFiles = job with { ResultJson = Work.JobResult.Parse("Done.", folder).ToJson() };
+            Assert.Equal([@"C:\o\listing.md"], ShellStateBuilder.Build(Inputs([new ShellJobInput(noFiles, [@"C:\o\listing.md"], [])])).Jobs.Single().Files.Select(f => f.Path));
+
+            var running = ShellStateBuilder.Build(Inputs([new ShellJobInput(job with { Status = "running" }, [], ["Live step"])])).Jobs.Single();
+            Assert.Equal(["Live step"], running.Bullets); // a new run shows its own steps, not the last run's points
+            Assert.Empty(ShellStateBuilder.Build(Inputs([new ShellJobInput(Job("plain", "completed", Now), [], [])])).Jobs.Single().Next);
+        }
+        finally { Directory.Delete(folder, recursive: true); }
+    }
+
+    [Fact]
     public void DisplayNameAccentAndStatus()
     {
         var settings = new AppSettings { ChatGptAccountEmail = "ahmad.b@example.com", AccentColor = "not a colour" };

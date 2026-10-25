@@ -119,6 +119,7 @@ public class WorkStoreTests
         Assert.Contains("v1.md", prompt);
         Assert.Contains("schedule", prompt);
         Assert.Contains("note.md", prompt);
+        Assert.Contains(Work.JobResult.Instructions, prompt);
         Assert.Equal("Done, saved brief.md.", JobPrompt.FirstSentence("Done, saved brief.md. It has three sections."));
         Assert.Equal("No ending", JobPrompt.FirstSentence("No ending"));
     }

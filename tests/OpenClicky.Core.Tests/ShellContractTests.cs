@@ -21,6 +21,7 @@ public class ShellContractTests
         Assert.NotNull(state);
         Assert.Equal(12, state!.Cards.Select(c => c.Kind).Distinct().Count());
         Assert.Equal(7, state.Jobs.Select(j => j.State).Distinct().Count());
+        Assert.Equal(["Email the summary to the team"], state.Featured!.Next);
 
         var again = ShellContract.Serialize(state);
         Assert.True(JsonNode.DeepEquals(JsonNode.Parse(fixture), JsonNode.Parse(again)), again);

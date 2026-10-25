@@ -611,7 +611,8 @@ public static class JobPrompt
             : "Files already in the job's output folder: " + string.Join(", ", outputs.Take(50)) + ".");
         text.AppendLine(@"Your working note is note.md in your job folder: keep it short and current with what is done and what is left. The note from the previous run, if there was one, is .openclicky\previous-note.md.");
         text.AppendLine("Save each finished deliverable with write_output using a relative file name. Only save what was asked for.");
-        text.Append("Finish with a short factual result. Its first sentence is shown to the user.");
+        text.AppendLine("Finish with a short factual result. Its first sentence is shown to the user unless you give a summary.");
+        text.Append(JobResult.Instructions);
         return text.ToString();
     }
 

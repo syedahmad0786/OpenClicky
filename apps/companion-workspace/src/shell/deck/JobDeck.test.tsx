@@ -11,7 +11,7 @@ function mockHost() {
   return { posts: (kind: string) => postMessage.mock.calls.map((c) => c[0]).filter((m) => m.kind === kind) };
 }
 const job = (n: number, patch: Partial<JobCard> = {}): JobCard => ({
-  id: `job-${n}`, title: `Job ${n}`, state: "done", colour: "blue", bullets: [], files: [], plan: [],
+  id: `job-${n}`, title: `Job ${n}`, state: "done", colour: "blue", bullets: [], next: [], files: [], plan: [],
   updatedAt: new Date(Date.UTC(2026, 0, 1, 0, n)).toISOString(), ...patch,
 });
 /** Newest first, like the host: job-count down to job-1. */

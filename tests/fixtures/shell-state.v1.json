@@ -19,7 +19,7 @@
     "colour": "blue",
     "summary": "Reading the PDF and pulling out the headline numbers.",
     "stat": { "value": "3 of 5", "label": "steps done" },
-    "bullets": ["Opened the report", "Found the revenue table"],
+    "bullets": ["Opened the report", "Found the revenue table"], "next": ["Email the summary to the team"],
     "files": [{ "name": "q3-report.pdf", "path": "C:\\Users\\demo\\Documents\\q3-report.pdf", "kind": "pdf" }],
     "liveLine": "Extracting table 2",
     "plan": [
@@ -31,14 +31,14 @@
   "jobs": [
     {
       "id": "job-queued", "title": "Tidy the downloads folder", "state": "queued", "colour": "yellow",
-      "bullets": [], "files": [{ "name": "Downloads", "path": "C:\\Users\\demo\\Downloads", "kind": "folder" }],
+      "bullets": [], "next": [], "files": [{ "name": "Downloads", "path": "C:\\Users\\demo\\Downloads", "kind": "folder" }],
       "plan": [], "updatedAt": "2026-10-24T09:00:00Z"
     },
     {
       "id": "job-working", "title": "Summarise the quarterly report", "state": "working", "colour": "blue",
       "summary": "Reading the PDF and pulling out the headline numbers.",
       "stat": { "value": "3 of 5", "label": "steps done" },
-      "bullets": ["Opened the report", "Found the revenue table"],
+      "bullets": ["Opened the report", "Found the revenue table"], "next": ["Email the summary to the team"],
       "files": [{ "name": "q3-report.pdf", "path": "C:\\Users\\demo\\Documents\\q3-report.pdf", "kind": "pdf" }],
       "liveLine": "Extracting table 2",
       "plan": [{ "text": "Open the report", "done": true }, { "text": "Write the summary", "done": false }],
@@ -47,7 +47,7 @@
     {
       "id": "job-needs-you", "title": "Book the flight", "state": "needsYou", "colour": "red",
       "summary": "Two fares match. Pick one to continue.",
-      "bullets": ["Fare A is cheaper", "Fare B is refundable", "Both leave at 8am", "Checked three sites"],
+      "bullets": ["Fare A is cheaper", "Fare B is refundable", "Both leave at 8am", "Checked three sites"], "next": [],
       "files": [
         { "name": "fares.xlsx", "path": "C:\\Users\\demo\\Documents\\fares.xlsx", "kind": "sheet" },
         { "name": "itinerary.docx", "path": "C:\\Users\\demo\\Documents\\itinerary.docx", "kind": "doc" }
@@ -57,7 +57,7 @@
     {
       "id": "job-done", "title": "Resize the photos", "state": "done", "colour": "green",
       "summary": "All twelve photos are resized.",
-      "bullets": ["12 photos resized"],
+      "bullets": ["12 photos resized"], "next": [],
       "files": [
         { "name": "cover.png", "path": "C:\\Users\\demo\\Pictures\\cover.png", "kind": "image" },
         { "name": "intro.mp3", "path": "C:\\Users\\demo\\Music\\intro.mp3", "kind": "audio" },
@@ -68,17 +68,17 @@
     {
       "id": "job-failed", "title": "Upload the backup", "state": "failed", "colour": "red",
       "summary": "The drive was offline.",
-      "bullets": [],
+      "bullets": [], "next": [],
       "files": [{ "name": "help", "path": "https://example.com/help", "kind": "link" }, { "name": "notes.bin", "path": "C:\\Users\\demo\\notes.bin", "kind": "other" }],
       "plan": [], "updatedAt": "2026-10-24T08:40:00Z"
     },
     {
       "id": "job-stopped", "title": "Draft the newsletter", "state": "stopped", "colour": "yellow",
-      "bullets": [], "files": [], "plan": [], "updatedAt": "2026-10-24T08:30:00Z"
+      "bullets": [], "next": [], "files": [], "plan": [], "updatedAt": "2026-10-24T08:30:00Z"
     },
     {
       "id": "job-new", "title": "Plan the week", "state": "new", "colour": "green",
-      "bullets": [], "files": [], "plan": [], "updatedAt": "2026-10-24T09:45:00Z"
+      "bullets": [], "next": [], "files": [], "plan": [], "updatedAt": "2026-10-24T09:45:00Z"
     }
   ],
   "chat": {

@@ -6,6 +6,7 @@ using OpenClicky.Core.Agent;
 using OpenClicky.Core.CompanionCursor;
 using OpenClicky.Core.Dictation;
 using OpenClicky.Core.Input;
+using OpenClicky.Core.Work;
 using OpenClicky.Input;
 using OpenClicky.Overlay;
 using OpenClicky.Providers;
@@ -785,12 +786,15 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         catch (Exception ex) when (ex is not OutOfMemoryException) { Log("routine_save_error=" + ex.GetType().Name); }
     }
 
-    private void FinishJob(JobRun work, string status, string text)
+    /// <summary>Records a finished run. <paramref name="text"/> is the reply without its result block; <paramref name="result"/> is stored
+    /// for the job card (a run without one clears the last run's). The routine, user step and lessons it names are only stored here.</summary>
+    private void FinishJob(JobRun work, string status, string text, JobResult? result = null)
     {
-        var summary = status == AgentProgressStates.Completed ? JobPrompt.FirstSentence(text) : text;
+        var summary = status == AgentProgressStates.Completed ? result?.Summary ?? JobPrompt.FirstSentence(text) : text;
         try
         {
             _work.RecordJobRun(work.Job.Id, status, summary, DateTimeOffset.UtcNow);
+            _work.SetJobResult(work.Job.Id, result?.ToJson() ?? "");
             _work.AppendRunLog(work.Job, work.Ask, status, text);
             if (work.RoutineId is { } routineId && _work.Routines(work.Job.Id).FirstOrDefault(r => r.Id == routineId) is { } routine)
                 _work.SaveRoutine(RoutineSchedule.AfterRun(routine, status == AgentProgressStates.Completed, summary[..Math.Min(summary.Length, 200)],
@@ -901,13 +905,16 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
                         connectors: connectors).ConfigureAwait(false);
                 }
                 finally { foreach (var connector in connectors) connector.Dispose(); }
-                var answer = result.Messages.LastOrDefault(m => m.Role == "assistant" && !string.IsNullOrWhiteSpace(m.Text))?.Text;
-                if (!string.IsNullOrWhiteSpace(answer))
+                var answer = result.Messages.LastOrDefault(m => m.Role == "assistant" && !string.IsNullOrWhiteSpace(m.Text))?.Text ?? "";
+                // The reply is untrusted: the result block is parsed (files checked inside the job folder) and never shown, spoken or logged.
+                var parsed = JobResult.Parse(answer, work is null ? "" : _work.JobFolder(work.Job));
+                var shown = string.IsNullOrWhiteSpace(parsed.Reply) ? parsed.Summary : parsed.Reply;
+                if (!string.IsNullOrWhiteSpace(shown))
                 {
-                    _talk.ReportTaskResult(work?.Display ?? task, answer);
+                    _talk.ReportTaskResult(work?.Display ?? task, shown);
                     taskResultCommitted = true;
                 }
-                if (work is not null) { FinishJob(work, AgentProgressStates.Completed, answer ?? "Finished without a written reply."); jobRecorded = true; }
+                if (work is not null) { FinishJob(work, AgentProgressStates.Completed, string.IsNullOrWhiteSpace(shown) ? "Finished without a written reply." : shown, parsed); jobRecorded = true; }
                 RecordProgress(id, new(0, "completed", "OpenWork returned its result. Session: " + result.SessionId));
                 return;
             }
