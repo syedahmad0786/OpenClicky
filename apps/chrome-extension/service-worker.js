@@ -6,6 +6,7 @@ import { TabManager } from "./tabs.mjs";
 const HOST = "com.openclicky.chrome_bridge";
 const ALARM = "openclicky-connect";
 const STORE_KEY = "openclickyTabs";
+const REFS_KEY = "openclickyRefs";
 
 const tabs = new TabManager(
   { tabs: chrome.tabs, tabGroups: chrome.tabGroups, windows: chrome.windows },
@@ -27,6 +28,10 @@ const bridge = createBridge({
   },
   tabs,
   downloads: chrome.downloads,
+  refStore: {
+    load: async () => (await chrome.storage.session.get(REFS_KEY))[REFS_KEY],
+    save: (counters) => chrome.storage.session.set({ [REFS_KEY]: counters }),
+  },
 });
 
 let port = null;
@@ -45,12 +50,17 @@ function refresh() {
   chrome.action.setIcon({ path: on ? "icons/on-32.png" : "icons/off-32.png" }).catch(() => {});
 }
 
-async function profileId() {
-  const { profileId: saved } = await chrome.storage.local.get("profileId");
-  if (saved) return saved;
-  const id = crypto.randomUUID();
-  await chrome.storage.local.set({ profileId: id });
-  return id;
+// Memoised: install and the top-level wake-up both connect at once, and must not mint two ids.
+let profileIdPromise = null;
+function profileId() {
+  profileIdPromise ??= (async () => {
+    const { profileId: saved } = await chrome.storage.local.get("profileId");
+    if (saved) return saved;
+    const id = crypto.randomUUID();
+    await chrome.storage.local.set({ profileId: id });
+    return id;
+  })().catch((e) => { profileIdPromise = null; throw e; });
+  return profileIdPromise;
 }
 
 function brand() {
@@ -69,7 +79,14 @@ async function onMessage(message) {
   refresh();
 }
 
-async function connect() {
+// One attempt at a time: callers during an attempt share it.
+let connecting = null;
+function connect() {
+  connecting ??= open().catch(() => {}).finally(() => { connecting = null; });
+  return connecting;
+}
+
+async function open() {
   if (port) return;
   const id = await profileId();
   if (port) return;

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { createBridge, UNTRUSTED } from "../../../chrome-extension/core.mjs";
@@ -39,7 +39,7 @@ function fakeDebuggee(responders = {}) {
   };
 }
 
-function setup({ responders, limits, downloads } = {}) {
+function setup({ responders, limits, downloads, refStore } = {}) {
   const f = fakeChrome();
   f.addWindow(1, { focused: true });
   f.add(11, 1, { title: "News", url: "https://news.test/" });
@@ -47,7 +47,7 @@ function setup({ responders, limits, downloads } = {}) {
   let saved;
   const tabs = new TabManager(f.api, { load: async () => saved, save: async (s) => { saved = s; } });
   const debuggee = fakeDebuggee(responders);
-  const bridge = createBridge({ debuggee, tabs, downloads, limits });
+  const bridge = createBridge({ debuggee, tabs, downloads, limits, refStore });
   const run = (op, args = {}, extra = {}) => bridge.execute({
     type: "command", id: "c1", op, task: "t1", owner: "job-1", groupTitle: "Weekly Research", color: "blue", deny: ["bank"], say: "Reading", args, ...extra,
   });
@@ -141,6 +141,39 @@ describe("createBridge", () => {
     const { run } = setup({ limits: { callMs: 50 }, responders: { "Page.createIsolatedWorld": () => new Promise(() => {}) } });
     expect(await run("javascript", { tabId: 11, code: "return 1" })).toEqual({ ok: false, error: "The page took too long to answer." });
     expect((await run("tabs")).ok).toBe(true); // the queue moves on
+  });
+
+  it("refs never restart when a tab is re-attached or the worker restarts", async () => {
+    let stored;
+    const refStore = { load: async () => stored, save: async (c) => { stored = JSON.parse(JSON.stringify(c)); } };
+    const { run, bridge, debuggee } = setup({ refStore });
+    expect((await run("snapshot", { tabId: 11 })).result.text).toContain('button "Save" [e1]');
+    expect(bridge.onDetach(11, "target_closed")).toEqual([]);
+    const again = await run("snapshot", { tabId: 11 });
+    expect(debuggee.of("attach")).toHaveLength(2);
+    expect(again.result.text).toContain('button "Save" [e2]');
+    expect(again.result.text).not.toMatch(/\[e1\]/);
+    expect(await run("click", { tabId: 11, ref: "e1" })).toEqual({ ok: false, error: "That ref is from an earlier page. Take a new snapshot." });
+    expect(stored).toEqual({ 11: 2 });
+
+    const restarted = setup({ refStore }); // a new worker: same stored counters
+    expect((await restarted.run("snapshot", { tabId: 11 })).result.text).toContain('button "Save" [e3]');
+    expect(stored).toEqual({ 11: 3 });
+  });
+
+  it("wait_for gets its wait plus 10 s", async () => {
+    vi.useFakeTimers();
+    try {
+      const { run } = setup({ responders: { "Runtime.evaluate": () => new Promise(() => {}) } }); // the page never answers
+      let done = null;
+      run("wait_for", { tabId: 11, text: "Ready", timeout: 20 }).then((r) => { done = r; });
+      await vi.advanceTimersByTimeAsync(29000);
+      expect(done).toBe(null); // past the 20 s single-call limit, still waiting
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(done).toEqual({ ok: false, error: "The page took too long to answer." });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("download saves under the job folder and refuses flagged files", async () => {
