@@ -56,7 +56,7 @@ internal sealed partial class TrayApplicationContext
     private string? DictationBlocker(out DictationTarget? target)
     {
         target = null;
-        if (_talk.State != CompanionVoiceState.Idle || _talk.ConversationActive || _taskCts is not null) return DictationBusy;
+        if (_talk.State != CompanionVoiceState.Idle || _talk.ConversationActive || TaskOpen) return DictationBusy;
         if (DictationWhisperPlan() is null) return DictationNeedsWhisper;
         DictationTarget.TryCapture(out var captured, out var failure, out _, AgentDenyList.ParseExtraFragments(_settings.AgentDenyListExtra));
         var gate = DictationGate.Check(failure);

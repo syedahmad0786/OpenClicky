@@ -115,7 +115,7 @@ internal sealed partial class TrayApplicationContext
     /// <summary>The classic window pauses a running task when it comes forward (input must not reach the wrong window); say so, since the notch gave no hint.</summary>
     private void ShowClassicFromNotch()
     {
-        var wasRunning = _taskCts is not null && !_taskControl.IsPaused;
+        var wasRunning = TaskOpen && !OpenControl.IsPaused;
         ShowClassic();
         if (wasRunning) _shell?.AddToast("Your task is paused while the classic window is open. Resume it from Tasks.");
     }

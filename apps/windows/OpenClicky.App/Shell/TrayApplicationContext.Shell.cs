@@ -30,9 +30,8 @@ internal sealed partial class TrayApplicationContext : IShellHost
     private string? _announcedRelease;
     private bool _installingUpdate;
     private readonly bool _background;
-    /// <summary>Caches so a push does not hit SQLite or the disk: history refreshes on TurnCommitted, outputs when a job finishes or is opened.</summary>
+    /// <summary>Cache so a push does not hit SQLite: history refreshes on TurnCommitted.</summary>
     private IReadOnlyList<ConversationTurn>? _shellTurns;
-    private readonly Dictionary<string, IReadOnlyList<string>> _jobOutputs = new(StringComparer.Ordinal);
 
     private ContextMenuStrip BuildTrayMenu()
     {
@@ -154,17 +153,11 @@ internal sealed partial class TrayApplicationContext : IShellHost
         var jobs = ShellSource("jobs", () => allJobs.OrderByDescending(j => j.LastRunAt ?? j.CreatedAt).Take(ShellStateBuilder.MaxJobs).Select(job =>
         {
             // A working job shows its own step phrases and checklist; before its first tool call, the last run events.
-            var live = _activeJob is { } active && active.Job.Id == job.Id ? active.Live : JobLiveState.Empty;
+            var live = _jobRuns.TryGetValue(job.Id, out var run) ? run.Live : JobLiveState.Empty;
             var steps = live.Steps.Count > 0 ? live.Steps.TakeLast(ShellStateBuilder.MaxBullets).ToList()
                 : _taskRuns.LastOrDefault(r => r.JobId == job.Id)?.Events
                     .Select(e => e.Message).Where(m => !string.IsNullOrWhiteSpace(m)).TakeLast(ShellStateBuilder.MaxBullets).ToList() ?? [];
-            if (!_jobOutputs.TryGetValue(job.Id, out var files))
-                _jobOutputs[job.Id] = files = ShellSource<IReadOnlyList<string>>("job outputs", () =>
-                {
-                    var output = _work.OutputFolder(job);
-                    return _work.Outputs(job).Take(ShellStateBuilder.MaxFiles).Select(name => Path.Combine(output, name)).ToList();
-                }, []);
-            return new ShellJobInput(job, files, steps, live.LiveLine ?? steps.LastOrDefault(), routines.Any(r => r.JobId == job.Id && RoutineSchedule.IsDue(r, now)), live.Plan);
+            return new ShellJobInput(job, JobFiles(job), steps, live.LiveLine ?? steps.LastOrDefault(), routines.Any(r => r.JobId == job.Id && RoutineSchedule.IsDue(r, now)), live.Plan);
         }).ToList(), []);
         // History is cached only once it loaded; a failed load is retried on the next push.
         var chat = _shellTurns ?? ShellSource<IReadOnlyList<ConversationTurn>>("history", () =>
@@ -201,21 +194,12 @@ internal sealed partial class TrayApplicationContext : IShellHost
         CompanionVoiceState.Listening => ShellPhase.Listening,
         CompanionVoiceState.Processing => ShellPhase.Thinking,
         CompanionVoiceState.Responding or CompanionVoiceState.Pointing => ShellPhase.Speaking,
-        _ => _taskCts is not null ? ShellPhase.Working : ShellPhase.Idle,
+        _ => TaskOpen ? ShellPhase.Working : ShellPhase.Idle,
     };
 
     void IShellHost.ToggleTalk() => ToggleConversation();
 
     void IShellHost.SubmitText(string text) => _ = SubmitRequestAsync(text, agent: false, fromShell: true);
-
-    void IShellHost.OpenJob(string id) => _jobOutputs.Remove(id);
-
-    void IShellHost.StopJob(string id)
-    {
-        if (_activeJob?.Job.Id != id) { Log("shell: job.stop ignored, that job is not running"); return; }
-        CancelTask();
-        _taskControl.Resume();
-    }
 
     void IShellHost.SetGeneral(string key, bool value)
     {

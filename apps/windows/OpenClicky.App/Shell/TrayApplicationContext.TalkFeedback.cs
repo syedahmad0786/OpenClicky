@@ -161,7 +161,7 @@ internal sealed partial class TrayApplicationContext
                 return false;
             case (CompanionCards.DrivingId, CompanionCards.StopAction):
                 CancelTask();
-                _taskControl.Resume();
+                OpenControl.Resume();
                 return false;
             // The card stays up while the last phrase is delivered; ending dictation removes it.
             case (DictationCards.ActivityId, DictationCards.StopAction):

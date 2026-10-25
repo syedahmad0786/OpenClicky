@@ -47,7 +47,7 @@ internal sealed partial class TrayApplicationContext
             try
             {
                 // Checked per action, on the UI thread: a running (not paused) agent task may be typing too.
-                var taskRunning = _taskCts is not null && !_taskControl.IsPaused;
+                var taskRunning = TaskOpen && !OpenControl.IsPaused;
                 var decision = TalkActionPolicy.Decide(action, mode, taskRunning);
                 Log($"talk_action kind={action.Kind} decision={decision} mode={mode} task_running={taskRunning}");
                 switch (decision)
@@ -154,7 +154,7 @@ internal sealed partial class TrayApplicationContext
             return;
         }
         // A task may have started or resumed while the dialog was open or keys were held: it may be typing too.
-        if (_taskCts is not null && !_taskControl.IsPaused)
+        if (TaskOpen && !OpenControl.IsPaused)
         {
             ShowTalkActionCard(TalkActionText.TypeHeldForTask(action));
             return;
