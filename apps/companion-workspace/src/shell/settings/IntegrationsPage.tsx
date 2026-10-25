@@ -11,6 +11,10 @@ const STATUS = {
   checking: { tone: "muted", text: "Checking…" },
   error: { tone: "danger", text: "Error" },
   needsSignIn: { tone: "warn", text: "Needs sign-in" },
+  configured: { tone: "muted", text: "Added" },
+  signingIn: { tone: "muted", text: "Signing in…" },
+  tokenRejected: { tone: "danger", text: "Token rejected" },
+  reconnect: { tone: "warn", text: "Reconnect required" },
 } as const;
 
 const AUTH_OPTIONS = [

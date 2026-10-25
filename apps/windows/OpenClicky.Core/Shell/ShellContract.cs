@@ -23,7 +23,7 @@ public enum DeviceState { Active, Unavailable }
 public enum WhisperState { Missing, Downloading, Ready }
 public enum HotkeyTrigger { Hold, DoubleTap }
 public enum ChromeState { NotInstalled, Waiting, Connected }
-public enum ConnectorStatus { Connected, Checking, Error, NeedsSignIn }
+public enum ConnectorStatus { Connected, Checking, Error, NeedsSignIn, Configured, SigningIn, TokenRejected, Reconnect }
 public enum ReachState { Allowed, Denied, Unknown }
 public enum RoutineStatus { Scheduled, Running, Failed, Paused }
 /// <summary>Wire form of the agent access mode: preview, confirmEach, auto, full.</summary>

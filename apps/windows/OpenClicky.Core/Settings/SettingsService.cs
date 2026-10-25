@@ -69,17 +69,12 @@ public sealed class SettingsService(AppSettings settings, Action<AppSettings> sa
 
 public enum ConnectorAuth { None, ApiKey, Browser }
 
-/// <summary>A connector the page asked to add (settings.action connector.add). The URL is already validated.</summary>
-public sealed record ConnectorDraft(string Name, string Url, ConnectorAuth Auth);
-
 /// <summary>A Windows privacy area agents may reach: its consent-store key and its ms-settings page.</summary>
 public sealed record ReachTarget(string Id, string Label, string ConsentKey, string Page);
 
 /// <summary>Pure helpers behind the settings.action handlers (argument parsing, id and schedule mapping).</summary>
 public static class SettingsActionArgs
 {
-    public const int MaxConnectorArg = 512;
-
     /// <summary>The reach rows, in page order. ConsentKey is under HKCU\…\CapabilityAccessManager\ConsentStore.</summary>
     public static readonly IReadOnlyList<ReachTarget> Reach =
     [
@@ -113,39 +108,6 @@ public static class SettingsActionArgs
     /// <summary>"win:" + 16 hex chars of SHA-256 of the voice token id: stable, and short enough for the voice cap.</summary>
     public static string VoiceShortId(string tokenId) =>
         "win:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(tokenId)))[..16].ToLowerInvariant();
-
-    /// <summary>Parses the connector.add arg {name, url, auth}. The URL must pass <see cref="ConnectorRegistry.ValidateUrl"/>.</summary>
-    public static bool TryParseConnector(string? arg, out ConnectorDraft? draft, out string error)
-    {
-        draft = null;
-        error = "That connector could not be added.";
-        if (string.IsNullOrWhiteSpace(arg) || arg.Length > MaxConnectorArg) return false;
-        try
-        {
-            using var document = JsonDocument.Parse(arg, new JsonDocumentOptions { MaxDepth = 2 });
-            var root = document.RootElement;
-            if (root.ValueKind != JsonValueKind.Object) return false;
-            var name = Text(root, "name")?.Trim();
-            var url = Text(root, "url")?.Trim();
-            ConnectorAuth? auth = Text(root, "auth") switch
-            {
-                "none" => ConnectorAuth.None,
-                "apiKey" => ConnectorAuth.ApiKey,
-                "browser" => ConnectorAuth.Browser,
-                _ => null,
-            };
-            if (name is not { Length: > 0 and <= 60 } || name.Any(char.IsControl)) { error = "Give the connector a name of up to 60 characters."; return false; }
-            if (auth is null || url is null) return false;
-            try { url = ConnectorRegistry.ValidateUrl(url).AbsoluteUri; }
-            catch (ArgumentException e) { error = UserMessage(e); return false; }
-            draft = new ConnectorDraft(name, url, auth.Value);
-            return true;
-        }
-        catch (Exception e) when (e is JsonException or InvalidOperationException) { return false; }
-
-        static string? Text(JsonElement root, string name) =>
-            root.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? ShellIntentParser.ReadString(v) : null;
-    }
 
     private static readonly System.Text.RegularExpressions.Regex AuthScheme =
         new(@"^[A-Za-z][A-Za-z0-9-]* \S", System.Text.RegularExpressions.RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(50));

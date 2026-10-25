@@ -395,9 +395,11 @@ internal sealed partial class TrayApplicationContext
 
     private void AddConnector(string? arg)
     {
-        if (!SettingsActionArgs.TryParseConnector(arg, out var draft, out var error)) { _shell?.AddToast(error); return; }
+        if (!ConnectorRequest.TryParse(arg, out var request, out var error)) { _shell?.AddToast(error); return; }
+        // Interim: only a typed address with a key or no auth is wired until the connectors update replaces this method.
+        if (request is not CustomRemote draft) { _shell?.AddToast("Coming in the connectors update."); return; }
         string? header = null, value = null;
-        switch (draft!.Auth)
+        switch (draft.Auth)
         {
             case ConnectorAuth.Browser: _shell?.AddToast("Browser sign-in arrives with the connectors update."); return;
             case ConnectorAuth.ApiKey:

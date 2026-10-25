@@ -17,7 +17,7 @@
   "whisperState": ["missing", "downloading", "ready"],
   "hotkeyTrigger": ["hold", "doubleTap"],
   "chromeState": ["notInstalled", "waiting", "connected"],
-  "connectorStatus": ["connected", "checking", "error", "needsSignIn"],
+  "connectorStatus": ["connected", "checking", "error", "needsSignIn", "configured", "signingIn", "tokenRejected", "reconnect"],
   "reachState": ["allowed", "denied", "unknown"],
   "routineStatus": ["scheduled", "running", "failed", "paused"],
   "accessMode": ["preview", "confirmEach", "auto", "full"],

@@ -122,7 +122,7 @@ const settingsViewSchema = z.object({
       key: id,
       name: text(80),
       host: text(255),
-      status: z.enum(["connected", "checking", "error", "needsSignIn"]),
+      status: z.enum(["connected", "checking", "error", "needsSignIn", "configured", "signingIn", "tokenRejected", "reconnect"]),
       toolCount: z.number().int().min(0).nullable(),
     }).strict()).max(64),
   }).strict(),
