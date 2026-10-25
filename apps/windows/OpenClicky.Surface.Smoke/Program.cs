@@ -16,6 +16,7 @@ internal static class Program
     private static int Main(string[] args)
     {
         if (args.Contains("--highlight-compositor")) return HighlightCompositorCheck();
+        if (args.Contains("--drawing-print")) return DrawingPrintCheck();
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
 
@@ -100,6 +101,51 @@ internal static class Program
             : !Red(110, 80) || !White(100, 80) ? "the rest ring is missing or filled"
             : !White(100, 20) || !White(190, 50) ? "paint outside the marks" : null;
         Console.WriteLine(failure is null ? "PASS: highlight compositor" : "FAIL: highlight compositor " + failure);
+        return failure is null ? 0 : 1;
+    }
+
+    /// <summary>
+    /// A saved drawing's print document, rendered by a PreviewPrintController: the pages are drawn in memory and nothing is sent to
+    /// a printer. The first page holds the title, the drawing's ink and the start of the text; a long text carries on to more pages.
+    /// </summary>
+    private static int DrawingPrintCheck()
+    {
+        var printers = new System.Drawing.Printing.PrinterSettings();
+        if (!printers.IsValid) { Console.WriteLine("SKIP: drawing print (no default printer to take page settings from)"); return 0; }
+        OpenClicky.Core.Drawing.DrawOp Op(OpenClicky.Core.Drawing.DrawOpKind kind, string id, OpenClicky.Core.Drawing.Box box, OpenClicky.Core.Drawing.FigureSpec? figure = null) =>
+            new(kind, id, [], box, null, "#FF0000", 1, new Dictionary<string, string>(), 0, figure);
+        var figure = new OpenClicky.Core.Drawing.FigureSpec("gear", new(300, 100, 200, 150), null, false, "Gears",
+            [new(OpenClicky.Core.Drawing.FigureKind.Box, new(1, 1, 1), default, default, "", "Follower", new Dictionary<string, double>(), null)]);
+        var longLine = string.Join(' ', Enumerable.Repeat("This sentence is here to make the spoken text long enough to run onto more than one page.", 2));
+        List<OpenClicky.Core.Drawing.SavedLine> lines =
+        [
+            new("Here is the box.", 1, [Op(OpenClicky.Core.Drawing.DrawOpKind.Rect, "box", new(100, 100, 400, 200)), Op(OpenClicky.Core.Drawing.DrawOpKind.Figure, "fig", new(700, 100, 300, 200), figure)]),
+            .. Enumerable.Range(0, 30).Select(i => new OpenClicky.Core.Drawing.SavedLine($"{i}. {longLine}", 1, [])),
+        ];
+        var drawing = new OpenClicky.Core.Drawing.SavedDrawing("print-smoke", "Print smoke drawing", DateTimeOffset.UtcNow, lines, [new(0, 0, 1920, 1080)]);
+        using var document = OpenClicky.App.DrawingPrinter.Build(drawing, Color.FromArgb(0x33, 0x80, 0xFF));
+        var preview = new System.Drawing.Printing.PreviewPrintController();
+        document.PrintController = preview;
+        document.Print();
+        var pages = preview.GetPreviewPageInfo();
+        int Count(System.Drawing.Printing.PreviewPageInfo page, Func<Color, bool> test)
+        {
+            using var bitmap = new Bitmap(page.Image.Width, page.Image.Height);
+            using (var g = Graphics.FromImage(bitmap)) { g.Clear(Color.White); g.DrawImage(page.Image, 0, 0, page.Image.Width, page.Image.Height); }
+            var n = 0;
+            for (var y = 0; y < bitmap.Height; y += 2)
+                for (var x = 0; x < bitmap.Width; x += 2)
+                    if (test(bitmap.GetPixel(x, y))) n++;
+            return n;
+        }
+        bool Red(Color c) => c.R > 200 && c.G < 90 && c.B < 90;
+        bool Dark(Color c) => c.R < 90 && c.G < 90 && c.B < 90;
+        var failure = pages.Length < 3 ? $"expected the long text to run to 3 or more pages, got {pages.Length}"
+            : Count(pages[0], Red) < 100 ? "the first page has no ink"
+            : Count(pages[0], Dark) < 400 ? "the first page has no text"
+            : Count(pages[1], Dark) < 400 ? "the text did not carry on to page 2"
+            : Count(pages[1], Red) != 0 || Count(pages[2], Red) != 0 ? "the drawing was printed again on a later page" : null;
+        Console.WriteLine(failure is null ? $"PASS: drawing print ({pages.Length} pages)" : "FAIL: drawing print " + failure);
         return failure is null ? 0 : 1;
     }
 

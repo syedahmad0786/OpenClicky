@@ -354,6 +354,11 @@ public sealed class ShellController : IDisposable
                 _host.OpenUrl(intent.GetString("target") switch { "whatsNew" => WhatsNewUrl, "bug" => BugUrl, _ => FeatureUrl });
                 break;
             case "app.quit": _host.Quit(); break;
+            case "drawing.action":
+                // Only a drawing the page was just shown (a row in the last pushed state) reaches the host; the action is allow-listed by the parser.
+                if (_last?.Chat.Rows.Any(r => r.DrawingId == id) != true) { _host.Trace("shell drawing action refused: not in the current state"); break; }
+                _host.DrawingAction(id!, intent.GetString("action")!);
+                break;
             case "card.dismiss":
                 RemoveCard(intent.GetString("cardId")!);
                 break;

@@ -144,6 +144,13 @@ internal sealed partial class TrayApplicationContext
             case (CompanionCards.WalkthroughId, CompanionCards.StopAction):
                 StopWalkthrough();
                 return false;
+            // Save keeps the drawing; Clear takes it off the screen; dismissing the card leaves it up, unsaved.
+            case (CompanionCards.DrawingSaveId, CompanionCards.SaveAction):
+                SaveLastDrawing();
+                return false;
+            case (CompanionCards.DrawingSaveId, CompanionCards.ClearAction):
+                _talk.ClearDrawing();
+                return false;
             default:
                 Log("shell: card action not handled: " + actionId);
                 return false;

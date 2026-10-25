@@ -28,6 +28,8 @@ public sealed record ShellInputs(
     public ShellNotch Notch { get; init; } = new(NotchTab.Home, false, ShellContract.DefaultSection);
     public string? FeaturedJobId { get; init; }
     public IReadOnlySet<string> DismissedJobIds { get; init; } = new HashSet<string>();
+    /// <summary>Saved drawings (any order). Each becomes an event row "Drew {title}" in chat at its time, carrying the drawing id.</summary>
+    public IReadOnlyList<(string Id, string Title, DateTimeOffset CreatedAt)> Drawings { get; init; } = [];
     /// <summary>Rows not yet in the persisted history (the turn in progress), appended after it.</summary>
     public IReadOnlyList<ChatRow> LiveRows { get; init; } = [];
     /// <summary>Newest first; the builder keeps the first six.</summary>
@@ -64,7 +66,7 @@ public static class ShellStateBuilder
         var cards = inputs.Jobs.Where(j => !string.IsNullOrEmpty(j.Job.Id)).OrderByDescending(j => j.Job.LastRunAt ?? j.Job.CreatedAt).Select(MapJob).ToList();
         var jobs = cards.Take(MaxJobs).ToList();
         var featured = Featured(inputs, cards);
-        var rows = inputs.Chat.SelectMany(TurnRows).Concat(inputs.LiveRows).TakeLast(MaxChatRows)
+        var rows = MergeDrawings(inputs.Chat.SelectMany(t => TurnRows(t).Select(r => (At: t.CreatedAtUtc, Row: r))), inputs.Drawings).Concat(inputs.LiveRows).TakeLast(MaxChatRows)
             .Select(r => r.Text.Length <= MaxRowText ? r : r with { Text = r.Text[..(MaxRowText - 1)] + "…" }).ToList();
 
         var state = new ShellState(
@@ -150,6 +152,12 @@ public static class ShellStateBuilder
             .Select(j => cards.First(c => c.Id == Cut(j.Job.Id, 160)))
             .FirstOrDefault();
     }
+
+    /// <summary>Drawing rows join the turn rows in time order (a stable sort: a turn row comes before a drawing row of the same instant).</summary>
+    private static IEnumerable<ChatRow> MergeDrawings(IEnumerable<(DateTimeOffset At, ChatRow Row)> turns, IReadOnlyList<(string Id, string Title, DateTimeOffset CreatedAt)> drawings) =>
+        turns.Concat(drawings.Where(d => d.Id is { Length: > 0 }).Select(d => (At: d.CreatedAt,
+                Row: new ChatRow("drawing-" + Cut(d.Id, 100), ChatRole.Event, Cut("Drew " + d.Title, 200), Iso(d.CreatedAt), DrawingId: Cut(d.Id, 160)))))
+            .OrderBy(x => x.At).Select(x => x.Row);
 
     private static IEnumerable<ChatRow> TurnRows(ConversationTurn turn)
     {

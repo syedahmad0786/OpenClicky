@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace OpenClicky.Core.Drawing;
 
 /// <summary>A point in virtual-screen physical pixels. Core has no System.Drawing.Common, so geometry is its own.</summary>
@@ -6,9 +8,9 @@ public readonly record struct Pt(float X, float Y);
 /// <summary>An axis-aligned box. Contains is half-open (left/top inclusive, right/bottom exclusive).</summary>
 public readonly record struct Box(float X, float Y, float W, float H)
 {
-    public float Right => X + W;
-    public float Bottom => Y + H;
-    public Pt Centre => new(X + W / 2, Y + H / 2);
+    [JsonIgnore] public float Right => X + W;
+    [JsonIgnore] public float Bottom => Y + H;
+    [JsonIgnore] public Pt Centre => new(X + W / 2, Y + H / 2);
 
     public bool Contains(Pt p) => p.X >= X && p.X < Right && p.Y >= Y && p.Y < Bottom;
 

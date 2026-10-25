@@ -9,7 +9,7 @@ namespace OpenClicky.Overlay.Smoke;
 // Windows CI / local proof: real BuddyOverlayController POINT fly-to to a known
 // virtual-screen coordinate, then assert the companion tip landed there.
 // No screenshots. Does NOT exercise tray, PTT, Talk, STT, vision, or TTS.
-internal static class Program
+internal static partial class Program
 {
     private const int SettleTolerancePx = 8;
 
@@ -67,9 +67,28 @@ internal static class Program
             return 18;
         }
 
+        var replayGeometryFailure = ValidateReplayGeometry();
+        if (replayGeometryFailure is not null)
+        {
+            Console.Error.WriteLine("FAIL: replay and print geometry " + replayGeometryFailure);
+            return 19;
+        }
+
+        if (args.Contains("--replay", StringComparer.OrdinalIgnoreCase))
+        {
+            var replayFailure = ValidateReplayWindows();
+            if (replayFailure is not null)
+            {
+                Console.Error.WriteLine("FAIL: replay " + replayFailure);
+                return 21;
+            }
+            Console.WriteLine("PASS: saved-drawing replay (full screen, window, board, speech and pause) and print geometry");
+            return 0;
+        }
+
         if (args.Contains("--geometry-only", StringComparer.OrdinalIgnoreCase))
         {
-            Console.WriteLine("PASS: region, response bubble, message bubble, drawing layout and helper (graph, card, button) geometry");
+            Console.WriteLine("PASS: region, response bubble, message bubble, drawing layout, helper (graph, card, button) and replay/print geometry");
             return 0;
         }
 

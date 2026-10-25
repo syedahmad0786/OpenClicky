@@ -20,5 +20,6 @@
   "connectorStatus": ["connected", "checking", "error", "needsSignIn"],
   "reachState": ["allowed", "denied", "unknown"],
   "routineStatus": ["scheduled", "running", "failed", "paused"],
-  "accessMode": ["preview", "confirmEach", "auto", "full"]
+  "accessMode": ["preview", "confirmEach", "auto", "full"],
+  "drawingActions": ["replayWindow", "replayFullScreen", "replayBoard", "print", "remove"]
 }

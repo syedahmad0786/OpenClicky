@@ -16,6 +16,8 @@ export const cardKinds = [
 export const notchTabs = ["home", "chat", "settings", "document"] as const;
 export const generalKeys = ["showInTaskbar", "showInRecordings", "launchAtLogin", "paused"] as const;
 export const linkTargets = ["whatsNew", "bug", "feature"] as const;
+/** Page to host, on a saved drawing's chat row: the three replay modes, print, and remove from chat. */
+export const drawingActions = ["replayWindow", "replayFullScreen", "replayBoard", "print", "remove"] as const;
 export const settingsSections = [
   "account", "general", "voice", "microphone", "dictation", "shortcuts", "cursor", "integrations",
   "agents", "routines", "access", "memory", "notes", "clipboard", "tasks", "advanced",
@@ -53,6 +55,8 @@ const chatRowSchema = z.object({
   text: text(32_000),
   at: iso,
   jobId: id.optional(),
+  /** Set on the row of a saved drawing (host: ChatRow.DrawingId); Replay, Print and Remove act on it. */
+  drawingId: id.optional(),
 }).strict();
 
 const notchCardSchema = z.object({
@@ -185,6 +189,7 @@ export const shellStateSchema = z.object({
 export type ShellState = z.infer<typeof shellStateSchema>;
 export type JobCard = z.infer<typeof jobCardSchema>;
 export type ChatRow = z.infer<typeof chatRowSchema>;
+export type DrawingAction = (typeof drawingActions)[number];
 export type NotchCard = z.infer<typeof notchCardSchema>;
 export type DocumentView = z.infer<typeof documentViewSchema>;
 export type SettingsView = z.infer<typeof settingsViewSchema>;
@@ -220,6 +225,7 @@ export type PageMessage =
   | { kind: "file.open" | "file.reveal"; path: string }
   | { kind: "card.action"; cardId: string; actionId: string }
   | { kind: "card.dismiss"; cardId: string }
+  | { kind: "drawing.action"; id: string; action: DrawingAction }
   | { kind: "update.check" }
   | { kind: "update.install" }
   | { kind: "link.open"; target: (typeof linkTargets)[number] }

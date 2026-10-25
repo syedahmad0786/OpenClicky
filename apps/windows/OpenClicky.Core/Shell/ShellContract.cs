@@ -55,7 +55,9 @@ public sealed record ChatRow(
     ChatRole Role,
     string Text,
     string At,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? JobId = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? JobId = null,
+    // DrawingId is set on the row of a saved drawing; the page offers replay, print and remove for it.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? DrawingId = null);
 
 public sealed record ShellChat(IReadOnlyList<ChatRow> Rows);
 public sealed record CardAction(string Id, string Label, CardActionStyle Style);
@@ -199,6 +201,9 @@ public static class ShellIntentParser
     private static readonly Regex PatchKey = new(@"^[a-z]+(\.[a-zA-Z]+)+\z", RegexOptions.CultureInvariant); // linear pattern, input capped at 60 chars before the match
     private const int MaxPatchKeyLength = 60, MaxPatchValueChars = 4_000, MaxPatchValueDepth = 4, MaxActionArgLength = 512;
 
+    /// <summary>drawing.action allow-list: the three replay modes, print, and remove from chat.</summary>
+    public static readonly IReadOnlyList<string> DrawingActions = ["replayWindow", "replayFullScreen", "replayBoard", "print", "remove"];
+
     /// <summary>settings.action allow-list.</summary>
     public static readonly IReadOnlyList<string> SettingsActions =
     [
@@ -252,6 +257,7 @@ public static class ShellIntentParser
         "file.open" or "file.reveal" => Str(m, "path", MaxPathLength),
         "card.action" => Str(m, "cardId", MaxIdLength) && Str(m, "actionId", MaxIdLength),
         "card.dismiss" => Str(m, "cardId", MaxIdLength),
+        "drawing.action" => Str(m, "id", MaxIdLength) && OneOf(m, "action", DrawingActions),
         "link.open" => OneOf(m, "target", LinkTargets),
         "settings.section" => OneOf(m, "section", ShellContract.Sections),
         "settings.patch" => Patch(m),

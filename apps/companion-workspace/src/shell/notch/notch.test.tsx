@@ -173,6 +173,45 @@ it("Chat renders bubbles and event captions, and shows the empty state", () => {
   expect(screen.getByText("No messages yet")).toBeInTheDocument();
 });
 
+it("ChatTab renders drawing row with Replay, Print, Remove", () => {
+  const host = mockHost();
+  render(<Notch state={open("chat")} />);
+  const caption = screen.getByText("Drew a box around the total");
+  expect(caption).toHaveAttribute("data-role", "event");
+  const row = caption.parentElement!;
+  expect(within(row).getByRole("button", { name: "Replay" })).toHaveAttribute("aria-expanded", "false");
+  expect(within(row).getByRole("button", { name: "Print" })).toBeInTheDocument();
+  expect(within(row).getByRole("button", { name: "Remove" })).toBeInTheDocument();
+  // Ordinary rows carry no actions, and nothing was posted by merely showing the row.
+  expect(screen.getByText("Job started").closest(".notch-chat__drawing")).toBeNull();
+  expect(host.posts("drawing.action")).toEqual([]);
+  expect(screen.queryByRole("group", { name: "Replay mode" })).toBeNull();
+});
+
+it("drawing.action posted with mode", () => {
+  const host = mockHost();
+  render(<Notch state={open("chat")} />);
+  const id = "0f1e2d3c4b5a69788796a5b4c3d2e1f0";
+  const replay = screen.getByRole("button", { name: "Replay" });
+
+  fireEvent.click(replay);
+  expect(replay).toHaveAttribute("aria-expanded", "true");
+  const modes = screen.getByRole("group", { name: "Replay mode" });
+  expect(within(modes).getAllByRole("button").map((b) => b.textContent)).toEqual(["Window", "Full screen", "Board"]);
+  fireEvent.click(within(modes).getByRole("button", { name: "Replay full screen" }));
+  expect(screen.queryByRole("group", { name: "Replay mode" })).toBeNull(); // picking a mode closes the choice
+
+  fireEvent.click(replay);
+  fireEvent.click(screen.getByRole("button", { name: "Replay in a window" }));
+  fireEvent.click(replay);
+  fireEvent.click(screen.getByRole("button", { name: "Replay on a board" }));
+  fireEvent.click(screen.getByRole("button", { name: "Print" }));
+  fireEvent.click(screen.getByRole("button", { name: "Remove" }));
+
+  expect(host.posts("drawing.action")).toEqual(["replayFullScreen", "replayWindow", "replayBoard", "print", "remove"]
+    .map((action) => ({ kind: "drawing.action", id, action })));
+});
+
 it("Enter submits and clears; Shift+Enter and empty input do not", () => {
   const host = mockHost();
   render(<Notch state={open("chat")} />);

@@ -13,9 +13,10 @@ public class ShellControllerTests
         public List<string> Calls { get; } = [];
         public List<string> Files { get; } = [Inside];
         public bool ThrowOnCollect { get; set; }
+        public List<(string Id, string Title, DateTimeOffset CreatedAt)> Drawings { get; } = [];
         public ShellInputs CollectInputs() => ThrowOnCollect ? throw new InvalidOperationException("data source down") : new(new AppSettings(),
             [new ShellJobInput(new WorkJob("j1", "openclicky", "Report", "p", DateTimeOffset.UtcNow, "completed", DateTimeOffset.UtcNow), Files, [])],
-            [], [], ShellPhase.Idle, DateTimeOffset.UtcNow);
+            [], [], ShellPhase.Idle, DateTimeOffset.UtcNow) { Drawings = Drawings };
         public void ToggleTalk() => Calls.Add("talk");
         public void SubmitText(string text) => Calls.Add("submit:" + text);
         public void StopJob(string id) => Calls.Add("stop:" + id);
@@ -32,6 +33,7 @@ public class ShellControllerTests
         public void SettingsSection(string section) => Calls.Add("section:" + section);
         public void PatchSetting(string key, JsonElement value) => Calls.Add($"patch:{key}={value.GetRawText()}");
         public void SettingsAction(string action, string? arg) => Calls.Add($"action:{action}:{arg}");
+        public void DrawingAction(string id, string action) => Calls.Add($"drawing:{id}:{action}");
         public bool KeepCard { get; set; }
         public bool CardAction(string cardId, string actionId) { Calls.Add($"card:{cardId}:{actionId}"); return KeepCard; }
     }
@@ -75,6 +77,45 @@ public class ShellControllerTests
         surface.Send(new { kind = "file.reveal", path = Inside });
         Assert.Contains("open:" + Inside, host.Calls);
         Assert.Contains("reveal:" + Inside, host.Calls);
+    }
+
+    [Fact]
+    public async Task DrawingActionRoutedOnlyForKnownActions()
+    {
+        var host = new FakeHost();
+        host.Drawings.Add(("d1", "A box", DateTimeOffset.UtcNow));
+        var surface = new FakeSurface();
+        var controller = new ShellController(host, () => Task.FromResult<IShellSurface>(surface), push => push());
+        Assert.True(await controller.StartAsync());
+        foreach (var action in ShellIntentParser.DrawingActions) surface.Send(new { kind = "drawing.action", id = "d1", action });
+        Assert.Equal(ShellIntentParser.DrawingActions.Select(a => "drawing:d1:" + a), host.Calls.Where(c => c.StartsWith("drawing:")));
+
+        host.Calls.Clear();
+        foreach (var action in new[] { "delete", "Print", "replay", "replayWindow ", "", "card.action" }) surface.Send(new { kind = "drawing.action", id = "d1", action });
+        surface.Send(new { kind = "drawing.action", id = "d1" }); // no action at all
+        surface.Send(new { kind = "drawing.action", id = "d1", action = 5 });
+        Assert.DoesNotContain(host.Calls, c => c.StartsWith("drawing:"));
+    }
+
+    [Fact]
+    public async Task DrawingActionUnknownIdIgnored()
+    {
+        var host = new FakeHost();
+        host.Drawings.Add(("d1", "A box", DateTimeOffset.UtcNow));
+        var surface = new FakeSurface();
+        var controller = new ShellController(host, () => Task.FromResult<IShellSurface>(surface), push => push());
+        Assert.True(await controller.StartAsync());
+        surface.Send(new { kind = "drawing.action", id = "other", action = "print" });
+        surface.Send(new { kind = "drawing.action", id = @"..\d1", action = "remove" });
+        surface.Send(new { kind = "drawing.action", id = "turn-1-a", action = "print" }); // a row of the state, but not a drawing
+        Assert.DoesNotContain(host.Calls, c => c.StartsWith("drawing:"));
+        Assert.Contains(host.Calls, c => c.StartsWith("trace:") && c.Contains("drawing action refused"));
+
+        // Once the drawing is gone from the state (removed), its id stops working too.
+        host.Drawings.Clear();
+        controller.RequestPush();
+        surface.Send(new { kind = "drawing.action", id = "d1", action = "print" });
+        Assert.DoesNotContain(host.Calls, c => c.StartsWith("drawing:"));
     }
 
     [Fact]

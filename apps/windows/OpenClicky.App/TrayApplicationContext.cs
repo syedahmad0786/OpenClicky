@@ -183,6 +183,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         {
             if (state == CompanionVoiceState.Processing && _talk.Walkthrough.View.Busy) _walkthroughForm.Hide();
             if (state is CompanionVoiceState.Listening or CompanionVoiceState.Processing) ApplyCompanionStyle(); // Windows' reduced-motion setting may have changed
+            if (state is CompanionVoiceState.Listening or CompanionVoiceState.Processing) CloseReplay(); // a new question takes over the screen
             _home.SetState(state);
             _home.SetConversationActive(_talk.ConversationActive);
             _companionDock.SetState(state, _talk.ConversationActive);
@@ -297,6 +298,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         try { _physicalInput.Start(); }
         catch (Exception ex) { Log("takeover_monitor_error=" + ex.GetType().Name); ClassicMessage("Automatic pause on physical input is unavailable. Use Stop before taking over a running task."); }
         // The classic dock stays hidden here: the notch replaces it once the shell is up (UpdateCompanionDock).
+        WireDrawings();
         WireCompanion();
         ApplyCompanionStyle();
         if (_settings.AwarenessEnabled) _guideTimer.Start();
@@ -453,6 +455,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
     private void Stop()
     {
         CancelMicWatch(); // before the state leaves Listening: a stopped hold must not warn
+        CloseReplay();
         StopWalkthrough();
         if (_dictationActive) CancelDictation();
         CancelTask();
@@ -685,6 +688,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
 
     private Task StartAgentTask(string task, JobRun? work)
     {
+        OnUi(CloseReplay); // the agent may be started off the UI thread; a replay is not left up under its screenshots
         var planner = _sandboxDemo && _sandbox is not null
             ? new SandboxPlanner(_sandbox)
             : ProviderFactory.CreateAgentPlanner(_settings, _secrets, Log);
@@ -1271,7 +1275,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
 
     /// <summary>Esc stops only what is running: a task, a voice turn or its speech, dictation, a conversation or a walkthrough.</summary>
     private bool IsBusy => _taskCts is not null || _submissionCts is not null || (_dictationActive && !DictationHidden) || _talk.ConversationActive
-        || _talk.State != CompanionVoiceState.Idle || _talk.Walkthrough.View.Active;
+        || _talk.State != CompanionVoiceState.Idle || _talk.Walkthrough.View.Active || _replay is not null;
 
     /// <summary>After a settings change: the monitor applies new bindings once no shortcut is held.</summary>
     private void ApplyShortcutBindings()
@@ -1589,6 +1593,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
 
     protected override void ExitThreadCore()
     {
+        CloseReplay();
         _lifetime.Cancel();
         DisposeShell();
         CancelTask();

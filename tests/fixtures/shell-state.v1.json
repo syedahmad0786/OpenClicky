@@ -85,7 +85,8 @@
     "rows": [
       { "id": "row-1", "role": "user", "text": "Summarise the quarterly report", "at": "2026-10-24T09:29:00Z" },
       { "id": "row-2", "role": "assistant", "text": "On it. I will start with the revenue table.", "at": "2026-10-24T09:29:05Z", "jobId": "job-working" },
-      { "id": "row-3", "role": "event", "text": "Job started", "at": "2026-10-24T09:29:06Z", "jobId": "job-working" }
+      { "id": "row-3", "role": "event", "text": "Job started", "at": "2026-10-24T09:29:06Z", "jobId": "job-working" },
+      { "id": "drawing-0f1e2d3c4b5a69788796a5b4c3d2e1f0", "role": "event", "text": "Drew a box around the total", "at": "2026-10-24T09:30:00Z", "drawingId": "0f1e2d3c4b5a69788796a5b4c3d2e1f0" }
     ]
   },
   "cards": [

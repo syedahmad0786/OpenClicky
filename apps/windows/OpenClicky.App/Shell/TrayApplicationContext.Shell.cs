@@ -172,6 +172,7 @@ internal sealed partial class TrayApplicationContext : IShellHost
         var connectors = ShellSource("connectors", _connectors.List, []);
         return new ShellInputs(_settings, jobs, chat, connectors, CurrentPhase(), now)
         {
+            Drawings = SavedDrawings(),
             SettingsRuntime = ShellSource("settings", () => SettingsRuntimeFor(routines, allJobs, connectors), SettingsRuntime.Empty),
             Theme = ShellSource("theme", GeneralBehaviour.ReadTheme, ShellTheme.Light),
             ReducedMotion = ShellSource("reduced motion", GeneralBehaviour.ReducedMotion, false),

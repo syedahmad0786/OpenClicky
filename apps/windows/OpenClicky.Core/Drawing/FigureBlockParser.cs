@@ -27,6 +27,37 @@ public static partial class FigureBlockParser
         return (Scan(reply, figures), figures);
     }
 
+    /// <summary>
+    /// Whether a figure read back from a saved file keeps to the limits <see cref="Parse"/> enforces on a model's block: stored
+    /// geometry is never trusted. Ranges, label text, the part count and the triangle budget are all re-checked.
+    /// </summary>
+    internal static bool IsValid(FigureSpec f)
+    {
+        static bool Within(Vector3 v, Func<float, bool> ok) => ok(v.X) && ok(v.Y) && ok(v.Z);
+        static bool Good(string? s) => s is null || s.Length is > 0 and <= DrawCommandParser.MaxLabel && !s.Any(c => c == '`' || char.IsControl(c) || DrawCommandParser.IsBidiControl(c));
+        var b = f.Box;
+        if (f.Id is not null && !IdPattern().IsMatch(f.Id)) return false;
+        if (f.Screen is < 1 or > 16 || !Good(f.Title)) return false;
+        if (!(float.IsFinite(b.X) && float.IsFinite(b.Y) && b.X >= 0 && b.Y >= 0 && b.X <= MaxBoxValue && b.Y <= MaxBoxValue
+            && b.W >= MinBoxSide && b.H >= MinBoxSide && b.W <= MaxBoxValue && b.H <= MaxBoxValue)) return false;
+        if (f.Parts.Count is 0 or > MaxParts) return false;
+        var triangles = 0;
+        foreach (var p in f.Parts)
+        {
+            if (!Enum.IsDefined(p.Kind) || !Within(p.Size, v => v is >= (float)MinSize and <= (float)MaxSize)
+                || !Within(p.At, v => Math.Abs(v) <= MaxAt) || !Within(p.RotateDegrees, v => Math.Abs(v) <= MaxDegrees)) return false;
+            if (p.Color is null || p.Color.Length != 0 && !(p.Color.Length == 7 && p.Color[0] == '#' && p.Color.Skip(1).All(char.IsAsciiHexDigit))) return false;
+            if (!Good(p.Label) || p.Params is null || p.Params.Count > ParamKeys.Length
+                || p.Params.Any(kv => !ParamKeys.Contains(kv.Key) || !double.IsFinite(kv.Value))) return false;
+            if (p.Profile is { } profile && (p.Kind is not (FigureKind.Tube or FigureKind.Lathe or FigureKind.Extrude)
+                || profile.Count > FigureMesh.MaxProfilePoints
+                || profile.Any(v => !float.IsFinite(v.X) || !float.IsFinite(v.Y) || Math.Abs(v.X) > MaxAt || Math.Abs(v.Y) > MaxAt))) return false;
+            triangles += FigureMesh.Build(p).TriangleCount;
+            if (triangles > MaxTriangles) return false;
+        }
+        return true;
+    }
+
     /// <summary>Only the text, for streaming partial replies: a block still being written, and a trailing start of the fence, are cut too.</summary>
     internal static string Strip(string raw) => Scan(raw, null);
 

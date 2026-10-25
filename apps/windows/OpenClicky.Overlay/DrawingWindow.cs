@@ -32,9 +32,10 @@ internal sealed class DrawingWindow : IDisposable
     private double _spotStart;
     private readonly System.Windows.Forms.Timer _expiry = new() { Interval = (int)(DrawingRenderer.SpotlightSeconds * 1000) + 50 };
 
-    public DrawingWindow(Action<string>? log = null)
+    /// <param name="owner">The replay form this ink belongs to, when it is not drawn over the live screen: the ink stays above it.</param>
+    public DrawingWindow(Action<string>? log = null, nint owner = 0)
     {
-        _window = new("OpenClicky Ink", log);
+        _window = new("OpenClicky Ink", log, owner);
         _expiry.Tick += (_, _) =>
         {
             _expiry.Stop();

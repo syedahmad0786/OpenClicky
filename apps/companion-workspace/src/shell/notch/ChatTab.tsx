@@ -1,10 +1,39 @@
-import { useEffect, useRef, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { postPage } from "../bridge";
-import { talkGesture, type ShellState } from "../contract";
+import { talkGesture, type ChatRow, type DrawingAction, type ShellState } from "../contract";
 import { PillButton } from "../ui";
 import { MicIcon } from "./icons";
 
 const MAX_TEXT = 8_000; // host limit for text.submit
+
+const REPLAY_MODES: { action: DrawingAction; label: string; name: string }[] = [
+  { action: "replayWindow", label: "Window", name: "Replay in a window" },
+  { action: "replayFullScreen", label: "Full screen", name: "Replay full screen" },
+  { action: "replayBoard", label: "Board", name: "Replay on a board" },
+];
+
+/** A saved drawing in the conversation: its caption, and Replay (in a window, full screen or on a board), Print and Remove. */
+function DrawingRow({ row }: { row: ChatRow }) {
+  const [choosing, setChoosing] = useState(false);
+  const act = (action: DrawingAction) => postPage({ kind: "drawing.action", id: row.drawingId!, action });
+  return (
+    <div className="notch-chat__drawing">
+      <div className="notch-chat__row" data-role={row.role}>{row.text}</div>
+      <div className="notch-chat__drawing-actions">
+        <PillButton size="sm" variant="outline" aria-expanded={choosing} aria-haspopup="true" onClick={() => setChoosing((open) => !open)}>Replay</PillButton>
+        <PillButton size="sm" variant="outline" onClick={() => act("print")}>Print</PillButton>
+        <PillButton size="sm" variant="outline" title="Remove from chat" onClick={() => act("remove")}>Remove</PillButton>
+      </div>
+      {choosing && (
+        <div className="notch-chat__drawing-actions" role="group" aria-label="Replay mode">
+          {REPLAY_MODES.map(({ action, label, name }) => (
+            <PillButton key={action} size="sm" variant="secondary" aria-label={name} onClick={() => { setChoosing(false); act(action); }}>{label}</PillButton>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 interface ChatTabProps {
   state: ShellState; draft: string; onDraft: (text: string) => void;
@@ -52,7 +81,9 @@ export function ChatTab({ state, draft, onDraft, focusComposer, onComposerFocuse
             <strong>No messages yet</strong>
             <span>Say something, or type below.</span>
           </div>
-        ) : rows.map((row) => <div key={row.id} className="notch-chat__row" data-role={row.role}>{row.text}</div>)}
+        ) : rows.map((row) => row.drawingId
+          ? <DrawingRow key={row.id} row={row} />
+          : <div key={row.id} className="notch-chat__row" data-role={row.role}>{row.text}</div>)}
       </div>
       <div className="notch-chat__bar">
         <PillButton variant="primary" className="notch-chat__talk" icon={<MicIcon />} onClick={() => postPage({ kind: "talk.toggle" })}>

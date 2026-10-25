@@ -27,6 +27,37 @@ public class ShellContractTests
     }
 
     [Fact]
+    public void FixtureWithDrawingRowParses()
+    {
+        var state = ShellContract.Deserialize(FixtureJson())!;
+        var row = Assert.Single(state.Chat.Rows, r => r.DrawingId is not null);
+        Assert.Equal(ChatRole.Event, row.Role);
+        Assert.Equal("0f1e2d3c4b5a69788796a5b4c3d2e1f0", row.DrawingId);
+        Assert.Null(row.JobId);
+        Assert.Contains("\"drawingId\":\"0f1e2d3c4b5a69788796a5b4c3d2e1f0\"", ShellContract.Serialize(state));
+    }
+
+    [Theory]
+    [InlineData("""{"kind":"drawing.action","id":"d1","action":"replayWindow"}""", true)]
+    [InlineData("""{"kind":"drawing.action","id":"d1","action":"replayFullScreen"}""", true)]
+    [InlineData("""{"kind":"drawing.action","id":"d1","action":"replayBoard"}""", true)]
+    [InlineData("""{"kind":"drawing.action","id":"d1","action":"print"}""", true)]
+    [InlineData("""{"kind":"drawing.action","id":"d1","action":"remove"}""", true)]
+    [InlineData("""{"kind":"drawing.action","id":"d1","action":"delete"}""", false)]
+    [InlineData("""{"kind":"drawing.action","id":"d1"}""", false)]
+    [InlineData("""{"kind":"drawing.action","action":"print"}""", false)]
+    [InlineData("""{"kind":"drawing.action","id":"","action":"print"}""", false)]
+    [InlineData("""{"kind":"drawing.action","id":7,"action":"print"}""", false)]
+    public void DrawingActionIntentIsAllowListed(string json, bool valid) => Assert.Equal(valid, ShellIntentParser.TryParse(json, out _));
+
+    [Fact]
+    public void DrawingActionIdIsBounded()
+    {
+        Assert.True(ShellIntentParser.TryParse("{\"kind\":\"drawing.action\",\"id\":\"" + new string('a', 160) + "\",\"action\":\"print\"}", out _));
+        Assert.False(ShellIntentParser.TryParse("{\"kind\":\"drawing.action\",\"id\":\"" + new string('a', 161) + "\",\"action\":\"print\"}", out _));
+    }
+
+    [Fact]
     public void NullsAndOptionalsSerializeAsContractExpects()
     {
         var state = ShellContract.Deserialize(FixtureJson())! with { Featured = null, Document = null };
@@ -250,6 +281,7 @@ public class ShellContractTests
             ["reachState"] = Values<ReachState>(),
             ["routineStatus"] = Values<RoutineStatus>(),
             ["accessMode"] = Values<AccessModeView>(),
+            ["drawingActions"] = ShellIntentParser.DrawingActions.ToArray(),
         };
         Assert.Equal(shared.Select(p => p.Key).Order(), actual.Keys.Order());
         foreach (var (name, values) in actual)

@@ -22,13 +22,15 @@ internal sealed class LayeredWindow : NativeWindow, IDisposable
     private bool _failing;
 
     /// <param name="log">Diagnostics: the window title and Win32 error codes only, never content.</param>
-    public LayeredWindow(string title, Action<string>? log = null)
+    /// <param name="owner">An owner window (replay): this one then always stays above it in z-order and goes with it.</param>
+    public LayeredWindow(string title, Action<string>? log = null, nint owner = 0)
     {
         _log = log;
         _title = title;
         CreateHandle(new CreateParams
         {
             Caption = title,
+            Parent = owner,
             Style = WsPopup,
             ExStyle = WsExLayered | WsExTransparent | WsExToolWindow | WsExNoActivate | WsExTopmost,
         });

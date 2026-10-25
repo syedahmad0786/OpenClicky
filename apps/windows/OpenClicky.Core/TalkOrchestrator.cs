@@ -59,6 +59,14 @@ public sealed class TalkOrchestrator : IDisposable
     /// </summary>
     public DrawingDocument Drawing { get; } = new();
 
+    /// <summary>
+    /// The last turn that drew, as it was spoken and drawn (null before one, and again once the next turn starts). Built when the turn
+    /// ends with its drawing still up; <see cref="DrawingTurnCompleted"/> announces it. Any thread.
+    /// </summary>
+    public SavedDrawing? LastDrawingTurn { get => Volatile.Read(ref _lastDrawingTurn); private set => Volatile.Write(ref _lastDrawingTurn, value); }
+    private SavedDrawing? _lastDrawingTurn;
+    public event Action<SavedDrawing>? DrawingTurnCompleted;
+
     public string? WalkthroughWindowTitle { get; private set; }
     public event Action<WalkthroughView>? WalkthroughChanged;
     /// <summary>A walkthrough step or hover reply pointed: the target the user's click (or hover) should land on.</summary>
@@ -205,18 +213,29 @@ public sealed class TalkOrchestrator : IDisposable
     /// Maps <paramref name="ops"/> onto the captured screens and applies them; new parts reveal across <paramref name="line"/>.
     /// <paramref name="clearFirst"/> starts from an empty drawing. Nothing is shown when nothing changed.
     /// </summary>
-    private void ApplyDrawing(IReadOnlyList<DrawOp> ops, IReadOnlyList<ScreenCaptureResult> screens, TimeSpan line, bool clearFirst = false)
+    private IReadOnlyList<(DrawOp Virtual, DrawOp Source, float Scale)> ApplyDrawing(IReadOnlyList<DrawOp> ops, IReadOnlyList<ScreenCaptureResult> screens, TimeSpan line, bool clearFirst = false)
     {
         var mapped = DrawingMapper.ToVirtual(ops, screens);
         lock (_drawingGate)
         {
             var cleared = clearFirst && !Drawing.IsEmpty;
             if (clearFirst) Drawing.Clear();
-            if (mapped.Count == 0 && !cleared) return;
+            if (mapped.Count == 0 && !cleared) return mapped;
             var animations = Drawing.Apply(mapped, line);
             _overlay.ShowDrawing(Drawing.Parts.ToArray(), animations);
             _log($"drawing_parts={Drawing.Parts.Count} ops={mapped.Count}");
+            return mapped;
         }
+    }
+
+    /// <summary>The turn ended with its drawing still up: keep what it said and drew, and tell the app it can offer to save it.</summary>
+    private void PublishDrawingTurn(DrawingTurnRecorder recorder)
+    {
+        SavedDrawing? saved;
+        lock (_drawingGate) saved = Drawing.IsEmpty ? null : recorder.Build(DateTimeOffset.UtcNow);
+        if (saved is null) return;
+        LastDrawingTurn = saved;
+        DrawingTurnCompleted?.Invoke(saved);
     }
 
     private string DrawingContext()
@@ -870,6 +889,10 @@ public sealed class TalkOrchestrator : IDisposable
                 + (Walkthrough.View.Active ? "\nThis is an advisory walkthrough. Explain only; do not claim to click, type, save notes, or change anything.\n" : "")
                 + (selfContainedVisual ? "" : walkthrough is null ? "\n" + VisualArtifactReply.Instructions : "\n\n" + GuidedWalkthrough.ResponseInstructions);
             if (selfContainedVisual) history = [];
+            // What this turn says and draws, for the save offer. A walkthrough step starts clean and is not offered.
+            LastDrawingTurn = null;
+            var recorder = selfContainedVisual || walkthrough is not null ? null : new DrawingTurnRecorder();
+            recorder?.SetMonitors(screens);
             var speech = new StreamingReplySpeech();
             var speechGate = new object();
             var speechTail = Task.CompletedTask;
@@ -944,7 +967,8 @@ public sealed class TalkOrchestrator : IDisposable
                     if (!ObservationStillCurrent()) return;
                     IReadOnlyList<DrawOp> ops = cues.TakeThrough(throughSentence);
                     if (final is { Count: > 0 }) ops = [.. ops, .. final];
-                    if (!selfContainedVisual && ops.Count > 0) ApplyDrawing(ops, screens, line);
+                    var shown = !selfContainedVisual && ops.Count > 0 ? ApplyDrawing(ops, screens, line) : [];
+                    if (recorder is not null) lock (_drawingGate) recorder.AddLine(text, line, shown);
                     started.TrySetResult();
                     if (!settings.SpeakReplies)
                     {
@@ -970,7 +994,9 @@ public sealed class TalkOrchestrator : IDisposable
                 await lineStarted.ConfigureAwait(false);
                 if (ct.IsCancellationRequested || !ObservationStillCurrent()) return;
                 IReadOnlyList<DrawOp> ops = [.. cues.TakeAll(), .. final];
-                if (ops.Count > 0) ApplyDrawing(ops, screens, line);
+                if (ops.Count == 0) return;
+                var shown = ApplyDrawing(ops, screens, line);
+                if (recorder is not null) lock (_drawingGate) recorder.AppendToLast(line, shown);
             }
             var raw = talk is IStreamingTalkClient streaming && walkthrough is null
                 ? await streaming.StreamVisionTalkAsync(prompt, history, transcript, screens, settings.ResolveTalkModel(), ResponseChanged, token).ConfigureAwait(false)
@@ -1045,6 +1071,7 @@ public sealed class TalkOrchestrator : IDisposable
             await speechTail.ConfigureAwait(false);
             await restCued.ConfigureAwait(false);
             token.ThrowIfCancellationRequested();
+            if (recorder is not null) PublishDrawingTurn(recorder);
             if (walkthrough is null && !selfContainedVisual && requested.Actions.Count > 0) ActionsRequested?.Invoke(requested.Actions, replyAccess);
         }
         catch (OperationCanceledException) { _log("turn_cancelled"); }

@@ -133,7 +133,7 @@ public sealed class DrawingDocument
 
     private const float MaxCoordinate = 99_999;
 
-    private static bool Sane(DrawOp op)
+    internal static bool Sane(DrawOp op)
     {
         static bool Ok(float v) => float.IsFinite(v) && Math.Abs(v) <= MaxCoordinate;
         return Ok(op.Box.X) && Ok(op.Box.Y) && Ok(op.Box.W) && Ok(op.Box.H) && Ok(op.Box.Right) && Ok(op.Box.Bottom)

@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace OpenClicky.Core.Drawing;
 
 /// <summary>Every drawing op. The edits (<see cref="Recolor"/> and later) change existing parts instead of adding one.</summary>
@@ -29,5 +31,5 @@ public sealed record DrawOp(
     int Offset,
     FigureSpec? Figure = null)
 {
-    public bool IsEdit => Kind >= DrawOpKind.Recolor;
+    [JsonIgnore] public bool IsEdit => Kind >= DrawOpKind.Recolor;
 }

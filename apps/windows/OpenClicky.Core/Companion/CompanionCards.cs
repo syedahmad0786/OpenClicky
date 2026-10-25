@@ -14,7 +14,13 @@ public static class WalkthroughCardPolicy
 public static class CompanionCards
 {
     public const string WalkthroughId = "walkthrough", BackAction = "back", RecheckAction = "recheck", StopAction = "stop";
-    public const int MaxBody = 1_000;
+    public const string DrawingSaveId = "drawing-save", SaveAction = "save", ClearAction = "clear";
+    public const int MaxBody = 1_000, DrawingOfferMs = 20_000;
+
+    /// <summary>Offered when a turn that drew ends. Dismissing it (or letting it expire) keeps the drawing on screen, unsaved.</summary>
+    public static NotchCard SaveDrawing() => new(DrawingSaveId, NotchCardKind.Tip, "Keep this drawing?",
+        "Save it to replay later, or clear the screen.",
+        [new(SaveAction, "Save", CardActionStyle.Primary), new(ClearAction, "Clear", CardActionStyle.Secondary)], DrawingOfferMs);
 
     /// <summary>The walkthrough step card: the instruction (or, before the first one, the status) and Back / Recheck / Stop.</summary>
     public static NotchCard Walkthrough(WalkthroughView v)

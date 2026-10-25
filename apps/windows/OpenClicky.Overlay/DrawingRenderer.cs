@@ -1,4 +1,5 @@
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.Globalization;
 using OpenClicky.Core.CompanionCursor;
 using OpenClicky.Core.Drawing;
@@ -100,8 +101,10 @@ public static class DrawingRenderer
     /// <paramref name="screen"/> (default: the virtual screen), is skipped: edits can move or scale a part off-screen. So is a
     /// shape whose strokes leave the monitor under its anchor.
     /// Label pills that would overlap move apart (<see cref="LabelLayout"/>).
+    /// With <paramref name="screen"/> given (replay, print) that rectangle is also the monitor and work area every part is checked
+    /// against, and <paramref name="dipOverride"/> (when set) replaces the monitor scale: the parts are not on a live display.
     /// </summary>
-    public static IReadOnlyList<PartLayout> Layout(IReadOnlyList<DrawPart> parts, Rectangle? screen = null)
+    public static IReadOnlyList<PartLayout> Layout(IReadOnlyList<DrawPart> parts, Rectangle? screen = null, float? dipOverride = null)
     {
         ArgumentNullException.ThrowIfNull(parts);
         var bounds = screen ?? SystemInformation.VirtualScreen;
@@ -114,17 +117,18 @@ public static class DrawingRenderer
             if (!Inside(op, bounds)) continue;
             var anchor = op.Points.Count > 0 ? op.Points[0] : op.Box.Centre;
             var at = new Point((int)anchor.X, (int)anchor.Y);
-            var dip = DpiScale.ForPoint(at);
-            var work = Screen.FromPoint(at).WorkingArea;
+            var dip = dipOverride ?? DpiScale.ForPoint(at);
+            var monitorBounds = screen is null ? Screen.FromPoint(at).Bounds : bounds;
+            var work = screen is null ? Screen.FromPoint(at).WorkingArea : bounds;
             var layout = new PartLayout(part, dip);
             var paint = RectangleF.Empty;
             // Fills (badge, button, paper) must sit whole on the monitor under their anchor, like strokes: dropped, never clamped.
-            bool OnMonitor(RectangleF r) => RectangleF.Inflate(Screen.FromPoint(at).Bounds, 1, 1).Contains(r);
+            bool OnMonitor(RectangleF r) => RectangleF.Inflate(monitorBounds, 1, 1).Contains(r);
             switch (op.Kind)
             {
                 case DrawOpKind.Spotlight:
                 {
-                    var screenArea = (long)bounds.Width * bounds.Height <= MaxInkPixels ? bounds : Screen.FromPoint(at).Bounds;
+                    var screenArea = (long)bounds.Width * bounds.Height <= MaxInkPixels ? bounds : monitorBounds;
                     var hole = RectangleF.Intersect(ToRect(op.Box), screenArea);
                     if (hole.Width <= 0 || hole.Height <= 0) continue;
                     layout.Spot = (screenArea, hole, SpotCornerDip * dip);
@@ -202,7 +206,7 @@ public static class DrawingRenderer
                     if (outline.Count == 0) continue; // drawn by a later helper (graph, card, …) or nothing to draw
                     // The strokes must stay on the part's monitor (only their band may overhang its edge, as for a highlight
                     // on the taskbar). Checked before the wobble, so an oversized shape costs nothing.
-                    var monitor = RectangleF.Inflate(Screen.FromPoint(at).Bounds, 1, 1);
+                    var monitor = RectangleF.Inflate(monitorBounds, 1, 1);
                     if (!monitor.Contains(Extent(outline))) continue;
                     var seed = InkStyle.Seed(part.Id);
                     layout.Strokes = outline.Select((stroke, i) =>
@@ -328,6 +332,57 @@ public static class DrawingRenderer
 
         if (progress >= 1 && layout.Pill is { } pill && layout.PillText is { } text)
             CursorRenderer.DrawLabel(g, pill, text, dip, colour, alpha);
+    }
+
+    /// <summary>
+    /// The finished parts on a <paramref name="paper"/> bitmap of <paramref name="size"/> pixels (print). Coordinates are
+    /// bitmap pixels and lengths are DIP times <paramref name="dip"/>. A spotlight is left out (it would darken the page); a 3D
+    /// figure becomes its label pills, stacked in its box. The caller disposes the bitmap.
+    /// </summary>
+    public static Bitmap RenderStill(IReadOnlyList<DrawPart> parts, Size size, Color paper, Color accent, float dip)
+    {
+        ArgumentNullException.ThrowIfNull(parts);
+        var bitmap = new Bitmap(size.Width, size.Height, PixelFormat.Format32bppPArgb);
+        try
+        {
+            using var g = Graphics.FromImage(bitmap);
+            g.Clear(paper);
+            CursorRenderer.Prepare(g);
+            var drawn = parts.Where(p => p.Op.Kind != DrawOpKind.Spotlight).ToArray();
+            foreach (var layout in Layout(drawn, new Rectangle(Point.Empty, size), dip)) Draw(g, layout, 1, 1, accent);
+            foreach (var part in drawn.Where(p => p.Op is { Kind: DrawOpKind.Figure, Figure: not null })) DrawFigureLabels(g, part, size, dip, accent);
+            return bitmap;
+        }
+        catch
+        {
+            bitmap.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>A figure's title and part labels as pills, one under another and centred in its box; ones that do not fit the box are left out.</summary>
+    private static void DrawFigureLabels(Graphics g, DrawPart part, Size size, float dip, Color accent)
+    {
+        var box = part.Op.Box;
+        var figure = part.Op.Figure!;
+        if (!Inside(part.Op, new Rectangle(Point.Empty, size))) return;
+        var labels = figure.Parts.Select(p => p.Label).Prepend(figure.Title).Where(l => !string.IsNullOrEmpty(l)).Distinct().Cast<string>().ToArray();
+        var gap = PillGapDip * dip;
+        var pills = new List<(string Text, SizeF Size)>();
+        float height = 0;
+        foreach (var label in labels)
+        {
+            var s = CursorRenderer.LabelSize(label, dip);
+            if (height + s.Height > box.H) break;
+            pills.Add((label, s));
+            height += s.Height + gap;
+        }
+        var y = box.Y + (box.H - Math.Max(0, height - gap)) / 2;
+        foreach (var (text, s) in pills)
+        {
+            CursorRenderer.DrawLabel(g, new RectangleF(box.Centre.X - s.Width / 2, y, s.Width, s.Height), text, dip, accent);
+            y += s.Height + gap;
+        }
     }
 
     /// <summary>Where the pen is at <paramref name="progress"/>: the end of the drawn stroke, the edge of the text being written.</summary>

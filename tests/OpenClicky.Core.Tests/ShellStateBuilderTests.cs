@@ -26,6 +26,46 @@ public class ShellStateBuilderTests
     }
 
     [Fact]
+    public void DrawingRowsMergedByTime()
+    {
+        var chat = new[]
+        {
+            new ConversationTurn(1, "first q", "first a", Now.AddMinutes(1)),
+            new ConversationTurn(2, "second q", "second a", Now.AddMinutes(10)),
+        };
+        // Supplied newest first and out of order; one lands between the turns, one exactly with the first turn, one after both.
+        (string, string, DateTimeOffset)[] drawings =
+        [
+            ("late", "A late sketch", Now.AddMinutes(20)),
+            ("tie", "Tied", Now.AddMinutes(1)),
+            ("mid", "Between", Now.AddMinutes(5)),
+        ];
+        var live = new ChatRow("live-1", ChatRole.User, "typing now", ShellStateBuilder.Iso(Now.AddMinutes(30)));
+
+        var rows = ShellStateBuilder.Build(Inputs(chat: chat) with { Drawings = drawings, LiveRows = [live] }).Chat.Rows;
+
+        Assert.Equal(["first q", "first a", "Drew Tied", "Drew Between", "second q", "second a", "Drew A late sketch", "typing now"], rows.Select(r => r.Text));
+        var mid = rows.Single(r => r.DrawingId == "mid");
+        Assert.Equal(ChatRole.Event, mid.Role);
+        Assert.Equal("drawing-mid", mid.Id);
+        Assert.Equal(ShellStateBuilder.Iso(Now.AddMinutes(5)), mid.At);
+        Assert.Equal(3, rows.Count(r => r.DrawingId is not null));
+        Assert.Null(rows[0].DrawingId);
+        Assert.Contains("\"drawingId\":\"mid\"", ShellContract.Serialize(ShellStateBuilder.Build(Inputs(chat: chat) with { Drawings = drawings })));
+        Assert.DoesNotContain("drawingId", ShellContract.Serialize(ShellStateBuilder.Build(Inputs(chat: chat))));
+    }
+
+    [Fact]
+    public void DrawingRowsAreBoundedAndKeepTheNewest()
+    {
+        var drawings = Enumerable.Range(0, 250).Select(i => ($"d{i}", new string('t', 400), Now.AddMinutes(i))).ToArray();
+        var rows = ShellStateBuilder.Build(Inputs() with { Drawings = drawings }).Chat.Rows;
+        Assert.Equal(200, rows.Count);
+        Assert.Equal("d249", rows[^1].DrawingId);
+        Assert.All(rows, r => Assert.True(r.Text.Length <= 205));
+    }
+
+    [Fact]
     public void CapsListsAndContent()
     {
         var files = Enumerable.Range(0, 10).Select(i => $@"C:\out\f{i}.md").ToArray();

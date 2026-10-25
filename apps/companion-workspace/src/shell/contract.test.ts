@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parseHostMessage, parseShellState, settingsActions, settingsPatchKeySchema, settingsSections, shellStateSchema } from "./contract";
+import { drawingActions, parseHostMessage, parseShellState, settingsActions, settingsPatchKeySchema, settingsSections, shellStateSchema } from "./contract";
 
 const fixture = JSON.parse(readFileSync(resolve(__dirname, "../../../../tests/fixtures/shell-state.v1.json"), "utf8"));
 const enums: Record<string, string[]> = JSON.parse(readFileSync(resolve(__dirname, "../../../../tests/fixtures/shell-enums.v1.json"), "utf8"));
@@ -109,6 +109,15 @@ describe("shell contract", () => {
     expect(parseShellState(card("x".repeat(2_001)))).toBeNull();
   });
 
+  it("a chat row may carry a drawing id, and only a string one", () => {
+    const rows = (extra: object) => ({ ...fixture, chat: { rows: [{ id: "r", role: "event", text: "Drew a box", at: "2026-10-24T09:30:00Z", ...extra }] } });
+    expect(parseShellState(rows({ drawingId: "0f1e2d3c" }))?.chat.rows[0].drawingId).toBe("0f1e2d3c");
+    expect(parseShellState(rows({}))?.chat.rows[0].drawingId).toBeUndefined();
+    expect(parseShellState(rows({ drawingId: 7 }))).toBeNull();
+    expect(parseShellState(rows({ drawingId: "" }))).toBeNull();
+    expect(parseShellState(rows({ drawingPath: "x" }))).toBeNull(); // strict: no other keys
+  });
+
   it("enum values match the shared list (drift guard; C# checks the same file)", () => {
     const top = shellStateSchema.shape;
     const settings = top.settings.shape;
@@ -135,6 +144,7 @@ describe("shell contract", () => {
       reachState: settings.agents.shape.reach.element.shape.state.options,
       routineStatus: settings.routines.element.shape.status.options,
       accessMode: settings.access.shape.mode.options,
+      drawingActions,
     };
     expect(Object.keys(actual).sort()).toEqual(Object.keys(enums).sort());
     for (const [name, values] of Object.entries(actual)) expect([name, [...values]]).toEqual([name, enums[name]]);
