@@ -55,6 +55,24 @@ public class JobResultTests
         Assert.Equal(("Done.", "T"), (crlf.Reply, crlf.Title));
     }
 
+    [Theory]
+    [InlineData("```OpenClicky-Result\n{\"title\":\"T\"}\n```", "T")]
+    [InlineData("```openclicky-result json\n{\"title\":\"T\"}\n```", "T")]
+    [InlineData("```openclicky-resultjson\n{\"title\":\"T\"}\n```", null)]
+    public void FenceTagIsCaseInsensitiveAndMayHaveMoreWords(string block, string? title)
+    {
+        var result = JobResult.Parse("Done.\n" + block, "");
+        Assert.Equal(title, result.Title);
+        Assert.Equal(title is null ? "Done.\n" + block : "Done.", result.Reply);
+    }
+
+    [Theory]
+    [InlineData("""{"value":12,"label":"photos"}""", "12")]
+    [InlineData("""{"value":4.5,"label":"photos"}""", "4.5")]
+    [InlineData("""{"value":"12%","label":"photos"}""", "12%")]
+    public void StatValueMayBeANumber(string stat, string value) =>
+        Assert.Equal(new JobStat(value, "photos"), JobResult.Parse(Block("{\"stat\":" + stat + "}"), "").Stat);
+
     [Fact]
     public void LastBlockWins()
     {
@@ -144,6 +162,8 @@ public class JobResultTests
     [InlineData("example.com/login", null)]
     [InlineData("https://example.com/login", "https://example.com/login")]
     [InlineData("http://example.com/", "http://example.com/")]
+    [InlineData("HTTPS://Example.COM/a b", "https://example.com/a%20b")]
+    [InlineData("https://example.com", "https://example.com/")]
     public void RejectsNonHttpPage(string page, string? expected)
     {
         var json = System.Text.Json.JsonSerializer.Serialize(new { your_turn = new { step = "Sign in", page } });

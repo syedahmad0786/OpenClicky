@@ -31,8 +31,9 @@ public sealed record JobResult(string Reply, string? Title, string? Summary, IRe
         + "If the user asked for something to repeat, add \"routine\" with \"title\", \"task\" and either \"every_minutes\" or \"at\" (HH:MM) plus optional \"days\". "
         + "Add \"learned\" for short, reusable lessons about how to do things on this PC. Leave out anything that does not apply.";
 
-    private static readonly Regex Block = new(@"^[ \t]*```" + FenceTag + @"[ \t]*\r?\n(?<json>.*?)\r?\n[ \t]*```[ \t]*\r?$",
-        RegexOptions.Multiline | RegexOptions.Singleline | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+    // The tag is case-insensitive and may be followed by more words on the opening line ("```openclicky-result json").
+    private static readonly Regex Block = new(@"^[ \t]*```" + FenceTag + @"(?:[ \t][^\r\n]*)?\r?\n(?<json>.*?)\r?\n[ \t]*```[ \t]*\r?$",
+        RegexOptions.Multiline | RegexOptions.Singleline | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private static readonly JsonDocumentOptions Lenient = new() { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip };
     private static readonly string[] Days = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
@@ -61,7 +62,9 @@ public sealed record JobResult(string Reply, string? Title, string? Summary, IRe
             if (root.ValueKind != JsonValueKind.Object) return Empty(reply);
             var stripped = reply;
             for (var i = blocks.Count - 1; i >= 0; i--) stripped = stripped.Remove(blocks[i].Index, blocks[i].Length);
-            var stat = Get(root, "stat") is { ValueKind: JsonValueKind.Object } s && Text(Get(s, "value"), 40) is { } value
+            // The headline number may come as a JSON number ("value":12) or a string ("value":"12%").
+            var stat = Get(root, "stat") is { ValueKind: JsonValueKind.Object } s
+                && (Get(s, "value") is { ValueKind: JsonValueKind.Number } number ? Cut(number.GetRawText(), 40) : Text(Get(s, "value"), 40)) is { } value
                 ? new JobStat(value, Text(Get(s, "label"), 80) ?? "") : null;
             return new JobResult(stripped.Trim(), Text(Get(root, "title"), 120), Text(Get(root, "summary"), 300),
                 Texts(Get(root, "points"), 4, 200), stat, Texts(Get(root, "next"), 3, 160),
@@ -133,8 +136,10 @@ public sealed record JobResult(string Reply, string? Title, string? Summary, IRe
     {
         if (element is not { ValueKind: JsonValueKind.Object } step || Text(Get(step, "step"), 600) is not { } text) return null;
         // A link is never cut (a shorter URL points somewhere else): one over 2048 characters is dropped.
+        // Stored in canonical form (Uri.AbsoluteUri), so what is shown is what opens.
         var page = Text(Get(step, "page"), int.MaxValue) is { Length: <= 2_048 } link
-            && Uri.TryCreate(link, UriKind.Absolute, out var uri) && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp) ? link : null;
+            && Uri.TryCreate(link, UriKind.Absolute, out var uri) && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp)
+            && uri.AbsoluteUri is { Length: <= 2_048 } canonical ? canonical : null;
         return new UserStep(text, page, Text(Get(step, "done_when_url_contains"), 200), DateTimeOffset.UtcNow);
     }
 
@@ -147,6 +152,8 @@ public sealed record JobResult(string Reply, string? Title, string? Summary, IRe
 
     private static string? Text(JsonElement? element, int max) =>
         element is { ValueKind: JsonValueKind.String } e && e.GetString()!.Trim() is { Length: > 0 } text ? text[..Math.Min(text.Length, max)] : null;
+
+    private static string Cut(string value, int max) => value[..Math.Min(value.Length, max)];
 
     private static IReadOnlyList<string> Texts(JsonElement? element, int count, int max) =>
         element is { ValueKind: JsonValueKind.Array } array
