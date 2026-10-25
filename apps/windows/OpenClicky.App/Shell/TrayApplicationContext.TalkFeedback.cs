@@ -177,6 +177,7 @@ internal sealed partial class TrayApplicationContext
             case (DictationCards.TidyNoticeId, DictationCards.OkAction):
                 return false;
             default:
+                if (ProactiveCardAction(cardId, actionId) is { } keep) return keep;
                 Log("shell: card action not handled: " + actionId);
                 return false;
         }
@@ -185,6 +186,7 @@ internal sealed partial class TrayApplicationContext
     /// <summary>Closing the consent card is a "not now"; closing the hands-free card is a Stop; closing any other card changes nothing.</summary>
     void IShellHost.CardDismissed(string cardId)
     {
+        ProactiveCardDismissed(cardId);
         if (cardId == CompanionCards.DriveConsentId) AnswerDriveConsent(false);
         else if (cardId == DictationCards.ActivityId && _dictationActive && !_dictationHeld) _ = FinishHandsFreeDictationAsync();
     }

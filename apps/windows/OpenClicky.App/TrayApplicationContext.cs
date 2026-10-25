@@ -306,6 +306,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         // The classic dock stays hidden here: the notch replaces it once the shell is up (UpdateCompanionDock).
         WireDrawings();
         WireCompanion();
+        WireProactive();
         ApplyCompanionStyle();
         if (_settings.AwarenessEnabled) _guideTimer.Start();
         Log($"tray ready — {TalkGesture} to talk");
