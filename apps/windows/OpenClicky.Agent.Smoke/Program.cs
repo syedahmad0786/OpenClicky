@@ -241,6 +241,9 @@ internal static class Program
         var edit = FindDescendant(window, ControlType.Edit, "Type target") ?? FindFirstEdit(window);
         if (edit is null) { Console.Error.WriteLine("FAIL: dictation target edit not found"); return 20; }
 
+        // Other windows may cover the sandbox: keep it topmost (without activating it) so the click below lands on it.
+        SetWindowPos(new IntPtr(window.Current.NativeWindowHandle), new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010); // HWND_TOPMOST; NOSIZE NOMOVE NOACTIVATE
+        await Task.Delay(300).ConfigureAwait(true);
         var point = edit.GetClickablePoint();
         var executor = new CompositeAgentExecutor();
         var focus = await executor.ExecuteAsync(new AgentActionRequest(
@@ -253,6 +256,24 @@ internal static class Program
             "focus deterministic dictation target"), userConfirmed: true).ConfigureAwait(true);
         if (!focus.Success) { Console.Error.WriteLine("FAIL: " + focus.Message); return 21; }
         await Task.Delay(250).ConfigureAwait(true);
+
+        // Context reader: with "Hello world" typed and the caret put after "Hello", the text before the caret must be "Hello".
+        var moves = Enumerable.Repeat(new AgentActionRequest(AgentToolNames.Hotkey, new Dictionary<string, string> { ["keys"] = "left" }, "move caret"), 6);
+        foreach (var step in new[] { new AgentActionRequest(AgentToolNames.TypeText, new Dictionary<string, string> { ["text"] = "Hello world" }, "type context fixture text") }.Concat(moves))
+        {
+            var stepResult = await executor.ExecuteAsync(step, userConfirmed: true).ConfigureAwait(true);
+            if (!stepResult.Success) { Console.Error.WriteLine("FAIL: " + stepResult.Message); return 24; }
+        }
+        await Task.Delay(150).ConfigureAwait(true);
+        if (!DictationTarget.TryCapture(out var contextTarget, out var contextError) || contextTarget is null)
+        { Console.Error.WriteLine("FAIL: dictation context capture: " + contextError); return 25; }
+        var context = await DictationContextReader.ReadAsync(contextTarget, TimeSpan.FromMilliseconds(400), CancellationToken.None).ConfigureAwait(true);
+        Console.WriteLine($"dictation_context app='{context?.AppName}' before='{context?.BeforeText}' after='{context?.AfterText}' selected='{context?.SelectedText}' single={context?.SingleLine} host={context?.SiteHost ?? "-"}");
+        if (context is null || context.BeforeText != "Hello" || context.AfterText != " world" || context.SelectedText != "")
+        { Console.Error.WriteLine("FAIL: expected before='Hello' after=' world' from the fixture field"); return 26; }
+        foreach (var keys in new[] { "ctrl+a", "backspace" }) // leave the field empty for the insertion check below
+            await executor.ExecuteAsync(new AgentActionRequest(AgentToolNames.Hotkey, new Dictionary<string, string> { ["keys"] = keys }, "clear context fixture text"), userConfirmed: true).ConfigureAwait(true);
+        await Task.Delay(150).ConfigureAwait(true);
 
         if (!DictationTarget.TryCapture(out var target, out var error) || target is null)
         { Console.Error.WriteLine("FAIL: dictation target capture: " + error); return 22; }

@@ -25,6 +25,7 @@ public sealed class DictationTarget
     public string AppTitle { get; }
     public string ControlName { get; }
     public bool CanVerifyText { get; }
+    internal AutomationElement Element => _element;
 
     public static bool TryCapture(out DictationTarget? target, out string error, IEnumerable<string>? exclusions = null)
     {
