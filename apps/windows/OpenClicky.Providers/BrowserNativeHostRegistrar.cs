@@ -53,38 +53,64 @@ public static class BrowserNativeHostRegistrar
         return key?.GetValue("") is string s && string.Equals(s, manifestPath, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>True when our host manifest is missing, unreadable or names another exe (an update or a move).</summary>
+    public static bool ManifestDiffers(string folder, string hostExePath)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(File.ReadAllBytes(Path.Combine(folder, HostName + ".json")));
+            return !(doc.RootElement.ValueKind == JsonValueKind.Object && doc.RootElement.TryGetProperty("path", out var path)
+                && path.ValueKind == JsonValueKind.String && string.Equals(path.GetString(), hostExePath, StringComparison.OrdinalIgnoreCase));
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException) { return true; }
+    }
+
     /// <summary>Copies manifest.json, *.js, *.mjs, *.html and icons\* (never test\ or README); removes stale files of those kinds.</summary>
     public static string InstallExtension(string sourceFolder, string targetFolder)
     {
         // Fail before touching the target: stale-file removal below would otherwise wipe a loaded extension folder.
         var manifest = Path.Combine(sourceFolder, "manifest.json");
         if (!File.Exists(manifest)) throw new FileNotFoundException("Extension source has no manifest.json.", manifest);
-        Directory.CreateDirectory(targetFolder);
-        var code = new[] { ".js", ".mjs", ".html" };
-        // Filter by exact extension: Windows wildcard matching lets "*.mjs" also match ".mjsx".
-        string[] Files(string dir) => Directory.GetFiles(dir).Where(f => code.Contains(Path.GetExtension(f), StringComparer.OrdinalIgnoreCase)).ToArray();
-        var wanted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        void Copy(string src, string destDir)
+        var plan = Plan(sourceFolder, targetFolder);
+        foreach (var (from, to) in plan)
         {
-            Directory.CreateDirectory(destDir);
-            var name = Path.GetFileName(src);
-            wanted.Add(Path.GetFullPath(Path.Combine(destDir, name)));
-            File.Copy(src, Path.Combine(destDir, name), true);
+            Directory.CreateDirectory(Path.GetDirectoryName(to)!);
+            File.Copy(from, to, true);
         }
-
-        Copy(manifest, targetFolder);
-        foreach (var f in Files(sourceFolder)) Copy(f, targetFolder);
-        var icons = Path.Combine(sourceFolder, "icons");
-        if (Directory.Exists(icons))
-            foreach (var f in Directory.GetFiles(icons)) Copy(f, Path.Combine(targetFolder, "icons"));
-
-        foreach (var f in Files(targetFolder))
-            if (!wanted.Contains(Path.GetFullPath(f))) File.Delete(f);
-        var targetIcons = Path.Combine(targetFolder, "icons");
-        if (Directory.Exists(targetIcons))
-            foreach (var f in Directory.GetFiles(targetIcons))
-                if (!wanted.Contains(Path.GetFullPath(f))) File.Delete(f);
+        foreach (var f in Stale(targetFolder, plan)) File.Delete(f);
         return targetFolder;
+    }
+
+    /// <summary>True when <see cref="InstallExtension"/> would change the target: a file to copy is missing or different,
+    /// or a stale file would be removed. False when the source has no manifest (nothing to install).</summary>
+    public static bool ExtensionDiffers(string sourceFolder, string targetFolder)
+    {
+        if (!File.Exists(Path.Combine(sourceFolder, "manifest.json"))) return false;
+        var plan = Plan(sourceFolder, targetFolder);
+        return plan.Any(p => !File.Exists(p.To) || !File.ReadAllBytes(p.From).AsSpan().SequenceEqual(File.ReadAllBytes(p.To)))
+            || Stale(targetFolder, plan).Any();
+    }
+
+    private static readonly string[] CodeExtensions = [".js", ".mjs", ".html"];
+
+    // Filter by exact extension: Windows wildcard matching lets "*.mjs" also match ".mjsx".
+    private static string[] CodeFiles(string dir) => Directory.Exists(dir)
+        ? Directory.GetFiles(dir).Where(f => CodeExtensions.Contains(Path.GetExtension(f), StringComparer.OrdinalIgnoreCase)).ToArray()
+        : [];
+
+    private static string[] AllFiles(string dir) => Directory.Exists(dir) ? Directory.GetFiles(dir) : [];
+
+    private static List<(string From, string To)> Plan(string source, string target)
+    {
+        var plan = new List<(string From, string To)> { (Path.Combine(source, "manifest.json"), Path.Combine(target, "manifest.json")) };
+        plan.AddRange(CodeFiles(source).Select(f => (f, Path.Combine(target, Path.GetFileName(f)))));
+        plan.AddRange(AllFiles(Path.Combine(source, "icons")).Select(f => (f, Path.Combine(target, "icons", Path.GetFileName(f)))));
+        return plan;
+    }
+
+    private static List<string> Stale(string target, List<(string From, string To)> plan)
+    {
+        var wanted = new HashSet<string>(plan.Select(p => Path.GetFullPath(p.To)), StringComparer.OrdinalIgnoreCase);
+        return CodeFiles(target).Concat(AllFiles(Path.Combine(target, "icons"))).Where(f => !wanted.Contains(Path.GetFullPath(f))).ToList();
     }
 }

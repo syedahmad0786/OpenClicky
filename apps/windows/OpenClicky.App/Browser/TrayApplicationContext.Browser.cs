@@ -39,6 +39,7 @@ internal sealed partial class TrayApplicationContext
         byte[] secret;
         try { secret = ChromeBridgeSecretStore.LoadOrCreate(); }
         catch (Exception ex) when (ex is not OutOfMemoryException) { Log("browser_secret_error=" + ex.GetType().Name); return; }
+        if (BrowserRegistered()) RefreshBrowserInstall();
         while (!_lifetime.IsCancellationRequested)
         {
             if (!BrowserRegistered())
@@ -65,6 +66,23 @@ internal sealed partial class TrayApplicationContext
             try { await Task.Delay(TimeSpan.FromSeconds(2), _lifetime.Token).ConfigureAwait(false); }
             catch (OperationCanceledException) { return; }
         }
+    }
+
+    /// <summary>
+    /// After an update or a move the registered manifest can name an old exe and the loaded extension folder can hold old files.
+    /// Rewrites only our own files when they differ; the registry key already points at the same manifest path, so no registry writes.
+    /// </summary>
+    private void RefreshBrowserInstall()
+    {
+        try
+        {
+            if (BrowserNativeHostRegistrar.ManifestDiffers(BrowserNativeHostRegistrar.DefaultBridgeFolder, Application.ExecutablePath))
+                BrowserNativeHostRegistrar.WriteManifest(BrowserNativeHostRegistrar.DefaultBridgeFolder, Application.ExecutablePath);
+            var source = DeploymentPathResolver.ResolveDirectory("chrome-extension");
+            if (BrowserNativeHostRegistrar.ExtensionDiffers(source, BrowserNativeHostRegistrar.DefaultExtensionFolder))
+                BrowserNativeHostRegistrar.InstallExtension(source, BrowserNativeHostRegistrar.DefaultExtensionFolder);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Log("browser_refresh_error=" + ex.GetType().Name); }
     }
 
     // Raised on pipe threads: never throw back into the server.

@@ -105,4 +105,39 @@ public sealed class BrowserNativeHostRegistrarTests : IDisposable
         Assert.Equal(new[] { "a.js", "b.mjs", "c.html", @"icons\on.png", "keep.txt", "manifest.json" }.Order(), got);
         Assert.Equal("new", File.ReadAllText(Path.Combine(dst, "a.js")));
     }
+
+    [Fact]
+    public void ManifestDiffersWhenMissingOrPointingElsewhere()
+    {
+        var folder = Path.Combine(_dir, "bridge");
+        Assert.True(BrowserNativeHostRegistrar.ManifestDiffers(folder, @"C:\new\OpenClicky.exe"));
+        BrowserNativeHostRegistrar.WriteManifest(folder, @"C:\old\OpenClicky.exe");
+        Assert.True(BrowserNativeHostRegistrar.ManifestDiffers(folder, @"C:\new\OpenClicky.exe"));
+        Assert.False(BrowserNativeHostRegistrar.ManifestDiffers(folder, @"C:\old\OpenClicky.exe"));
+        File.WriteAllText(Path.Combine(folder, "com.openclicky.chrome_bridge.json"), "not json");
+        Assert.True(BrowserNativeHostRegistrar.ManifestDiffers(folder, @"C:\old\OpenClicky.exe"));
+    }
+
+    [Fact]
+    public void ExtensionDiffersUntilInstalledThenOnAnyChange()
+    {
+        var src = Path.Combine(_dir, "src");
+        var dst = Path.Combine(_dir, "dst");
+        Directory.CreateDirectory(Path.Combine(src, "icons"));
+        foreach (var f in new[] { "manifest.json", "a.js", @"icons\on.png", "README.md" }) File.WriteAllText(Path.Combine(src, f), "v1");
+        Assert.True(BrowserNativeHostRegistrar.ExtensionDiffers(src, dst));
+        BrowserNativeHostRegistrar.InstallExtension(src, dst);
+        Assert.False(BrowserNativeHostRegistrar.ExtensionDiffers(src, dst));
+
+        File.WriteAllText(Path.Combine(src, "README.md"), "v2"); // not copied, so no difference
+        Assert.False(BrowserNativeHostRegistrar.ExtensionDiffers(src, dst));
+        File.WriteAllText(Path.Combine(src, "a.js"), "v2");
+        Assert.True(BrowserNativeHostRegistrar.ExtensionDiffers(src, dst));
+        BrowserNativeHostRegistrar.InstallExtension(src, dst);
+        File.WriteAllText(Path.Combine(dst, "stale.mjs"), "old"); // InstallExtension would remove it
+        Assert.True(BrowserNativeHostRegistrar.ExtensionDiffers(src, dst));
+        BrowserNativeHostRegistrar.InstallExtension(src, dst);
+        Assert.False(BrowserNativeHostRegistrar.ExtensionDiffers(src, dst));
+        Assert.False(BrowserNativeHostRegistrar.ExtensionDiffers(Path.Combine(_dir, "no-source"), dst)); // nothing to install
+    }
 }

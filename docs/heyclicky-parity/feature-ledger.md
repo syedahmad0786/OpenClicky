@@ -111,7 +111,7 @@ RE depth: **S** = static evidence is enough · **L** = needs a live view-only lo
 | G-S8 | Over-budget snapshots putting on-screen elements first | Orders snapshot lines by what is visible | Skip — snapshots are cut at the 12,000-character budget with a note to use `query` or `interactive` (a `ponytail:` comment marks the ceiling) | — |
 | G-S9 | Exact-origin allow-list (old `bridge-config.json`) | Limits the agent to listed sites | Skip — replaced by the access modes plus a title/URL deny list (Ruling R1); the deny list is a convenience, not a security boundary | — |
 
-**Native-accepted: pending.** G1–G3 move to Native-accepted after the user runs these ten checks (they need the user's real browser and signed-in sites). The harness above proved the page layer in a throwaway headless Chrome; it cannot load the extension (branded Chrome ignores `--load-extension`), show a tab group, or reach the user's profile:
+**Native-accepted: pending.** G1–G3 move to Native-accepted after the user runs these eleven checks (they need the user's real browser and signed-in sites). The harness above proved the page layer in a throwaway headless Chrome; it cannot load the extension (branded Chrome ignores `--load-extension`), show a tab group, or reach the user's profile:
 
 1. Settings → Integrations → Browser: Chrome and its profiles are listed; pick a profile and click Connect. The extensions page opens in that profile and Explorer shows the extension folder. (Headless Chrome turns a `chrome://extensions/` command-line URL into `chrome://newtab/`, so only a real window shows whether the page opens.)
 2. Turn on Developer mode, Load unpacked with that folder. The card turns "Connected" within a few seconds and the popup says "Connected to OpenClicky."
@@ -123,6 +123,9 @@ RE depth: **S** = static evidence is enough · **L** = needs a live view-only lo
 8. Connect a second profile: the popup there says another profile is connected; switching in the card moves work to it.
 9. Disconnect in the card mid-job: the popup says to finish setup at once, Chrome's debugging bar goes away and the job's tabs stay open; remove the extension yourself.
 10. Quit OpenClicky mid-job: Chrome's debugging bar goes away and the tabs stay. Then, with OpenClicky closed, click Open OpenClicky in the popup: the app starts.
+11. From an MSIX install, Connect and confirm the card turns Connected (MSIX may hide HKCU/LocalAppData writes from Chrome).
+
+**Known gap:** an MSIX-packaged OpenClicky is unverified with the browser bridge: package virtualization may hide the HKCU native-host key and the LocalAppData manifest and extension folder from Chrome (check 11). After an update or a move, OpenClicky rewrites its own host manifest and extension folder on startup when they differ (no registry writes); reload the extension on the extensions page if Chrome keeps the old files.
 
 ## 6. OpenClicky extras kept (Extra)
 
