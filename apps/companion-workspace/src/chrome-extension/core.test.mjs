@@ -253,6 +253,57 @@ describe("createBridge", () => {
     expect(listeners.size).toBe(0);
   });
 
+  it("download waits out Chrome's scan and treats scanned-safe and policy-allowed as safe", async () => {
+    const listeners = new Set();
+    const items = new Map();
+    let next = 1;
+    const plan = {
+      "scan.pdf": ["asyncScanning", "deepScannedSafe"],
+      "policy.zip": ["allowlistedByPolicy", "allowlistedByPolicy"],
+      "prompt.zip": ["promptForScanning", "dangerous"],
+    };
+    const downloads = {
+      download: async (o) => {
+        const id = next++;
+        const [during, after] = plan[o.url.split("/").pop()];
+        items.set(id, { id, state: "complete", danger: during, filename: o.filename }); // complete, but still scanning
+        setTimeout(() => { items.get(id).danger = after; for (const l of listeners) l({ id }); }, 20);
+        return id;
+      },
+      search: async ({ id }) => [{ ...items.get(id) }],
+      cancel: async () => {},
+      onChanged: { addListener: (l) => listeners.add(l), removeListener: (l) => listeners.delete(l) },
+    };
+    const { run } = setup({ downloads });
+    expect((await run("download", { url: "https://files.test/scan.pdf" })).result.text).toBe("Downloaded scan.pdf to Downloads/OpenClicky/weekly-research.");
+    expect((await run("download", { url: "https://files.test/policy.zip" })).ok).toBe(true);
+    expect(await run("download", { url: "https://files.test/prompt.zip" })).toEqual({ ok: false, error: "Chrome flagged this download as unsafe, so it was not kept." });
+    expect(listeners.size).toBe(0);
+  });
+
+  it("a download still scanning at the limit times out and stops listening", async () => {
+    vi.useFakeTimers();
+    try {
+      const listeners = new Set();
+      const downloads = {
+        download: async () => 1,
+        search: async () => [{ id: 1, state: "complete", danger: "asyncScanning", filename: "x" }],
+        onChanged: { addListener: (l) => listeners.add(l), removeListener: (l) => listeners.delete(l) },
+      };
+      const { run } = setup({ downloads });
+      let done = null;
+      run("download", { url: "https://files.test/big.iso" }).then((r) => { done = r; });
+      await vi.advanceTimersByTimeAsync(44000);
+      expect(done).toBe(null);
+      expect(listeners.size).toBe(1);
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(done).toEqual({ ok: false, error: "The page took too long to answer." });
+      expect(listeners.size).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("manifest has no host permissions or content scripts", () => {
     const m = JSON.parse(readFileSync(resolve(process.cwd(), "../chrome-extension/manifest.json"), "utf8"));
     expect(m.manifest_version).toBe(3);

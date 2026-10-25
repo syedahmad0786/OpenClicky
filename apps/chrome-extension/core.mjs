@@ -12,7 +12,8 @@ export const MODEL_OPS = [
 const OPS = new Set([...MODEL_OPS, "end", "sweep"]);
 const BATCH_OPS = new Set(["open", "click", "fill", "press", "scroll", "wait_for", "back", "upload"]);
 const MUTATING = new Set(["open", "click", "fill", "type", "press", "back", "click_at", "hover_at", "drag_at", "javascript", "upload", "dialog"]);
-const SAFE_DANGER = new Set(["safe", "accepted"]);
+const SAFE_DANGER = new Set(["safe", "accepted", "deepScannedSafe", "allowlistedByPolicy"]);
+const SCANNING = new Set(["asyncScanning", "promptForScanning"]); // Chrome hasn't decided yet: keep waiting
 export const DEFAULT_TIMEOUTS = { callMs: 20000, batchMs: 30000, downloadMs: 45000, loadMs: 8000, maxSteps: 20 };
 
 const NO_TAB = "Open a tab or pass a tabId from tabs.";
@@ -239,20 +240,25 @@ export function createBridge({ debuggee, tabs, downloads, refStore, limits = {} 
     const folder = slug(cmd.groupTitle) || slug(cmd.owner) || "job";
     const id = await downloads.download({ url, filename: `OpenClicky/${folder}/${fileNameOf(url)}`, conflictAction: "uniquify" });
     const item = await new Promise((resolve, reject) => {
+      const finish = (settle, value) => {
+        clearTimeout(timer);
+        downloads.onChanged.removeListener(listener);
+        settle(value);
+      };
       const check = async () => {
         try {
           const [it] = await downloads.search({ id });
           if (!it) return;
-          if (it.state === "complete" || it.state === "interrupted" || (it.danger && !SAFE_DANGER.has(it.danger))) {
-            downloads.onChanged.removeListener(listener);
-            resolve(it);
-          }
+          const decided = it.state === "interrupted" || (!SCANNING.has(it.danger)
+            && (it.state === "complete" || (it.danger && !SAFE_DANGER.has(it.danger))));
+          if (decided) finish(resolve, it);
         } catch (e) {
-          downloads.onChanged.removeListener(listener);
-          reject(e);
+          finish(reject, e);
         }
       };
       const listener = (delta) => { if (delta?.id === id) check(); };
+      // The call's own limit fails the op; this one makes sure the listener goes too.
+      const timer = setTimeout(() => finish(reject, new Error(TOO_LONG)), L.downloadMs);
       downloads.onChanged.addListener(listener);
       check(); // it may have finished before the listener was added
     });
