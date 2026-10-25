@@ -22,6 +22,7 @@ export const drawingActions = ["replayWindow", "replayFullScreen", "replayBoard"
 export const settingsSections = [
   "account", "general", "voice", "microphone", "dictation", "shortcuts", "cursor", "integrations",
   "agents", "routines", "access", "memory", "notes", "clipboard", "tasks", "advanced",
+  "proactive",
 ] as const;
 export const settingsActions = [
   "signIn", "signOut", "refreshModels", "manageUsage", "secret.edit", "testMic", "downloadWhisper", "downloadWhisperMultilingual", "playTestSound",
@@ -162,6 +163,10 @@ const settingsViewSchema = z.object({
     rememberHistory: z.boolean(),
   }).strict(),
   advanced: z.object({ useLocalProxy: z.boolean(), proxyUrl: text(2_048), forceGdiCapture: z.boolean() }).strict(),
+  proactive: z.object({
+    morningBrief: z.boolean(), suggestions: z.boolean(), integrationNudges: z.boolean(), meetingCountdown: z.boolean(),
+    calendarConnector: text(80).nullable(),
+  }).strict(),
 }).strict();
 
 export const shellStateSchema = z.object({

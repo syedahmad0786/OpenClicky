@@ -250,4 +250,42 @@ public class SettingsPatchTests
         Assert.Equal("#3380FF", s.AccentColor);
         Assert.Equal(2_000, s.AgentDenyListExtra!.Length);
     }
+
+    [Fact]
+    public void ProactiveFlagsDefaultOffAndPatch()
+    {
+        var s = new AppSettings();
+        Assert.False(s.Proactive.MorningBrief || s.Proactive.Suggestions || s.Proactive.IntegrationNudges || s.Proactive.MeetingCountdown || s.Proactive.AnyOn);
+        Assert.Null(s.Proactive.CalendarConnector);
+        foreach (var key in new[] { "morningBrief", "suggestions", "integrationNudges", "meetingCountdown" })
+            Assert.Equal(PatchResult.Applied, Apply(s, "proactive." + key, "true", out _));
+        Assert.True(s.Proactive.MorningBrief && s.Proactive.Suggestions && s.Proactive.IntegrationNudges && s.Proactive.MeetingCountdown && s.Proactive.AnyOn);
+        Assert.Equal(PatchResult.Rejected, Apply(s, "proactive.suggestions", "\"yes\"", out var error));
+        Assert.Equal("Expected on or off.", error);
+    }
+
+    [Fact]
+    public void ProactiveCalendarConnectorValidates()
+    {
+        var s = new AppSettings();
+        Assert.Equal(PatchResult.Applied, Apply(s, "proactive.calendarConnector", "\"work_cal\"", out _));
+        Assert.Equal("work_cal", s.Proactive.CalendarConnector);
+        foreach (var bad in new[] { "\"Bad Key!\"", "\"" + new string('a', 81) + "\"", "7", "null" })
+        {
+            Assert.Equal(PatchResult.Rejected, Apply(s, "proactive.calendarConnector", bad, out var error));
+            Assert.Equal("Pick one of your connectors.", error);
+            Assert.Equal("work_cal", s.Proactive.CalendarConnector);
+        }
+        Assert.Equal(PatchResult.Applied, Apply(s, "proactive.calendarConnector", "\"" + new string('a', 80) + "\"", out _));
+        Assert.Equal(PatchResult.Applied, Apply(s, "proactive.calendarConnector", "\"\"", out _));
+        Assert.Null(s.Proactive.CalendarConnector);
+    }
+
+    [Fact]
+    public void ProactiveNullObjectIsTolerated()
+    {
+        var s = new AppSettings { Proactive = null! };
+        Assert.Equal(PatchResult.Applied, Apply(s, "proactive.suggestions", "true", out _));
+        Assert.True(s.Proactive.Suggestions);
+    }
 }

@@ -11,6 +11,9 @@ public sealed class AppSettings
 
     public bool UseLocalProxy { get; set; }
 
+    /// <summary>Proactive cards, all off by default. A null from hand-edited JSON is treated as defaults by every reader.</summary>
+    public OpenClicky.Core.Proactive.ProactiveSettings Proactive { get; set; } = new();
+
     /// <summary>Which provider Talk/Agent call. OpenRouter remains an explicit alternative.</summary>
     public AuthProvider AuthProvider { get; set; } = AuthProvider.ChatGPT;
 

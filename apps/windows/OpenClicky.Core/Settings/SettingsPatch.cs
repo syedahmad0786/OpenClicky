@@ -28,7 +28,16 @@ public static class SettingsPatch
         ["access.rememberHistory"] = (s, v) => s.PersistConversationHistory = v,
         ["advanced.useLocalProxy"] = (s, v) => s.UseLocalProxy = v,
         ["advanced.forceGdiCapture"] = (s, v) => s.ForceGdiCapture = v,
+        ["proactive.morningBrief"] = (s, v) => Proactive(s).MorningBrief = v,
+        ["proactive.suggestions"] = (s, v) => Proactive(s).Suggestions = v,
+        ["proactive.integrationNudges"] = (s, v) => Proactive(s).IntegrationNudges = v,
+        ["proactive.meetingCountdown"] = (s, v) => Proactive(s).MeetingCountdown = v,
     };
+
+    private static readonly Regex ConnectorKey = new(@"^[a-z0-9_]{1,80}\z", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(50));
+
+    /// <summary>The proactive block, created when hand-edited JSON left it null so a patch is never lost.</summary>
+    private static OpenClicky.Core.Proactive.ProactiveSettings Proactive(AppSettings s) => s.Proactive ??= new();
 
     private sealed record HotkeySlot(string Name, Func<AppSettings, HotkeyBinding?> Get, Action<AppSettings, HotkeyBinding> Set, HotkeyBinding Default);
 
@@ -153,6 +162,12 @@ public static class SettingsPatch
                 s.OpenRouterModel = routed!;
                 return PatchResult.Applied;
 
+            case "proactive.calendarConnector":
+                var connector = value.ValueKind == JsonValueKind.String ? ShellIntentParser.ReadString(value) : null;
+                if (connector is null || (connector.Length > 0 && !ConnectorKey.IsMatch(connector))) return Reject("Pick one of your connectors.", out error);
+                Proactive(s).CalendarConnector = connector.Length == 0 ? null : connector;
+                return PatchResult.Applied;
+
             default:
                 return Reject("Unknown setting.", out error);
         }
@@ -265,5 +280,6 @@ public static class SettingsPatch
         s.VoiceId = string.IsNullOrWhiteSpace(s.VoiceId) ? SettingsCatalog.WindowsDefaultVoice : s.VoiceId;
         s.DictationLanguage = SettingsCatalog.Languages.Any(l => l.Code == s.DictationLanguage) ? s.DictationLanguage : "en";
         if (s.AgentDenyListExtra is { } deny) s.AgentDenyListExtra = SettingsCatalog.CleanDenyList(deny);
+        Proactive(s);
     }
 }

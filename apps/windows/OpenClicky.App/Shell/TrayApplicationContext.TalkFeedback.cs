@@ -187,14 +187,16 @@ internal sealed partial class TrayApplicationContext
             case (var id, RoutineRequests.ScheduleAction or RoutineRequests.DismissAction) when RoutineRequests.RequestIdOf(id) is { } requestId:
                 return RoutineConfirmAction(requestId, actionId);
             default:
+                if (ProactiveCardAction(cardId, actionId) is { } keep) return keep;
                 Log("shell: card action not handled: " + actionId);
                 return false;
         }
     }
 
-    /// <summary>Closing the consent card is a "not now"; closing the hands-free card is a Stop; closing any other card changes nothing.</summary>
+    /// <summary>Closing the consent card is a "not now"; closing the hands-free card is a Stop; closing a proactive card drops it (a meeting is not shown again, a suggestion is removed); closing any other card changes nothing.</summary>
     void IShellHost.CardDismissed(string cardId)
     {
+        ProactiveCardDismissed(cardId);
         if (cardId == CompanionCards.DriveConsentId) AnswerDriveConsent(false);
         else if (cardId == DictationCards.ActivityId && _dictationActive && !_dictationHeld) _ = FinishHandsFreeDictationAsync();
         else if (RoutineRequests.RequestIdOf(cardId) is { } requestId) DiscardRoutineRequest(requestId); // closing the card is Not now

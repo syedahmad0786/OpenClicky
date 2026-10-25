@@ -25,7 +25,7 @@ it("lists the sidebar sections in order with group headers and posts settings.se
   const posts = host();
   const { container } = render(<SettingsPanel state={make("general")} />);
   const names = within(screen.getByRole("navigation", { name: "Settings sections" })).getAllByRole("button").map((b) => b.textContent);
-  expect(names).toEqual(["Account", "General", "Voice", "Microphone", "Dictation", "Shortcuts", "Cursor", "Integrations", "Agents", "Routines",
+  expect(names).toEqual(["Account", "General", "Voice", "Microphone", "Dictation", "Shortcuts", "Cursor", "Integrations", "Agents", "Routines", "Proactive",
     "Access & privacy", "Memory", "Notes", "Clipboard shelf", "Tasks", "Advanced"]);
   expect([...container.querySelectorAll(".settings-sidebar__group")].map((e) => e.textContent)).toEqual(["OpenClicky", "Work", "Extras"]);
   expect(screen.getByRole("button", { name: "General" })).toHaveAttribute("aria-current", "page");
