@@ -7,6 +7,11 @@ namespace OpenClicky.Core.Onboarding;
 public static class OnboardingDrawDemo
 {
     public const string Prompt = "Show me how you draw on my screen";
+    /// <summary>
+    /// What the demo sends; the chat shows <see cref="Prompt"/>. Sending the prompt itself would start a guided walkthrough
+    /// (TalkOrchestrator treats requests beginning "show me how" as one), which clears the drawing.
+    /// </summary>
+    public const string Request = "Draw on my screen to show what you can do";
     public const string Spoken = "I can circle things, point at them and leave you a note. Press Escape and it all goes away.";
 
     public static string Reply(IReadOnlyList<ScreenCaptureResult> screens)

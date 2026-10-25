@@ -13,11 +13,6 @@ namespace OpenClicky.App;
 internal sealed partial class TrayApplicationContext
 {
     private const string ScreenSettingsUri = "ms-settings:privacy-graphicscaptureprogrammatic";
-    /// <summary>
-    /// What the draw demo sends; the chat shows <see cref="OnboardingDrawDemo.Prompt"/>. Sending the prompt itself would start a
-    /// guided walkthrough (TalkOrchestrator treats requests beginning "show me how" as one), which clears the drawing.
-    /// </summary>
-    private const string DrawDemoRequest = "Draw on my screen to show what you can do";
 
     private readonly OnboardingFlow _onboarding = new();
     /// <summary>The talk client used while <see cref="_demoTalk"/> is set; null means the canned pointing demo client.</summary>
@@ -27,6 +22,8 @@ internal sealed partial class TrayApplicationContext
     private string? _tourDemo;
     /// <summary>The draw demo ran in this tour, so its drawing may still be on screen.</summary>
     private bool _tourDrew;
+    /// <summary>The test window the tour's practice run opened; closed once the tour leaves that step or ends.</summary>
+    private OpenClicky.Sandbox.SandboxForm? _tourSandbox;
 
     /// <summary>Once the shell is up: the tour starts by itself until it has been skipped or finished once.</summary>
     private void MaybeStartOnboarding()
@@ -64,11 +61,12 @@ internal sealed partial class TrayApplicationContext
     /// <summary>Skip (openHome false) or Finish: stops a running demo first, then the tour never starts by itself again.</summary>
     private void EndTour(bool openHome)
     {
-        if (_tourDemo == "drive") CancelTask();
+        if (_tourDemo == "drive") { _talk.CancelCurrentTurn(); CancelTask(); } // the turn too: the task may not have started yet
         else if (_tourDemo == "draw") _talk.CancelCurrentTurn();
         if (_tourDrew) _talk.ClearDrawing();
         StopMicTest();
         _onboarding.End();
+        CloseTourSandbox();
         _settings.FirstRunCompleted = true;
         SettingsStore.Save(_settings);
         PushTour();
@@ -82,6 +80,7 @@ internal sealed partial class TrayApplicationContext
         var from = _onboarding.Step;
         if (!move()) return;
         if (from == OnboardingStep.MicCheck) StopMicTest();
+        if (from == OnboardingStep.DriveDemo) CloseTourSandbox();
         if (_onboarding.Step == OnboardingStep.Microphone) SettingsProbe.Refresh();
         PushTour();
     }
@@ -91,10 +90,11 @@ internal sealed partial class TrayApplicationContext
     {
         if (_onboardingWired) return;
         _onboardingWired = true;
-        _talk.TurnCommitted += _ => OnUi(() =>
+        // A finished model reply, history on or off. MessageReceived("OpenClicky") also carries errors such as "add an OpenRouter key".
+        _talk.AssistantResponseChanged += (_, final) =>
         {
-            if (_onboarding.MarkDone(OnboardingStep.VoiceHello) || _onboarding.MarkDone(OnboardingStep.CircleToAsk)) PushTour();
-        });
+            if (final) OnUi(() => { if (_onboarding.MarkDone(OnboardingStep.VoiceHello) || _onboarding.MarkDone(OnboardingStep.CircleToAsk)) PushTour(); });
+        };
         _hotkey.TextMode += (_, _) => TourStepDone(OnboardingStep.TextMode);
         _hotkey.DictateEnded += (_, e) => { if (!e.Cancelled) TourStepDone(OnboardingStep.Dictation); };
         _hotkey.HandsFreeToggled += (_, _) => TourStepDone(OnboardingStep.Dictation);
@@ -102,9 +102,23 @@ internal sealed partial class TrayApplicationContext
 
     private void TourStepDone(OnboardingStep step) => OnUi(() => { if (_onboarding.MarkDone(step)) PushTour(); });
 
-    /// <summary>On that step, with no demo, task or talk turn running.</summary>
-    private bool CanStartTourDemo(OnboardingStep step) =>
-        _onboarding.Step == step && !_onboarding.Busy && _tourDemo is null && _talk.State == CompanionVoiceState.Idle && _taskCts is null;
+    /// <summary>On that step, with no demo, task or talk turn running. A running turn or task is refused out loud; the rest silently.</summary>
+    private bool CanStartTourDemo(OnboardingStep step)
+    {
+        if (_onboarding.Step != step || _onboarding.Busy || _tourDemo is not null) return false;
+        if (_talk.State == CompanionVoiceState.Idle && _taskCts is null) return true;
+        _shell?.AddToast("Finish the current voice turn or task first.");
+        return false;
+    }
+
+    /// <summary>Never while a sandbox demo runs; the form may already be gone (closed by the user, or replaced by the classic demo).</summary>
+    private void CloseTourSandbox()
+    {
+        if (_sandboxDemo || _tourSandbox is null) return;
+        if (ReferenceEquals(_sandbox, _tourSandbox)) _sandbox = null;
+        _tourSandbox.Dispose();
+        _tourSandbox = null;
+    }
 
     /// <summary>A real talk turn with a canned reply: the screenshot stays on this PC and no model is called.</summary>
     private async Task RunTourDrawDemoAsync()
@@ -115,7 +129,8 @@ internal sealed partial class TrayApplicationContext
         PushTour();
         _demoTalkClient = new OnboardingDrawTalkClient();
         _demoTalk = true;
-        try { await _talk.SubmitTextAsync(DrawDemoRequest, remember: false, displayAs: OnboardingDrawDemo.Prompt); }
+        _talk.ClearDrawing(); // so HasDrawing below means this demo drew (the tour wipes any drawing when it ends anyway)
+        try { await _talk.SubmitTextAsync(OnboardingDrawDemo.Request, remember: false, displayAs: OnboardingDrawDemo.Prompt); }
         catch (Exception ex) when (ex is not OutOfMemoryException) { Log("onboarding_draw_error=" + ex.GetType().Name); }
         finally
         {
@@ -124,7 +139,8 @@ internal sealed partial class TrayApplicationContext
             _tourDemo = null;
             if (!_onboarding.Active) _talk.ClearDrawing(); // ended while the reply was still drawing
             _onboarding.Busy = false;
-            _onboarding.MarkDone(OnboardingStep.DrawDemo);
+            // Only when something was drawn: a failed capture ("Bring the app ... to the front") draws nothing.
+            if (_overlay.HasDrawing) _onboarding.MarkDone(OnboardingStep.DrawDemo);
             PushTour();
         }
     }
@@ -141,6 +157,8 @@ internal sealed partial class TrayApplicationContext
         finally
         {
             _tourDemo = null;
+            _tourSandbox = _sandbox;
+            if (!_onboarding.Active) CloseTourSandbox(); // ended while the run was going
             _onboarding.Busy = false;
             if (ok) _onboarding.MarkDone(OnboardingStep.DriveDemo);
             PushTour();

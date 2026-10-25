@@ -83,4 +83,17 @@ public class OnboardingDrawDemoTests
 
         Assert.Equal(OnboardingDrawDemo.Reply(screens), reply);
     }
+
+    /// <summary>The walkthrough triggers are inline in TalkOrchestrator.RunTurnAsync: "show me how" / "guide me", ignoring case.</summary>
+    [Fact]
+    public void RequestRoutesAsAPlainTalkTurn()
+    {
+        var request = OnboardingDrawDemo.Request;
+
+        Assert.False(request.StartsWith("show me how", StringComparison.OrdinalIgnoreCase));
+        Assert.False(request.StartsWith("guide me", StringComparison.OrdinalIgnoreCase));
+        Assert.False(AgentIntent.TryExtract(request, out _));
+        Assert.False(VisualArtifactReply.IsSelfContainedRequest(request));
+        Assert.StartsWith("show me how", OnboardingDrawDemo.Prompt, StringComparison.OrdinalIgnoreCase); // why Prompt is display-only
+    }
 }
