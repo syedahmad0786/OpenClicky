@@ -54,7 +54,7 @@ public sealed class DesktopToolSession
 
     public DesktopToolSession(IDesktopToolHost host, AgentAccessMode access, IEnumerable<string>? denyListExtra = null,
         CancellationToken taskToken = default, ChromeBridgeSession? browser = null, Action<string>? onDestinationObserved = null,
-        JobOutputTools? jobFiles = null, IReadOnlyList<RemoteMcpConnector>? connectors = null)
+        JobOutputTools? jobFiles = null, IReadOnlyList<McpConnector>? connectors = null)
     {
         JobFiles = jobFiles;
         Connectors = connectors ?? [];
@@ -72,7 +72,7 @@ public sealed class DesktopToolSession
     public AgentAccessMode AccessSnapshot => _access;
     public bool BrowserToolsAvailable => _browser is not null;
     public JobOutputTools? JobFiles { get; }
-    public IReadOnlyList<RemoteMcpConnector> Connectors { get; }
+    public IReadOnlyList<McpConnector> Connectors { get; }
     public bool HasUnverifiedAppLaunch => _unverifiedAppLaunchIds.Count > 0;
     public bool HasFailedApprovedAction => _failedApprovedAction || (_browser?.HasFailedApprovedAction ?? false);
     public bool WasDeclined => _endedByRejection || (_browser?.WasDeclined ?? false);

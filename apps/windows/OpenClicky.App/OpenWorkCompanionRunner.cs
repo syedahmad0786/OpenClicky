@@ -10,7 +10,7 @@ internal static class OpenWorkCompanionRunner
     public static async Task<OpenCodeTaskResult> RunAsync(string task, AppSettings settings, ISecretStore secrets,
         IDesktopToolHost host, AgentAccessMode access, Action<AgentProgress> progress,
         CancellationToken token, string? runtimeDirectory = null, string? workspaceDirectory = null, ChromeBridgeSession? browser = null,
-        JobOutputTools? jobFiles = null, IReadOnlyList<RemoteMcpConnector>? connectors = null)
+        JobOutputTools? jobFiles = null, IReadOnlyList<McpConnector>? connectors = null)
     {
         if (settings.AuthProvider != AuthProvider.ChatGPT || !ProviderFactory.IsChatGptSignedIn(secrets))
             throw new InvalidOperationException("Continue with ChatGPT in Settings before running a task.");

@@ -814,9 +814,9 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         catch (Exception ex) when (ex is not OutOfMemoryException) { Log("work_index_error=" + ex.GetType().Name); }
     }
 
-    private IReadOnlyList<RemoteMcpConnector> OpenConnectors()
+    private IReadOnlyList<McpConnector> OpenConnectors()
     {
-        var list = new List<RemoteMcpConnector>();
+        var list = new List<McpConnector>();
         try
         {
             foreach (var info in _connectors.List())
