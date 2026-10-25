@@ -6,7 +6,8 @@ namespace OpenClicky.Providers;
 
 public static class ChromeBridgeSecretStore
 {
-    public static string DefaultPath => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OpenClicky", "chrome-bridge.key");
+    /// <summary>OPENCLICKY_BROWSER_KEY (a full file path) moves the key for tests, like OPENCLICKY_BROWSER_PIPE; Windows ignores a changed LOCALAPPDATA.</summary>
+    public static string DefaultPath => Environment.GetEnvironmentVariable("OPENCLICKY_BROWSER_KEY") is { Length: > 0 } p ? p : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OpenClicky", "chrome-bridge.key");
 
     public static byte[] LoadOrCreate(string? path = null)
     {
