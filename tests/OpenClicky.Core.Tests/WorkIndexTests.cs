@@ -101,12 +101,53 @@ public class WorkIndexTests
         Assert.StartsWith(existing.TrimEnd('\n'), text);
         Assert.EndsWith(Close + "\n", text);
         Assert.Contains($"{Stamp(T0)} · done · Done it", Block(text[existing.Length..]));
-        // The next render keeps the text, adds the job list before the block and never duplicates the block; after that it is stable.
+        // The next render keeps the text, has the job list before the block and never duplicates the block; after that it is stable.
         var again = WorkIndex.Render(text, [job], [run]);
         Assert.StartsWith(existing.TrimEnd('\n'), again);
         Assert.Equal(2, again.Split(Close).Length);
         Assert.Contains("# Work\n\n- Job — j — done\n\n" + Open, again);
         Assert.Equal(again, WorkIndex.Render(again, [job], [run]));
+    }
+
+    [Theory]
+    // The user deleted the closing marker of an app-written file that has notes after the block.
+    [InlineData("# Work\n\n- Old — o — done\n\n" + Open + "\nold run\n\n## USER notes\nUSER keep me.\n")]
+    // A stray closing marker at the very start of the file.
+    [InlineData(Close + "\nUSER notes after a stray close\n")]
+    // An orphaned opening marker and no heading.
+    [InlineData("USER intro\n" + Open + "\nUSER half block\n")]
+    // Text under the heading, inside the job list area, and after an intact block.
+    [InlineData("USER preface\n# Work\nUSER line under heading\n- Old — o — done\n\n" + Open + "\nx\n" + Close + "\nUSER after\n")]
+    // A heading and job list with no block at all, then the user's own text.
+    [InlineData("# Work\n\n- Old — o — done\n\nUSER tail\n")]
+    public void NeverRemovesUserTextAcrossRenders(string existing)
+    {
+        var userLines = existing.Split('\n').Where(l => l.Contains("USER", StringComparison.Ordinal)).ToList();
+        var text = existing;
+        for (var i = 0; i < 4; i++)
+        {
+            // Different jobs and runs each time, as when WORK.md is rewritten after each state change.
+            var jobs = Enumerable.Range(0, i + 1).Select(n => new WorkIndexJob("Job " + n, "f" + n, n % 2 == 0 ? "running" : "completed")).ToList();
+            text = WorkIndex.Render(text, jobs, [new WorkIndexRun(T0.AddMinutes(i), "completed", "Run " + i)]);
+            var lines = text.Split('\n');
+            Assert.All(userLines, l => Assert.Contains(l, lines));
+            Assert.Equal(2, text.Split(Close).Length - (existing.StartsWith(Close, StringComparison.Ordinal) ? 1 : 0)); // one app block
+            Assert.Contains("- Job 0 — f0 — working", lines);
+        }
+        var stable = WorkIndex.Render(text, [new WorkIndexJob("Job 0", "f0", "running")], []);
+        Assert.Equal(stable, WorkIndex.Render(stable, [new WorkIndexJob("Job 0", "f0", "running")], []));
+    }
+
+    [Fact]
+    public void FileStartingWithClosingMarkerDoesNotGrow()
+    {
+        var job = new WorkIndexJob("Job", "j", "completed");
+        var run = new WorkIndexRun(T0, "completed", "Done it");
+        var first = WorkIndex.Render(Close + "\nNotes.\n", [job], [run]);
+        var text = first;
+        for (var i = 0; i < 5; i++) text = WorkIndex.Render(text, [job], [run]);
+        Assert.Equal(first.Length, text.Length);
+        Assert.Equal(first, text);
     }
 
     [Fact]

@@ -195,6 +195,7 @@ public class WorkStoreTests
         store.SetJobState(queued.Id, WorkJobStates.Queued, at);
         var waiting = store.CreateJob(slug, "Needs you", "p");
         store.SetJobState(waiting.Id, WorkJobStates.NeedsYou, at);
+        var olderReady = store.CreateJob(slug, "Never run", "p"); // older than the finished job, but Ready jobs are never trimmed
         var finished = store.CreateJob(slug, "Finished", "p");
         store.SetJobState(finished.Id, WorkJobStates.Completed, at);
         var next = store.CreateJob(slug, "Next oldest", "p");
@@ -205,8 +206,23 @@ public class WorkStoreTests
         var ids = store.Jobs().Select(j => j.Id).ToHashSet();
         Assert.Equal(WorkStore.MaxJobs, ids.Count);
         Assert.DoesNotContain(finished.Id, ids);
-        Assert.Subset(ids, new HashSet<string> { withRoutine.Id, running.Id, queued.Id, waiting.Id, next.Id, newest.Id });
+        Assert.Subset(ids, new HashSet<string> { withRoutine.Id, running.Id, queued.Id, waiting.Id, olderReady.Id, next.Id, newest.Id });
         Assert.True(Directory.Exists(finished.FolderPath)); // rows only; the folder stays on disk
+    });
+
+    [Fact]
+    public void CapNeverTrimsReadyOrActiveJobs() => InTempStore((store, _) =>
+    {
+        var at = DateTimeOffset.UtcNow;
+        var slug = WorkStore.DefaultCompanionSlug;
+        var states = new[] { WorkJobStates.Ready, WorkJobStates.Queued, WorkJobStates.Running, WorkJobStates.NeedsYou };
+        for (var i = 0; i < WorkStore.MaxJobs; i++)
+        {
+            var job = store.CreateJob(slug, "Job " + i, "p");
+            if (states[i % states.Length] != WorkJobStates.Ready) store.SetJobState(job.Id, states[i % states.Length], at);
+        }
+        store.CreateJob(slug, "Job 81", "p");
+        Assert.Equal(WorkStore.MaxJobs + 1, store.Jobs().Count);
     });
 
     [Fact]

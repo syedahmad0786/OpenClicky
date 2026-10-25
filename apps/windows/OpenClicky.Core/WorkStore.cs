@@ -150,7 +150,7 @@ public sealed class WorkStore
 
     public WorkJob GetJob(string id) => Jobs().FirstOrDefault(j => j.Id == id) ?? throw new KeyNotFoundException("That job no longer exists.");
 
-    /// <summary>Saves a Ready job with the least-used colour and its own folder, then trims the list to <see cref="MaxJobs"/>.</summary>
+    /// <summary>Saves a Ready job with the least-used colour and its own folder, then trims finished jobs beyond <see cref="MaxJobs"/>.</summary>
     public WorkJob CreateJob(string companionSlug, string title, string prompt)
     {
         title = RequireText(title, MaxTitleLength, nameof(title));
@@ -173,7 +173,8 @@ public sealed class WorkStore
         }
     }
 
-    /// <summary>Beyond <see cref="MaxJobs"/>, drops the oldest rows that are not active and have no routine (folders stay on disk, as with <see cref="DeleteJob"/>).</summary>
+    /// <summary>Beyond <see cref="MaxJobs"/>, drops the oldest finished (completed, failed, stopped) rows that have no routine
+    /// (folders stay on disk, as with <see cref="DeleteJob"/>). With no such row the list stays over the cap.</summary>
     private static void Trim(SqliteConnection connection, string keepId)
     {
         using var count = connection.CreateCommand();
@@ -182,10 +183,10 @@ public sealed class WorkStore
         if (excess <= 0) return;
         Execute(connection, """
             DELETE FROM jobs WHERE id IN (SELECT id FROM jobs
-                WHERE id<>$keep AND status NOT IN ($queued,$running,$needs) AND NOT EXISTS (SELECT 1 FROM routines WHERE routines.job_id=jobs.id)
+                WHERE id<>$keep AND status IN ($completed,$failed,$stopped) AND NOT EXISTS (SELECT 1 FROM routines WHERE routines.job_id=jobs.id)
                 ORDER BY created_at_utc, rowid LIMIT $excess)
             """,
-            ("$keep", keepId), ("$queued", WorkJobStates.Queued), ("$running", WorkJobStates.Running), ("$needs", WorkJobStates.NeedsYou), ("$excess", excess));
+            ("$keep", keepId), ("$completed", WorkJobStates.Completed), ("$failed", WorkJobStates.Failed), ("$stopped", WorkJobStates.Stopped), ("$excess", excess));
     }
 
     /// <summary>Sets one of <see cref="WorkJobStates"/>; <paramref name="at"/> becomes the job's last activity time.</summary>
