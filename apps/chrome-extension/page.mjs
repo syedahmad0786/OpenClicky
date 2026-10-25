@@ -249,6 +249,10 @@ export class PageSession {
       if (!(await this._call(n.objectId, chooseOption, [text]))) throw new Error("No option in that list matches the text.");
     } else if (kind === "text" || kind === "editable") {
       await this._call(n.objectId, focusField);
+      // insertText goes wherever focus is now, and a focus handler may have moved it: check again.
+      const focus = await this._eval(activeField);
+      if (focus === "password") throw new Error(PASSWORD_REFUSAL);
+      if (focus !== "editable") throw new Error("That field did not keep the focus. Take a new snapshot.");
       await this.send("Input.insertText", { text });
     } else if (kind === "readonly") {
       throw new Error("That field is read-only or disabled.");
@@ -376,6 +380,19 @@ export class PageSession {
     const { executionContextId: contextId } = await this.send("Page.createIsolatedWorld", { frameId: this.mainFrameId, worldName: "openclicky" });
     const guard = await this.send("Runtime.evaluate", { expression: `(${guardMain})()`, contextId });
     if (guard?.exceptionDetails) throw new Error("The script could not be prepared safely, so it did not run.");
+    // Best effort: guard the same-named world in every child frame, so window[n] from the script lands in a
+    // guarded realm. Frames this target can't reach (out of process) are skipped.
+    let tree = null;
+    try { tree = await this.send("Page.getFrameTree", {}); } catch { /* no tree */ }
+    const children = [];
+    const collect = (t) => { for (const c of t?.childFrames ?? []) { if (c.frame?.id) children.push(c.frame.id); collect(c); } };
+    collect(tree?.frameTree);
+    for (const frameId of children) {
+      try {
+        const world = await this.send("Page.createIsolatedWorld", { frameId, worldName: "openclicky" });
+        await this.send("Runtime.evaluate", { expression: `(${guardMain})()`, contextId: world.executionContextId });
+      } catch { /* frame went away or is out of process */ }
+    }
     const r = await this.send("Runtime.evaluate", {
       expression: `(async () => { ${code} })()`, contextId, awaitPromise: true, returnByValue: true, timeout: 15000,
     });

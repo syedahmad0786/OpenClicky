@@ -78,6 +78,20 @@ describe("PageSession", () => {
     expect(f.of("Input.insertText")).toHaveLength(0);
   });
 
+  it("fill re-checks focus before inserting text", async () => {
+    const f = fake({
+      "Accessibility.getFullAXTree": { nodes: page(ax("2", "textbox", "Name", 7)) },
+      "DOM.resolveNode": { object: { objectId: "o7" } },
+      "DOM.describeNode": { node: { nodeName: "INPUT", attributes: ["type", "text"] } },
+      "Runtime.callFunctionOn": (p) => ({ result: { value: p.functionDeclaration.startsWith("function fieldKind") ? "text" : undefined } }),
+      "Runtime.evaluate": { result: { value: "password" } }, // a focus handler moved focus to a password field
+    });
+    const s = new PageSession(f.send);
+    await s.snapshot({});
+    await expect(s.fill({ ref: "e1", text: "hunter2" })).rejects.toThrow(PASSWORD_REFUSAL);
+    expect(f.of("Input.insertText")).toHaveLength(0);
+  });
+
   it("type refuses a focused password field", async () => {
     const f = fake({ "Runtime.evaluate": { result: { value: "password" } } });
     const s = new PageSession(f.send);
@@ -166,16 +180,20 @@ describe("PageSession", () => {
 
   it("javascript runs guarded in an isolated world and cuts the result", async () => {
     const f = fake({
-      "Page.createIsolatedWorld": { executionContextId: 42 },
+      "Page.createIsolatedWorld": (p) => ({ executionContextId: p.frameId === "F" ? 42 : 43 }),
+      "Page.getFrameTree": { frameTree: { frame: { id: "F" }, childFrames: [{ frame: { id: "C", parentId: "F" } }] } },
       "Runtime.evaluate": (p) => ({ result: { value: p.expression.startsWith("(async") ? "y".repeat(30000) : undefined } }),
     });
     const s = new PageSession(f.send);
     s.onEvent("Page.frameNavigated", { frame: { id: "F" } });
     const { text } = await s.javascript({ code: "return document.title" });
-    expect(f.of("Page.createIsolatedWorld")[0].params).toEqual({ frameId: "F", worldName: "openclicky" });
-    const [guard, run] = f.of("Runtime.evaluate").map((c) => c.params);
+    expect(f.of("Page.createIsolatedWorld").map((c) => c.params)).toEqual([
+      { frameId: "F", worldName: "openclicky" }, { frameId: "C", worldName: "openclicky" },
+    ]);
+    const [guard, childGuard, run] = f.of("Runtime.evaluate").map((c) => c.params);
     expect(guard).toMatchObject({ contextId: 42 });
     expect(guard.expression).toContain("Not available to agents.");
+    expect(childGuard).toMatchObject({ contextId: 43, expression: guard.expression });
     expect(run).toMatchObject({ contextId: 42, awaitPromise: true, returnByValue: true, timeout: 15000 });
     expect(run.expression).toBe("(async () => { return document.title })()");
     expect(text.length).toBe(20000);

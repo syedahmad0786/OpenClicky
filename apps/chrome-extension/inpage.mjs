@@ -67,72 +67,111 @@ export function extractMain(limits) {
 }
 
 /**
- * Locks down the current JS world before an agent script runs (used in the isolated world only).
+ * Locks down the current JS world before an agent script runs (used in isolated worlds only).
  * A convenience guard, not a security boundary: it covers the direct routes to cookies, storage, saved
- * credentials and password values. Known gaps: same-origin child frames reached as window[n], Attr nodes,
- * and a script submitting a form that already holds a password.
+ * credentials and password values, and blocks creating new frames (a fresh realm would be unguarded).
+ * Checks use originals captured here, so a script can't swap them out first. Known gaps: indexed
+ * window[n] access to child frames that already exist (page.mjs guards every frame's world first, best
+ * effort), frames created by cloning an existing frame element or adopting one from an XHR document,
+ * Attr nodes, and a script submitting a form that already holds a password.
  */
 export function guardMain() {
   const NO = "Not available to agents.";
   const REFUSE = "Refused: that is a password field. Ask the user to type it themselves.";
   const apply = Reflect.apply;
+  const construct = Reflect.construct;
   const define = Object.defineProperty;
-  const getAttr = Element.prototype.getAttribute;
-  const trim = String.prototype.trim;
-  const lower = String.prototype.toLowerCase;
-  const isPw = (el) => {
-    if (!(el instanceof HTMLInputElement)) return false;
-    const t = apply(getAttr, el, ["type"]);
-    return typeof t === "string" && apply(lower, apply(trim, t, []), []) === "password";
-  };
+  const describe = Object.getOwnPropertyDescriptor;
+  const Str = String;
+  const exec = RegExp.prototype.exec;
+  const matches = (re, s) => apply(exec, re, [s]) !== null;
+  const input = HTMLInputElement.prototype;
+  const typeGet = describe(input, "type").get;
+  // The original type getter brand-checks the element and reports how it renders, whatever its prototype.
+  const isPw = (el) => { try { return apply(typeGet, el, []) === "password"; } catch { return false; } };
   const deny = () => { throw new Error(NO); };
-  const lock = (obj, name, desc) => { try { define(obj, name, { configurable: false, ...desc }); } catch { /* not present here */ } };
+  const lock = (obj, name, desc) => { try { if (obj) define(obj, name, { configurable: false, ...desc }); } catch { /* not present here */ } };
 
   lock(Document.prototype, "cookie", { get: deny, set: deny });
-  for (const name of ["cookieStore", "localStorage", "sessionStorage", "indexedDB"]) lock(window, name, { get: deny });
+  for (const name of ["cookieStore", "localStorage", "sessionStorage", "indexedDB", "frames"]) lock(window, name, { get: deny });
   if (typeof Navigator !== "undefined") lock(Navigator.prototype, "credentials", { get: deny });
   for (const C of [window.HTMLIFrameElement, window.HTMLFrameElement, window.HTMLObjectElement]) {
     if (C) for (const name of ["contentDocument", "contentWindow"]) lock(C.prototype, name, { get: deny });
   }
   lock(window, "open", { value: deny, writable: false });
 
-  const input = HTMLInputElement.prototype;
-  const accessor = (name, onGet, onSet) => {
-    const d = Object.getOwnPropertyDescriptor(input, name);
-    if (!d) return;
-    lock(input, name, {
-      get() { return onGet && isPw(this) ? onGet() : apply(d.get, this, []); },
-      set(v) { if (isPw(this)) throw new Error(REFUSE); apply(d.set, this, [v]); },
+  const accessor = (proto, name, onGet, onSet) => {
+    const d = proto && describe(proto, name);
+    if (!d || !d.set) return;
+    lock(proto, name, {
+      get() { return onGet ? onGet(this, d.get) : apply(d.get, this, []); },
+      set(v) { apply(d.set, this, [onSet(this, v)]); },
     });
   };
-  accessor("value", () => "");
-  accessor("type");
-  accessor("defaultValue", () => "");
-  const wrap = (proto, name, blocked) => {
-    const fn = proto[name];
+  const noPw = (el, v) => { if (isPw(el)) throw new Error(REFUSE); return v; };
+  const blankPw = (el, get) => (isPw(el) ? "" : apply(get, el, []));
+  accessor(input, "value", blankPw, noPw);
+  accessor(input, "type", null, noPw);
+  accessor(input, "defaultValue", blankPw, noPw);
+
+  const wrap = (proto, name, blocked, message = REFUSE) => {
+    const fn = proto && proto[name];
     if (typeof fn !== "function") return;
-    lock(proto, name, { writable: false, value: function (...args) { if (blocked(this, args)) throw new Error(REFUSE); return apply(fn, this, args); } });
+    lock(proto, name, { writable: false, value: function (...args) { if (blocked(this, args)) throw new Error(message); return apply(fn, this, args); } });
   };
-  const attrName = (n) => apply(lower, String(n), []);
-  const touchesPw = (el, n) => isPw(el) && /^(type|value)$/.test(attrName(n));
+  const PW_ATTR = /^(type|value)$/i;
+  const touchesPw = (el, n) => isPw(el) && matches(PW_ATTR, Str(n));
   wrap(Element.prototype, "setAttribute", (el, a) => touchesPw(el, a[0]));
   wrap(Element.prototype, "setAttributeNS", (el, a) => touchesPw(el, a[1]));
   wrap(Element.prototype, "removeAttribute", (el, a) => touchesPw(el, a[0]));
   wrap(Element.prototype, "removeAttributeNS", (el, a) => touchesPw(el, a[1]));
   wrap(Element.prototype, "toggleAttribute", (el, a) => touchesPw(el, a[0]));
   wrap(input, "setRangeText", (el) => isPw(el));
-  wrap(Document.prototype, "execCommand", () => isPw(document.activeElement));
+  const activeGet = describe(Document.prototype, "activeElement")?.get;
+  wrap(Document.prototype, "execCommand", () => isPw(activeGet ? apply(activeGet, document, []) : document.activeElement));
+
+  // No new frames: markup is coerced to a string once, checked, and that same string is used.
+  const FRAME_TAG = /<(iframe|frame|object|embed)/i;
+  const FRAME_NAME = /^(?:[^:]*:)?(iframe|frame|object|embed)$/i;
+  const markup = (v) => (v === null ? "" : Str(v));
+  const html = (i) => (self, a) => { a[i] = markup(a[i]); return matches(FRAME_TAG, a[i]); };
+  wrap(Document.prototype, "createElement", (d, a) => { a[0] = Str(a[0]); return matches(FRAME_NAME, a[0]); }, NO);
+  wrap(Document.prototype, "createElementNS", (d, a) => { a[1] = Str(a[1]); return matches(FRAME_NAME, a[1]); }, NO);
+  wrap(Element.prototype, "insertAdjacentHTML", html(1), NO);
+  wrap(Element.prototype, "setHTMLUnsafe", html(0), NO);
+  wrap(window.ShadowRoot && ShadowRoot.prototype, "setHTMLUnsafe", html(0), NO);
+  wrap(window.DOMParser && DOMParser.prototype, "parseFromString", html(0), NO);
+  wrap(Range.prototype, "createContextualFragment", html(0), NO);
+  wrap(Document, "parseHTMLUnsafe", html(0), NO);
+  // ponytail: write/writeln are refused outright; markup split across calls can't be checked per call
+  wrap(Document.prototype, "write", () => true, NO);
+  wrap(Document.prototype, "writeln", () => true, NO);
+  const frameFree = (self, v) => { const s = markup(v); if (matches(FRAME_TAG, s)) throw new Error(NO); return s; };
+  accessor(Element.prototype, "innerHTML", null, frameFree);
+  accessor(Element.prototype, "outerHTML", null, frameFree);
+  accessor(window.ShadowRoot && ShadowRoot.prototype, "innerHTML", null, frameFree);
 
   const FD = window.FormData;
   if (FD) {
     const del = FD.prototype.delete;
+    const elementsGet = describe(HTMLFormElement.prototype, "elements").get;
+    const lengthGet = describe(HTMLCollection.prototype, "length").get;
+    const item = HTMLCollection.prototype.item;
+    const nameGet = describe(input, "name").get;
     const Safe = function FormData(...args) {
-      const fd = new FD(...args);
-      const form = args[0];
-      if (form && form.elements) for (const el of form.elements) if (isPw(el) && el.name) apply(del, fd, [el.name]);
+      const fd = construct(FD, args);
+      let els = null;
+      try { els = apply(elementsGet, args[0], []); } catch { /* no form */ }
+      const count = els ? apply(lengthGet, els, []) : 0;
+      for (let i = 0; i < count; i++) {
+        const el = apply(item, els, [i]);
+        const name = isPw(el) ? apply(nameGet, el, []) : "";
+        if (name) apply(del, fd, [name]);
+      }
       return fd;
     };
     Safe.prototype = FD.prototype;
+    lock(FD.prototype, "constructor", { value: Safe, writable: false });
     lock(window, "FormData", { value: Safe, writable: false });
   }
 }
@@ -208,15 +247,27 @@ export function isCovered(x, y) {
   return !(within(hit, this) || within(this, hit));
 }
 
-/** this = covered element: click a visible close-style button inside whatever covers (x, y). */
+/** this = covered element: click a visible close-style button inside whatever covers (x, y), never outside it. */
 export function dismissCover(x, y) {
+  const target = this;
   const doc = this.ownerDocument;
   const words = /\b(close|dismiss|no thanks|decline|reject)\b|×/i;
-  for (let n = doc.elementFromPoint(x, y); n && n !== doc.body && n !== doc.documentElement; n = n.parentElement) {
-    for (const b of n.querySelectorAll("button, [role=button], a, input[type=button], input[type=submit]")) {
-      const label = `${b.innerText || b.value || ""} ${b.getAttribute("aria-label") || ""} ${b.getAttribute("title") || ""}`;
-      if (words.test(label) && b.getClientRects().length && getComputedStyle(b).visibility !== "hidden") { b.click(); return true; }
-    }
+  const sel = "button, [role=button], a, input[type=button], input[type=submit]";
+  const holds = (a, el) => { for (let n = el; n; n = n.parentNode || n.host) if (n === a) return true; return false; };
+  const usable = (b) => {
+    const label = `${b.innerText ?? b.textContent ?? ""} ${b.value || ""} ${b.getAttribute("aria-label") || ""} ${b.getAttribute("title") || ""}`;
+    return b.matches(sel) && words.test(label) && b.getClientRects().length > 0 && getComputedStyle(b).visibility !== "hidden";
+  };
+  let hit = doc.elementFromPoint(x, y);
+  while (hit && hit.shadowRoot) {
+    const inner = hit.shadowRoot.elementFromPoint(x, y);
+    if (!inner || inner === hit) break;
+    hit = inner;
+  }
+  // Climb from the cover only while the subtree does not also hold the target (shadow-aware).
+  for (let n = hit; n && n.nodeType === 1 && !holds(n, target); n = n.parentElement || (n.parentNode && n.parentNode.host) || null) {
+    const inShadow = n.shadowRoot ? [...n.shadowRoot.querySelectorAll(sel)] : [];
+    for (const b of [n, ...n.querySelectorAll(sel), ...inShadow]) if (usable(b)) { b.click(); return true; }
   }
   return false;
 }

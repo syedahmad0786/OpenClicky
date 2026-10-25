@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { JSDOM } from "jsdom";
-import { extractMain, guardMain, fieldKind, activeField } from "../../../chrome-extension/inpage.mjs";
+import { extractMain, guardMain, fieldKind, activeField, dismissCover } from "../../../chrome-extension/inpage.mjs";
 
 describe("inpage", () => {
   it("extract skips field values and passwords", () => {
@@ -43,6 +43,49 @@ describe("inpage", () => {
     expect(activeField()).toBe("editable");
     document.querySelector("#t").blur();
     expect(activeField()).toBe("none");
+  });
+
+  it("dismiss stays inside the cover", () => {
+    document.body.innerHTML = `<div id="app"><button id="decline" aria-label="Decline">Decline</button><button id="target">Buy</button>
+      <div id="cover"><span id="hit">Offer</span></div></div>`;
+    const $ = (sel) => document.querySelector(sel);
+    const clicked = [];
+    const arm = () => {
+      for (const b of document.querySelectorAll("button")) {
+        b.getClientRects = () => [{}];
+        b.onclick = () => clicked.push(b.id);
+      }
+    };
+    arm();
+    document.elementFromPoint = () => $("#hit");
+    expect(dismissCover.call($("#target"), 1, 1)).toBe(false);
+    expect(clicked).toEqual([]);
+    $("#cover").insertAdjacentHTML("beforeend", `<button id="close" aria-label="Close">×</button>`);
+    arm();
+    expect(dismissCover.call($("#target"), 1, 1)).toBe(true);
+    expect(clicked).toEqual(["close"]);
+    delete document.elementFromPoint;
+  });
+
+  it("guard blocks creating frames", () => {
+    const { window } = new JSDOM(`<div id="d"></div>`, { runScripts: "outside-only", url: "https://example.test/" });
+    const { document } = window;
+    window.eval(`(${guardMain})()`);
+    const div = document.querySelector("#d");
+    const NO = "Not available to agents.";
+    expect(() => document.createElement("IFRAME")).toThrow(NO);
+    expect(() => document.createElementNS("http://www.w3.org/1999/xhtml", "html:frame")).toThrow(NO);
+    expect(document.createElement("p").localName).toBe("p");
+    expect(() => { div.innerHTML = "<p>x</p><IFRAME src=x>"; }).toThrow(NO);
+    expect(() => { div.outerHTML = "<object></object>"; }).toThrow(NO);
+    div.innerHTML = "<b>ok</b>";
+    expect(div.innerHTML).toBe("<b>ok</b>");
+    expect(() => div.insertAdjacentHTML("beforeend", "<embed>")).toThrow(NO);
+    expect(() => new window.DOMParser().parseFromString("<iframe>", "text/html")).toThrow(NO);
+    expect(() => document.createRange().createContextualFragment("<frame>")).toThrow(NO);
+    expect(() => document.write("<p>")).toThrow(NO);
+    expect(() => window.frames).toThrow(NO);
+    window.close();
   });
 
   // Serialised into its own window, as in production, so the locked globals never leak into this file.
