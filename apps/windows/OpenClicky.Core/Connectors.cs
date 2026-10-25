@@ -136,20 +136,9 @@ public sealed class ConnectorRegistry
         return json is null ? null : JsonSerializer.Deserialize<ConnectorSecret>(json);
     }
 
-    /// <summary>Replaces the stored secret (a token refresh, a new sign-in). Does nothing when the connector was removed meanwhile, so a late refresh cannot resurrect a secret.</summary>
-    public void SaveSecret(string key, ConnectorSecret secret)
-    {
-        lock (_sync)
-        {
-            using var connection = Open();
-            if (!Read(connection).Any(c => c.Key == key)) return;
-            _secrets.Set(SecretName(key), JsonSerializer.Serialize(secret));
-        }
-    }
-
     /// <summary>
-    /// As <see cref="SaveSecret(string, ConnectorSecret)"/>, but only while <paramref name="row"/> itself is still there: a
-    /// flow that outlived its connector must not write into a newer one that reused the key.
+    /// Replaces the stored secret (a token refresh, a new sign-in), but only while <paramref name="row"/> itself is still there:
+    /// a flow that outlived its connector must not resurrect its secret or write into a newer one that reused the key.
     /// </summary>
     public void SaveSecret(ConnectorInfo row, ConnectorSecret secret)
     {

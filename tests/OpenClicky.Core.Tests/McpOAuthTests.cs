@@ -177,6 +177,23 @@ public class McpOAuthTests
     }
 
     [Fact]
+    public async Task RemoteServerCannotPointTokensAtThisPc()
+    {
+        // Loopback http is only for a server that itself runs on this PC.
+        var server = FakeServer.Standard();
+        server.Json("GET", "https://as.test/.well-known/oauth-authorization-server",
+            """{"issuer":"https://as.test","authorization_endpoint":"https://as.test/authorize","token_endpoint":"http://127.0.0.1:9/token","registration_endpoint":"https://as.test/register"}""");
+        await Fails(McpOAuthFailure.InsecureEndpoint, server);
+        Assert.DoesNotContain(server.Requests, r => r.Url.StartsWith("http://127.0.0.1", StringComparison.Ordinal));
+
+        server = new FakeServer();
+        using var oauth = new McpOAuth(server);
+        var refresh = await Assert.ThrowsAsync<McpOAuthException>(() => oauth.RefreshAsync(Tokens() with { TokenEndpoint = "http://127.0.0.1:9/token" }, Timeout()));
+        Assert.Equal(McpOAuthFailure.InsecureEndpoint, refresh.Failure);
+        Assert.Empty(server.Requests);
+    }
+
+    [Fact]
     public async Task MetadataForAnotherResourceRefused()
     {
         // A hostile challenge pointing at a victim's metadata must not get the user signed in to the victim.

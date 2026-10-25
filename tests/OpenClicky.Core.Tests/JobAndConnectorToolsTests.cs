@@ -67,6 +67,37 @@ public class JobAndConnectorToolsTests
     }
 
     [Fact]
+    public async Task ConnectorCall_ApprovalPromptNamesTheAccount()
+    {
+        using var connector = new RemoteMcpConnector("notion_work", "Notion", new ConnectorSecret("https://mcp.example.test/mcp", null, null), new FakeMcp()) { Label = "Work" };
+        var host = new Host();
+        var session = new DesktopToolSession(host, AgentAccessMode.ConfirmEach, connectors: [connector]);
+
+        var sent = await Call(session, "connector_call", new { connector = "notion_work", tool = "send_email", arguments = "{}", rationale = "x" });
+        Assert.False(sent.IsError, sent.Content[0].Text);
+        Assert.Equal(1, host.ConfirmCalls);
+        Assert.Equal("Notion · Work", host.LastRequest!.Arguments["connector"]);
+    }
+
+    [Fact]
+    public async Task ConnectorCall_RemoteTimeoutIsAFailedActionNotACancellation()
+    {
+        var server = new FakeMcp { TimeOutCalls = true };
+        using var connector = new RemoteMcpConnector("mail", "Mail", new ConnectorSecret("https://mcp.example.test/mcp", null, null), server) { Label = "Work" };
+        var session = new DesktopToolSession(new Host(), AgentAccessMode.ConfirmEach, connectors: [connector]);
+
+        var sent = await Call(session, "connector_call", new { connector = "mail", tool = "send_email", arguments = "{}", rationale = "x" });
+        Assert.True(sent.IsError);
+        Assert.Equal("Mail · Work send_email failed: it did not answer in time.", sent.Content[0].Text);
+        Assert.True(session.HasFailedApprovedAction);
+
+        server.TimeOutList = true;
+        using var fresh = new RemoteMcpConnector("m2", "Mail", new ConnectorSecret("https://mcp.example.test/mcp", null, null), server);
+        var listed = await Call(new DesktopToolSession(new Host(), AgentAccessMode.ConfirmEach, connectors: [fresh]), "connector_tools", new { connector = "m2" });
+        Assert.Equal("Mail is unavailable: it did not answer in time.", listed.Content[0].Text);
+    }
+
+    [Fact]
     public void EventStream_ResponseIsMatchedById()
     {
         var body = "event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\"}\n\ndata: {\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{}}\n";
@@ -137,6 +168,7 @@ public class JobAndConnectorToolsTests
     private sealed class FakeMcp : HttpMessageHandler
     {
         public string? LastAuthorization;
+        public bool TimeOutCalls, TimeOutList;
         public List<string> CalledTools { get; } = [];
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -144,6 +176,8 @@ public class JobAndConnectorToolsTests
             LastAuthorization = request.Headers.Authorization?.ToString();
             using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken));
             var method = json.RootElement.GetProperty("method").GetString();
+            if ((TimeOutCalls && method == "tools/call") || (TimeOutList && method != "notifications/initialized"))
+                throw new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout.");
             if (!json.RootElement.TryGetProperty("id", out var id)) return new HttpResponseMessage(HttpStatusCode.Accepted);
             object result = method switch
             {

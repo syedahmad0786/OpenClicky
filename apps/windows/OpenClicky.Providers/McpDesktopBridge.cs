@@ -142,7 +142,7 @@ public sealed class McpDesktopBridge
             tools.AddRange(JobOutputTools.Definitions((name, description, properties, required) => Tool(name, description, properties, required)));
         if (session.Connectors.Count > 0)
         {
-            var keys = string.Join(", ", session.Connectors.Select(c => $"{c.Key} ({c.DisplayName}{(c.Label is { Length: > 0 } label ? " · " + label : "")})"));
+            var keys = string.Join(", ", session.Connectors.Select(c => $"{c.Key} ({c.Title})"));
             tools.Add(Tool("connector_tools", "List the tools of one connected account. Connected: " + keys + ". " + MultiAccountRule, new { connector = StringProperty() }, ["connector"]));
             tools.Add(Tool("connector_call", "Call one tool from connector_tools. arguments is a JSON object string matching its input_schema. Tools that are not read_only need the user's approval.",
                 new { connector = StringProperty(), tool = StringProperty(), arguments = StringProperty(), rationale = StringProperty() }, ["connector", "tool", "arguments", "rationale"]));

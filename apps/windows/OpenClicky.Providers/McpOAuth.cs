@@ -40,7 +40,7 @@ public sealed partial class McpOAuth : IDisposable
     /// <summary>Runs the whole sign-in. The caller bounds it (5 minutes); cancellation becomes <see cref="McpOAuthFailure.TimedOut"/>.</summary>
     public async Task<McpOAuthTokens> SignInAsync(Uri mcpUrl, string? clientId, CancellationToken ct)
     {
-        Secure(mcpUrl);
+        Secure(mcpUrl, mcpUrl);
         // Bound first, so a busy port fails before anything is registered with the server.
         using var listener = Listen(_callbackPort);
         try
@@ -92,7 +92,7 @@ public sealed partial class McpOAuth : IDisposable
     {
         if (string.IsNullOrEmpty(tokens.RefreshToken) || !Uri.TryCreate(tokens.TokenEndpoint, UriKind.Absolute, out var endpoint))
             throw new McpOAuthException(McpOAuthFailure.RefreshRejected);
-        Secure(endpoint);
+        Secure(endpoint, Uri.TryCreate(tokens.Resource, UriKind.Absolute, out var resource) ? resource : endpoint);
         var answer = await TokenRequestAsync(endpoint, tokens.ClientId, tokens.ClientSecret, tokens.ClientAuthMethod,
             [("grant_type", "refresh_token"), ("refresh_token", tokens.RefreshToken), ("resource", tokens.Resource)],
             McpOAuthFailure.RefreshRejected, ct).ConfigureAwait(false);
@@ -152,7 +152,7 @@ public sealed partial class McpOAuth : IDisposable
         var (challengeMetadata, challengeScope) = ParseChallenge(await ChallengeAsync(mcpUrl, ct).ConfigureAwait(false));
         var resourceCandidates = ProtectedResourceCandidates(mcpUrl);
         using var resourceMetadata = await FirstJsonAsync(
-            challengeMetadata is null ? resourceCandidates : [challengeMetadata, .. resourceCandidates], ct).ConfigureAwait(false);
+            challengeMetadata is null ? resourceCandidates : [challengeMetadata, .. resourceCandidates], mcpUrl, ct).ConfigureAwait(false);
         var protectedResource = resourceMetadata?.RootElement ?? default;
 
         var issuer = protectedResource.ValueKind == JsonValueKind.Object
@@ -172,12 +172,12 @@ public sealed partial class McpOAuth : IDisposable
             : CanonicalResource(mcpUrl);
         var scope = challengeScope ?? (scopes.Length > 0 ? scopes : null);
 
-        using var serverMetadata = await FirstJsonAsync(AuthorizationServerCandidates(issuer), ct).ConfigureAwait(false)
+        using var serverMetadata = await FirstJsonAsync(AuthorizationServerCandidates(issuer), mcpUrl, ct).ConfigureAwait(false)
             ?? throw new McpOAuthException(McpOAuthFailure.NoMetadata);
         var root = serverMetadata.RootElement;
-        var authorize = Endpoint(root, "authorization_endpoint") ?? throw new McpOAuthException(McpOAuthFailure.NoMetadata);
-        var token = Endpoint(root, "token_endpoint") ?? throw new McpOAuthException(McpOAuthFailure.NoMetadata);
-        return (resource, scope, new Server(authorize, token, Endpoint(root, "registration_endpoint")));
+        var authorize = Endpoint(root, "authorization_endpoint", mcpUrl) ?? throw new McpOAuthException(McpOAuthFailure.NoMetadata);
+        var token = Endpoint(root, "token_endpoint", mcpUrl) ?? throw new McpOAuthException(McpOAuthFailure.NoMetadata);
+        return (resource, scope, new Server(authorize, token, Endpoint(root, "registration_endpoint", mcpUrl)));
     }
 
     /// <summary>An unauthenticated initialize; a 401 carries the challenge. Only the headers are read.</summary>
@@ -203,11 +203,11 @@ public sealed partial class McpOAuth : IDisposable
     }
 
     /// <summary>The first candidate answering 200 with a JSON object; every candidate must be a secure address.</summary>
-    private async Task<JsonDocument?> FirstJsonAsync(IEnumerable<Uri> candidates, CancellationToken ct)
+    private async Task<JsonDocument?> FirstJsonAsync(IEnumerable<Uri> candidates, Uri mcpUrl, CancellationToken ct)
     {
         foreach (var candidate in candidates)
         {
-            Secure(candidate);
+            Secure(candidate, mcpUrl);
             try
             {
                 using var request = new HttpRequestMessage(HttpMethod.Get, candidate);
@@ -397,17 +397,18 @@ public sealed partial class McpOAuth : IDisposable
         return Task.CompletedTask;
     }
 
-    /// <summary>https anywhere, or http only to this PC.</summary>
-    private static void Secure(Uri uri)
+    /// <summary>https anywhere, or http to this PC only for a server that is itself on this PC (a remote server's metadata cannot point tokens at a local port).</summary>
+    private static void Secure(Uri uri, Uri mcpUrl)
     {
-        if (!uri.IsAbsoluteUri || !(uri.Scheme == Uri.UriSchemeHttps || (uri.Scheme == Uri.UriSchemeHttp && uri.IsLoopback)))
+        if (!uri.IsAbsoluteUri || !(uri.Scheme == Uri.UriSchemeHttps
+                || (uri.Scheme == Uri.UriSchemeHttp && uri.IsLoopback && mcpUrl.IsAbsoluteUri && mcpUrl.IsLoopback)))
             throw new McpOAuthException(McpOAuthFailure.InsecureEndpoint);
     }
 
-    private static Uri? Endpoint(JsonElement root, string name)
+    private static Uri? Endpoint(JsonElement root, string name, Uri mcpUrl)
     {
         if (Text(root, name) is not { } value || !Uri.TryCreate(value, UriKind.Absolute, out var uri)) return null;
-        Secure(uri);
+        Secure(uri, mcpUrl);
         return uri;
     }
 

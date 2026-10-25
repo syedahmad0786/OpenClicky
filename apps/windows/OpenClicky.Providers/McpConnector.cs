@@ -20,6 +20,8 @@ public abstract class McpConnector : IDisposable
     public string DisplayName { get; }
     /// <summary>The account label (Work, Personal…) shown next to the name, or null.</summary>
     public string? Label { get; init; }
+    /// <summary>The name the user sees for this account: "Notion · Work", or just the name when unlabelled.</summary>
+    public string Title => Label is { Length: > 0 } l ? $"{DisplayName} · {l}" : DisplayName;
 
     public abstract Task<IReadOnlyList<RemoteMcpTool>> ListToolsAsync(CancellationToken token);
     public abstract Task<RemoteMcpCallResult> CallToolAsync(string name, JsonElement arguments, CancellationToken token);

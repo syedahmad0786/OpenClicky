@@ -324,6 +324,11 @@ internal sealed class ConnectorsPanel : UserControl
     private async Task TestAsync()
     {
         if (Selected is not { } info) return;
+        if (info.Kind != ConnectorKind.Remote || info.Auth == OpenClicky.Core.Settings.ConnectorAuth.Browser)
+        {
+            ShowStatus("Test this connector in Settings → Integrations.");
+            return;
+        }
         ShowStatus("Testing…");
         try
         {

@@ -142,13 +142,13 @@ public sealed class ConnectorRegistryTests : IDisposable
     public void SaveSecretReplacesTheSecretAndSkipsRemovedConnectors()
     {
         var registry = Registry();
-        var key = registry.Add(Spec("Linear", "linear", "Work", ConnectorAuth.Browser)).Key;
-        registry.SaveSecret(key, new ConnectorSecret("https://mcp.example.test/mcp", null, null) { OAuthClientId = "new-client" });
-        Assert.Equal("new-client", registry.Secret(key)!.OAuthClientId);
+        var row = registry.Add(Spec("Linear", "linear", "Work", ConnectorAuth.Browser));
+        registry.SaveSecret(row, new ConnectorSecret("https://mcp.example.test/mcp", null, null) { OAuthClientId = "new-client" });
+        Assert.Equal("new-client", registry.Secret(row.Key)!.OAuthClientId);
 
-        registry.Remove(key);
-        registry.SaveSecret(key, new ConnectorSecret("https://mcp.example.test/mcp", null, null)); // a late token refresh
-        Assert.Null(registry.Secret(key));
+        registry.Remove(row.Key);
+        registry.SaveSecret(row, new ConnectorSecret("https://mcp.example.test/mcp", null, null)); // a late token refresh
+        Assert.Null(registry.Secret(row.Key));
     }
 
     [Fact]
