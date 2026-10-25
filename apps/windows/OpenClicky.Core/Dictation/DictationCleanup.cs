@@ -13,7 +13,7 @@ public sealed class TalkClientDictationCleaner(ITalkClient client, string model)
 {
     public async Task<string?> CleanAsync(string raw, DictationFieldContext? context, IReadOnlyList<string> dictionary, CancellationToken ct) =>
         DictationCleanup.Accept(raw, await client.CompleteVisionTalkAsync(
-            DictationCleanup.SystemPrompt, [], DictationCleanup.BuildUserMessage(raw, context, dictionary), [], model, ct));
+            DictationCleanup.SystemPrompt, [], DictationCleanup.BuildUserMessage(raw, context, dictionary), [], model, ct), dictionary);
 }
 
 public static class DictationCleanup
@@ -52,10 +52,11 @@ public static class DictationCleanup
         sb.Append(label).Append('\n').Append(Fence).Append('\n').Append(text.Replace(Fence, "'''")).Append('\n').Append(Fence).Append('\n');
 
     /// <summary>
-    /// Cleans a model reply: strips a code fence and wrapping quotes the speaker did not dictate. Returns null for an empty reply
-    /// or one longer than <c>raw.Length * 2 + 80</c> (a model that answered or rambled instead of tidying).
+    /// Cleans a model reply: strips a code fence and wrapping quotes the speaker did not dictate. Returns null for an empty reply,
+    /// one longer than <c>raw.Length * 2 + 80</c> (a model that rambled), or one whose words are mostly not the speaker's
+    /// (a refusal, or an answer to a dictated question): see <see cref="MostlySpokenWords"/>.
     /// </summary>
-    public static string? Accept(string raw, string? reply)
+    public static string? Accept(string raw, string? reply, IReadOnlyCollection<string>? dictionary = null)
     {
         var text = reply?.Trim() ?? "";
         if (text.Length >= 6 && text.StartsWith("```") && text.EndsWith("```"))
@@ -66,9 +67,29 @@ public static class DictationCleanup
             text = text.Trim();
         }
         if (IsWrapped(text) && text[1..^1].IndexOfAny(['"', '“', '”']) < 0 && !IsWrapped(raw.Trim())) text = text[1..^1].Trim();
-        if (text.Length == 0 || text.Length > raw.Length * 2 + 80) return null;
+        if (text.Length == 0 || text.Length > raw.Length * 2 + 80 || !MostlySpokenWords(raw, text, dictionary)) return null;
         return text;
     }
+
+    /// <summary>
+    /// At least 60% of the reply's words appear in the transcript or the dictionary, ignoring case and punctuation. Words in a
+    /// script written without spaces (CJK, kana, Thai) are counted by character instead.
+    /// </summary>
+    private static bool MostlySpokenWords(string raw, string reply, IReadOnlyCollection<string>? dictionary)
+    {
+        var spoken = Bare(raw + " " + string.Join(" ", dictionary ?? []));
+        var spokenWords = Words(spoken).ToHashSet();
+        var replyWords = Words(Bare(reply)).Where(w => !w.Any(DictationTextFit.IsNoSpaceScript)).ToList();
+        var replyChars = Bare(reply).Where(DictationTextFit.IsNoSpaceScript).ToList();
+        return AtLeast60Percent(replyWords.Count(spokenWords.Contains), replyWords.Count)
+            && AtLeast60Percent(replyChars.Count(spoken.Contains), replyChars.Count);
+    }
+
+    private static string Bare(string s) => new(s.ToLowerInvariant().Where(c => !char.IsPunctuation(c) && !char.IsSymbol(c)).ToArray());
+
+    private static string[] Words(string s) => s.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+
+    private static bool AtLeast60Percent(int hits, int total) => total == 0 || hits * 5 >= total * 3;
 
     private static bool IsWrapped(string s) =>
         s.Length >= 2 && ((s[0] == '"' && s[^1] == '"') || (s[0] == '“' && s[^1] == '”'));

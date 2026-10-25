@@ -76,7 +76,37 @@ public class DictationCleanupTests
         Assert.Null(DictationCleanup.Accept("hello there", "\"\""));
         var raw = "hello there";
         var limit = raw.Length * 2 + 80;
-        Assert.NotNull(DictationCleanup.Accept(raw, new string('a', limit)));
-        Assert.Null(DictationCleanup.Accept(raw, new string('a', limit + 1)));
+        // Punctuation is ignored by the word check, so these replies differ only in length.
+        Assert.NotNull(DictationCleanup.Accept(raw, "hello" + new string('!', limit - 5)));
+        Assert.Null(DictationCleanup.Accept(raw, "hello" + new string('!', limit - 4)));
+    }
+
+    [Fact]
+    public void RefusalFallsBackToRaw() =>
+        Assert.Null(DictationCleanup.Accept("what time is it", "I'm sorry, I can't help with that."));
+
+    [Fact]
+    public void AnswerFallsBackToRaw() =>
+        Assert.Null(DictationCleanup.Accept("what time is it", "It's 3 PM."));
+
+    [Fact]
+    public void OrdinaryTidyUpIsAccepted() =>
+        Assert.Equal("So the meeting is on Tuesday.", DictationCleanup.Accept("um so the meeting is on tuesday", "So the meeting is on Tuesday."));
+
+    [Fact]
+    public void DictionarySpellingFixIsAccepted()
+    {
+        Assert.Equal("Deploy it to Kubernetes.", DictationCleanup.Accept("deploy it to kubernates", "Deploy it to Kubernetes.", ["Kubernetes"]));
+        // Without the dictionary word, 3 of 4 words still match: the 60% bar is not a spell checker.
+        Assert.NotNull(DictationCleanup.Accept("deploy it to kubernates", "Deploy it to Kubernetes."));
+        Assert.Null(DictationCleanup.Accept("kubernates", "Kubernetes"));
+        Assert.Equal("Kubernetes", DictationCleanup.Accept("kubernates", "Kubernetes", ["kubernetes"]));
+    }
+
+    [Fact]
+    public void NoSpaceScriptUsesCharacterOverlap()
+    {
+        Assert.Equal("今日は会議です。", DictationCleanup.Accept("今日は会議です", "今日は会議です。"));
+        Assert.Null(DictationCleanup.Accept("今日は会議です", "申し訳ありませんが、お手伝いできません。"));
     }
 }

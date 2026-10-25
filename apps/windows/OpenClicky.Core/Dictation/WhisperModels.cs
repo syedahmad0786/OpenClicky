@@ -40,6 +40,17 @@ public static class WhisperPrompt
     public const int MaxLength = 600;
 
     /// <summary>The dictionary as a Whisper initial prompt: words joined by ", ", whole words only, at most 600 characters.</summary>
+    /// <summary>
+    /// Whisper can "hear" its own prompt in near-silence. An echo is a transcript that, trimmed (with any closing full stop or
+    /// comma) and ignoring case, is the prompt or its start up to a word boundary.
+    /// </summary>
+    public static bool IsEcho(string transcript, string? prompt)
+    {
+        var t = (transcript ?? "").Trim().TrimEnd('.', ',', '。').TrimEnd();
+        return prompt is not null && t.Length > 0 && prompt.StartsWith(t, StringComparison.OrdinalIgnoreCase)
+            && (t.Length == prompt.Length || prompt[t.Length] == ',');
+    }
+
     public static string? FromDictionary(IReadOnlyList<string> words)
     {
         if (words.Count == 0) return null;

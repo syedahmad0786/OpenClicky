@@ -7,14 +7,15 @@ public interface IDictationField
     Task<FieldInsertOutcome> InsertAsync(string text, CancellationToken ct);
 }
 
-/// <summary>Verified means the field's value was read back and shows the text.</summary>
-public sealed record FieldInsertOutcome(bool Verified, string? ValueBefore, string? ValueAfter, string Message);
+/// <summary>Verified means the field's value was read back and shows the text; InputSent, that keys went out (the text may be in the field).</summary>
+public sealed record FieldInsertOutcome(bool Verified, string? ValueBefore, string? ValueAfter, string Message, bool InputSent = false);
 
 public enum DictationDeliveryKind { Inserted, Clipboard, Nothing }
 
 public sealed record DictationDelivery(DictationDeliveryKind Kind, string Text, FieldInsertOutcome? Insert);
 
-public sealed record DictationOptions(bool Cleanup, IReadOnlyList<string> Dictionary, int CleanupTimeoutMs = 6000);
+/// <param name="FallbackBefore">The text the seam is fitted after when the field's context cannot be read (the session's previous phrase).</param>
+public sealed record DictationOptions(bool Cleanup, IReadOnlyList<string> Dictionary, int CleanupTimeoutMs = 6000, string? FallbackBefore = null);
 
 public static class DictationFlow
 {
@@ -28,6 +29,7 @@ public static class DictationFlow
     {
         var text = raw?.Trim() ?? "";
         if (text.Length == 0) return new(DictationDeliveryKind.Nothing, "", null);
+        var spoken = text;
         ct.ThrowIfCancellationRequested();
 
         DictationFieldContext? context = null;
@@ -41,7 +43,10 @@ public static class DictationFlow
         if (options.Cleanup && cleaner is not null && LongEnoughToTidy(text))
             text = await TryCleanAsync(text, context, cleaner, options, ct) ?? text;
 
-        var fitted = DictationTextFit.Fit(text, context?.BeforeText ?? "", context?.AfterText ?? "", context?.SingleLine ?? false);
+        // Unread context: fit after the session's previous phrase, so phrases never glue together. Line breaks the speaker did
+        // not dictate (a tidy-up adding them) are folded, since they would be typed as Enter.
+        var fitted = DictationTextFit.Fit(text, context?.BeforeText ?? options.FallbackBefore ?? "", context?.AfterText ?? "",
+            (context?.SingleLine ?? false) || !spoken.Contains('\n'));
         ct.ThrowIfCancellationRequested();
 
         FieldInsertOutcome? insert = null;

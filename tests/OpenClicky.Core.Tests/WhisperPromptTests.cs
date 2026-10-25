@@ -28,4 +28,19 @@ public class WhisperPromptTests
         var words = Enumerable.Range(0, 59).Select(i => "word" + i.ToString("D4")).Append("tenletters").ToList(); // exactly 600
         Assert.Equal(600, WhisperPrompt.FromDictionary([.. words, "next"])!.Length);
     }
+
+    [Theory]
+    [InlineData("OpenClicky, Ahmad, Whisper", true)]
+    [InlineData("  openclicky, ahmad, whisper.  ", true)]   // trimmed, any case, Whisper's closing full stop
+    [InlineData("OpenClicky, Ahmad", true)]                // a prefix of the prompt
+    [InlineData("OpenClicky", true)]
+    [InlineData("Open", false)]                            // stops inside a word: real speech
+    [InlineData("OpenClicky is great", false)]
+    [InlineData("Ahmad", false)]                           // not at the start
+    [InlineData("", false)]
+    public void PromptEchoIsDetected(string transcript, bool echo) =>
+        Assert.Equal(echo, WhisperPrompt.IsEcho(transcript, "OpenClicky, Ahmad, Whisper"));
+
+    [Fact]
+    public void NoPromptNoEcho() => Assert.False(WhisperPrompt.IsEcho("hello", null));
 }

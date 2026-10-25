@@ -12,6 +12,7 @@ public class DictationFlowTests
         public string? Inserted { get; private set; }
         public Func<Exception>? ReadThrows { get; init; }
         public Func<Exception>? InsertThrows { get; init; }
+        public bool InputSent { get; init; } = true;
 
         public Task<DictationFieldContext?> ReadContextAsync(CancellationToken ct)
         {
@@ -25,7 +26,7 @@ public class DictationFlowTests
             Calls.Add("insert");
             if (InsertThrows is not null) throw InsertThrows();
             Inserted = text;
-            return Task.FromResult(new FieldInsertOutcome(verified, "", verified ? text : "", verified ? "ok" : "not seen"));
+            return Task.FromResult(new FieldInsertOutcome(verified, "", verified ? text : "", verified ? "ok" : "not seen", InputSent));
         }
     }
 
@@ -168,7 +169,45 @@ public class DictationFlowTests
         Assert.Equal(" send it now", d.Text);
         Assert.Equal(" send it now", copied);
         Assert.False(d.Insert!.Verified);
+        Assert.False(d.Insert.InputSent); // it threw before any key went out
         Assert.Equal("typing failed", d.Insert.Message);
+    }
+
+    [Fact]
+    public async Task UnverifiedInsertKeepsWhetherKeysWereSent()
+    {
+        var sent = new FakeField(null, verified: false) { InputSent = true };
+        var d = await DictationFlow.DeliverAsync("send it now", sent, null, On, _ => { }, default);
+        Assert.Equal(DictationDeliveryKind.Clipboard, d.Kind);
+        Assert.True(d.Insert!.InputSent);
+    }
+
+    [Fact]
+    public async Task CleanerLineBreaksAreFoldedWhenTheRawHadNone()
+    {
+        var multiLine = new DictationFieldContext("Notepad", null, "", "", "", SingleLine: false);
+        var field = new FakeField(multiLine);
+        var d = await DictationFlow.DeliverAsync("first point second point", field, Returns("First point.\nSecond point."), On, _ => { }, default);
+        Assert.Equal("First point. Second point.", field.Inserted);
+        Assert.DoesNotContain('\n', d.Text);
+
+        // A dictated line break is kept in a multi-line field.
+        var field2 = new FakeField(multiLine);
+        await DictationFlow.DeliverAsync("first point\nsecond point", field2, Returns("First point.\nSecond point."), On, _ => { }, default);
+        Assert.Equal("First point.\nSecond point.", field2.Inserted);
+    }
+
+    [Fact]
+    public async Task UnreadContextFitsAfterThePreviousPhrase()
+    {
+        var field = new FakeField(null);
+        await DictationFlow.DeliverAsync("Next one.", field, null, On with { FallbackBefore = "The end." }, _ => { }, default);
+        Assert.Equal(" Next one.", field.Inserted);
+
+        // A context that was read wins over the fallback.
+        var read = new FakeField(new DictationFieldContext("App", null, "Hi (", "", "", false));
+        await DictationFlow.DeliverAsync("Next one.", read, null, On with { FallbackBefore = "The end." }, _ => { }, default);
+        Assert.Equal("Next one.", read.Inserted);
     }
 
     [Theory]

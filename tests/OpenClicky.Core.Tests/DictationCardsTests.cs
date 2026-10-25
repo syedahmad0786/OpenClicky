@@ -18,6 +18,52 @@ public class DictationCardsTests
     }
 
     [Fact]
+    public void UnconfirmedClipboardCardWarnsBeforePasting()
+    {
+        var card = DictationCards.ClipboardUnconfirmed();
+        Assert.Equal(DictationCards.ClipboardId, card.Id); // replaces the plain clipboard card, never stacks
+        Assert.Equal(NotchCardKind.Clipboard, card.Kind);
+        Assert.Equal("Check the field before pasting", card.Title);
+        Assert.Equal("I typed your words but couldn't confirm them. They're also on the clipboard.", card.Body);
+        Assert.Equal(8000, card.AutoDismissMs);
+        Assert.Empty(card.Actions);
+    }
+
+    [Fact]
+    public void TidyNoticeOffersTurnOffAndOk()
+    {
+        var card = DictationCards.TidyNotice();
+        Assert.Equal("dictation-tidy-notice", card.Id);
+        Assert.Equal(DictationCards.TidyNoticeId, card.Id);
+        Assert.Equal(NotchCardKind.Tip, card.Kind);
+        Assert.Equal("Tidy up with AI is on", card.Title);
+        Assert.Equal("Dictated words, the app name and the text around the cursor go to your model provider to fix punctuation. Your voice stays on this PC.", card.Body);
+        Assert.Equal(["off", "ok"], card.Actions.Select(a => a.Id));
+        Assert.Equal(["Turn off", "OK"], card.Actions.Select(a => a.Label));
+        Assert.Equal(DictationCards.TurnOffAction, card.Actions[0].Id);
+        Assert.Equal(DictationCards.OkAction, card.Actions[1].Id);
+        Assert.Null(card.AutoDismissMs); // stays until answered
+    }
+
+    [Fact]
+    public void TidyNoticeFlagDefaultsOffAndPersists()
+    {
+        Assert.False(new AppSettings().DictationCleanupNoticeShown);
+        var path = Path.Combine(Path.GetTempPath(), $"openclicky-notice-{Guid.NewGuid():N}.json");
+        try
+        {
+            SettingsStore.Save(new AppSettings { DictationCleanupNoticeShown = true }, path);
+            Assert.True(SettingsStore.Load(path).DictationCleanupNoticeShown);
+        }
+        finally { File.Delete(path); }
+        // "Turn off" applies this patch.
+        var s = new AppSettings();
+        Assert.Equal(OpenClicky.Core.Settings.PatchResult.Applied, OpenClicky.Core.Settings.SettingsPatch.TryApply(s,
+            DictationCards.TidyNoticeOffKey, System.Text.Json.JsonSerializer.SerializeToElement(false), out _));
+        Assert.False(s.DictationCleanup);
+    }
+
+    [Fact]
     public void HeldActivityHasNoActions()
     {
         var card = DictationCards.Activity(false, null);

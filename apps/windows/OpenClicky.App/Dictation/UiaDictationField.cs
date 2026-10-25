@@ -13,6 +13,6 @@ internal sealed class UiaDictationField(DictationTarget target, IAgentActionExec
     public async Task<FieldInsertOutcome> InsertAsync(string text, CancellationToken ct)
     {
         var result = await target.InsertAsync(text, executor, ct, requireCurrentFocus: true, exclusions: exclusions()).ConfigureAwait(false);
-        return new(result.Verified, result.ValueBefore, result.FinalText, result.Message);
+        return new(result.Verified, result.ValueBefore, result.FinalText, result.Message, result.InputAttempted);
     }
 }

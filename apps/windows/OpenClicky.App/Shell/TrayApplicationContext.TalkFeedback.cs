@@ -171,16 +171,22 @@ internal sealed partial class TrayApplicationContext
             case (DictationCards.LearnedId, DictationCards.UndoAction):
                 UndoLearnedWord();
                 return false;
+            case (DictationCards.TidyNoticeId, DictationCards.TurnOffAction):
+                NotchSettings.Patch(DictationCards.TidyNoticeOffKey, System.Text.Json.JsonSerializer.SerializeToElement(false));
+                return false;
+            case (DictationCards.TidyNoticeId, DictationCards.OkAction):
+                return false;
             default:
                 Log("shell: card action not handled: " + actionId);
                 return false;
         }
     }
 
-    /// <summary>Closing the consent card is a "not now"; closing any other card changes nothing.</summary>
+    /// <summary>Closing the consent card is a "not now"; closing the hands-free card is a Stop; closing any other card changes nothing.</summary>
     void IShellHost.CardDismissed(string cardId)
     {
         if (cardId == CompanionCards.DriveConsentId) AnswerDriveConsent(false);
+        else if (cardId == DictationCards.ActivityId && _dictationActive && !_dictationHeld) _ = FinishHandsFreeDictationAsync();
     }
 
     /// <summary>The NAudio recorder that is capturing now (the shared one, else the local recognizer's), if any has a level.</summary>

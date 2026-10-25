@@ -312,7 +312,7 @@ internal static class Program
         public async Task<FieldInsertOutcome> InsertAsync(string text, CancellationToken ct)
         {
             var r = await target.InsertAsync(text, executor, ct).ConfigureAwait(false);
-            return new(r.Verified, r.ValueBefore, r.FinalText, r.Message);
+            return new(r.Verified, r.ValueBefore, r.FinalText, r.Message, r.InputAttempted);
         }
     }
 

@@ -19,7 +19,7 @@ internal sealed partial class TrayApplicationContext
     private string? _dictationHoldError;
     private long _dictationPress;
     /// <summary>UI thread: identifies the running dictation (its field may be null: the words then go to the clipboard).</summary>
-    private object? _dictationSession;
+    private DictationRun? _dictationSession;
     private bool _dictationHandsFree;
     /// <summary>UI thread: the activity card is up (the shell was active when dictation showed), so the classic panel is not.</summary>
     private bool _dictationCardShown;
@@ -29,6 +29,22 @@ internal sealed partial class TrayApplicationContext
     /// phrase never overwrites an earlier one; and whether the clipboard notice was shown for it.</summary>
     private string _dictationClipboard = "";
     private bool _dictationClipboardNoticed;
+    /// <summary>UI thread: some of this dictation's clipboard text was typed but never confirmed in the field.</summary>
+    private bool _dictationClipboardUnconfirmed;
+
+    /// <summary>One dictation: its hands-free delivery order and cancellation, and the last phrase delivered.</summary>
+    private sealed class DictationRun(bool handsFree, bool shellUi)
+    {
+        /// <summary>Hands-free phrases are delivered here, in order and one at a time, so the microphone never waits on them.</summary>
+        public readonly SerialQueue Deliveries = new();
+        /// <summary>Cancelled when the dictation is cancelled (Esc, another key): pending deliveries stop.</summary>
+        public readonly CancellationTokenSource Cancel = new();
+        public bool HandsFree { get; } = handsFree;
+        /// <summary>Tidy-up and correction learning run only with the shell: the classic UI has no toggle, disclosure or Undo.</summary>
+        public bool ShellUi { get; } = shellUi;
+        /// <summary>The last phrase delivered (inserted or copied): the seam for a phrase whose field context cannot be read.</summary>
+        public volatile string? LastDelivered;
+    }
 
     /// <summary>A dictate hold still inside its tap window: recording silently, nothing shown yet.</summary>
     private bool DictationHidden => _dictationHeld && !_dictationShown;
@@ -53,6 +69,7 @@ internal sealed partial class TrayApplicationContext
     private void ReportDictationBlocker(string error)
     {
         if (error == DictationBusy) { _tray.ShowBalloonTip(3000, "OpenClicky dictation", error, ToolTipIcon.Info); return; }
+        if (_shell is { IsActive: true } shell) { shell.AddToast(error); return; } // the classic Home window stays closed
         _tray.ShowBalloonTip(5000, error == DictationNeedsWhisper ? "Local dictation unavailable" : "Dictation target unavailable", error, ToolTipIcon.Warning);
         ShowClassic();
         ClassicStatus(error);
@@ -78,10 +95,10 @@ internal sealed partial class TrayApplicationContext
         _dictationTarget = target;
         _dictationActive = true;
         _dictationHandsFree = handsFree;
-        _dictationSession = new object();
+        _dictationSession = new DictationRun(handsFree, _shell is { IsActive: true });
         StopDictationWatch();
         _dictationClipboard = "";
-        _dictationClipboardNoticed = false;
+        _dictationClipboardNoticed = _dictationClipboardUnconfirmed = false;
     }
 
     /// <summary>The activity card when the shell is active, else the classic dictation panel.</summary>
@@ -133,40 +150,81 @@ internal sealed partial class TrayApplicationContext
     }
 
     /// <summary>
-    /// The orchestrator's interceptor during dictation: each finished phrase is tidied up, fitted and typed into the field once
-    /// every key is up. Anything not verified in the field (or with no field, or keys still held) goes to the clipboard.
+    /// The orchestrator's interceptor during dictation. A hold delivers its phrase before returning; hands-free queues each
+    /// phrase (in order, one at a time) and returns at once, so the microphone listens again while the phrase is tidied and typed.
+    /// A transcript that only echoes the dictionary prompt is dropped.
     /// </summary>
     private async Task<bool> HandleDictationVoiceAsync(string text, CancellationToken token)
     {
-        var session = _dictationSession;
+        var run = _dictationSession;
         var target = _dictationTarget;
-        Log($"dictation_result chars={text.Length} empty={string.IsNullOrWhiteSpace(text)}");
-        if (string.IsNullOrWhiteSpace(text)) return true;
+        var echo = WhisperPrompt.IsEcho(text, WhisperPrompt.FromDictionary(_settings.DictionaryWords ?? []));
+        Log($"dictation_result chars={text.Length} empty={string.IsNullOrWhiteSpace(text)} echo={echo}");
+        if (string.IsNullOrWhiteSpace(text) || echo) return true;
+        if (run is not { HandsFree: true })
+        {
+            await DeliverDictationPhraseAsync(run, target, text, token).ConfigureAwait(false);
+            return true;
+        }
+        _ = run.Deliveries.Enqueue(async () =>
+        {
+            try { await DeliverDictationPhraseAsync(run, target, text, run.Cancel.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException) { Log("dictation_delivery_cancelled"); }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { Log("dictation_delivery_error=" + ex.GetType().Name); }
+        });
+        return true;
+    }
+
+    /// <summary>
+    /// One phrase: tidied up (shell only), fitted and typed into the field once every key is up. Anything not verified in the
+    /// field (or with no field, or keys still held) goes to the clipboard.
+    /// </summary>
+    private async Task DeliverDictationPhraseAsync(DictationRun? run, DictationTarget? target, string text, CancellationToken token)
+    {
         // Never type while a modifier is down (Ctrl+Enter would send): still held after 10 s, nothing is typed.
         var keysUp = await WaitForModifiersReleasedAsync(token).ConfigureAwait(false);
         var field = keysUp && target is not null
             ? new UiaDictationField(target, _executor, () => AgentDenyList.ParseExtraFragments(_settings.AgentDenyListExtra))
             : null;
         var copied = true;
-        var delivery = await DictationFlow.DeliverAsync(text, field, CreateDictationCleaner(),
-            new(_settings.DictationCleanup, _settings.DictionaryWords ?? []),
-            words => copied = CopyDictationToClipboard(session, words), token).ConfigureAwait(false);
-        Log($"dictation_delivery kind={delivery.Kind} verified={delivery.Insert?.Verified} keys_up={keysUp} field={field is not null} copied={copied}");
-        OnUi(() => ShowDictationDelivery(session, target, delivery, copied));
-        return true;
+        var tidy = run is { ShellUi: true } && _settings.DictationCleanup;
+        var delivery = await DictationFlow.DeliverAsync(text, field, tidy ? CreateDictationCleaner() : null,
+            new(tidy, _settings.DictionaryWords ?? [], FallbackBefore: run?.LastDelivered),
+            words => copied = CopyDictationToClipboard(run, words), token).ConfigureAwait(false);
+        if (run is not null && delivery.Kind != DictationDeliveryKind.Nothing) run.LastDelivered = delivery.Text;
+        Log($"dictation_delivery kind={delivery.Kind} verified={delivery.Insert?.Verified} sent={delivery.Insert?.InputSent} keys_up={keysUp} field={field is not null} copied={copied}");
+        OnUi(() => ShowDictationDelivery(run, target, delivery, copied));
     }
 
     /// <summary>The user's Talk provider and model, or null when tidy-up is off or no provider is configured.</summary>
     private IDictationCleaner? CreateDictationCleaner() =>
         _settings.DictationCleanup && ProviderFactory.CreateTalkClient(_settings, _secrets, Log) is { } client
-            ? new TalkClientDictationCleaner(client, _settings.ResolveTalkModel())
+            ? new NoticedCleaner(new TalkClientDictationCleaner(client, _settings.ResolveTalkModel()), () => OnUi(ShowTidyNoticeOnce))
             : null;
+
+    /// <summary>Calls <paramref name="invoked"/> as each tidy-up starts, just before the transcript is sent.</summary>
+    private sealed class NoticedCleaner(IDictationCleaner inner, Action invoked) : IDictationCleaner
+    {
+        public Task<string?> CleanAsync(string raw, DictationFieldContext? context, IReadOnlyList<string> dictionary, CancellationToken ct)
+        {
+            invoked();
+            return inner.CleanAsync(raw, context, dictionary, ct);
+        }
+    }
+
+    /// <summary>UI thread: the first time tidy-up runs, says what goes to the provider and offers Turn off. Shown once.</summary>
+    private void ShowTidyNoticeOnce()
+    {
+        if (_settings.DictationCleanupNoticeShown || _shell is not { IsActive: true } shell) return;
+        NotchSettings.Change(s => s.DictationCleanupNoticeShown = true); // a failed save toasts; the notice then shows again next time
+        shell.AddCard(DictationCards.TidyNotice());
+    }
 
     /// <summary>
     /// Any thread: on the UI (STA) thread, puts this dictation's clipboard text with <paramref name="words"/> fitted after it on
     /// the clipboard, and waits for it; false when the clipboard refused (the session's text then stays as it was).
     /// </summary>
-    private bool CopyDictationToClipboard(object? session, string words)
+    private bool CopyDictationToClipboard(DictationRun? session, string words)
     {
         var copied = false;
         try
@@ -187,7 +245,7 @@ internal sealed partial class TrayApplicationContext
     }
 
     /// <summary>UI thread. Cards and toasts never show the dictated words.</summary>
-    private void ShowDictationDelivery(object? session, DictationTarget? target, DictationDelivery delivery, bool copied)
+    private void ShowDictationDelivery(DictationRun? session, DictationTarget? target, DictationDelivery delivery, bool copied)
     {
         var current = _dictationActive && ReferenceEquals(session, _dictationSession) && !_dictationCardShown;
         switch (delivery.Kind)
@@ -208,8 +266,11 @@ internal sealed partial class TrayApplicationContext
                 break;
             case DictationDeliveryKind.Clipboard:
                 // Once per dictation: later phrases join the same clipboard text, so the notice is refreshed, never stacked.
-                var card = DictationCards.Clipboard();
+                // Typed-but-unconfirmed words may already be in the field: that warning stays for the rest of the dictation.
                 var sameSession = session is not null && ReferenceEquals(session, _dictationSession);
+                var unconfirmed = delivery.Insert?.InputSent == true;
+                if (sameSession) unconfirmed = _dictationClipboardUnconfirmed |= unconfirmed;
+                var card = unconfirmed ? DictationCards.ClipboardUnconfirmed() : DictationCards.Clipboard();
                 var noticed = sameSession && _dictationClipboardNoticed;
                 if (sameSession) _dictationClipboardNoticed = true;
                 if (_shell is { IsActive: true } active)
@@ -242,11 +303,12 @@ internal sealed partial class TrayApplicationContext
     /// UI thread, after a verified insert: for 15 s, watches the field (locally; its text is never logged or sent) for the user
     /// fixing one misheard word, and learns that word. A newer dictation, or the field changing hands, ends the watch.
     /// </summary>
-    private void OnDictationInserted(object? session, DictationTarget target, DictationDelivery delivery)
+    private void OnDictationInserted(DictationRun? session, DictationTarget target, DictationDelivery delivery)
     {
         StopDictationWatch();
         var words = _settings.DictionaryWords ?? [];
         if (_dictationSession is not null && !ReferenceEquals(session, _dictationSession)) return; // a newer dictation owns the field now
+        if (session is not { ShellUi: true }) return; // no learning in the classic UI: it has no Undo
         if (words.Count >= SettingsCatalog.MaxDictionaryWords) return;
         if (delivery.Insert is not { Verified: true, ValueBefore: { } before, ValueAfter: { } after }) return;
         var detector = new DictationCorrectionDetector(before, after, delivery.Text, [.. words]);
@@ -281,14 +343,13 @@ internal sealed partial class TrayApplicationContext
     /// <summary>UI thread: adds the word through the settings patch (cap and cleaning apply, the page updates) and offers Undo.</summary>
     private void LearnDictationWord(string word, CancellationToken token)
     {
-        if (token.IsCancellationRequested) return;
+        if (token.IsCancellationRequested || _shell is not { IsActive: true } shell) return; // the card's Undo needs the shell
         var words = _settings.DictionaryWords ?? [];
         if (words.Count >= SettingsCatalog.MaxDictionaryWords || words.Contains(word, StringComparer.OrdinalIgnoreCase)) return;
         if (!SetDictationDictionary([.. words, word]) || !(_settings.DictionaryWords ?? []).Contains(word, StringComparer.Ordinal)) return;
         _learnedWord = word;
         Log("dictation_word_learned");
-        if (_shell is { IsActive: true } shell) shell.AddCard(DictationCards.Learned(word));
-        else _tray.ShowBalloonTip(DictationCards.LearnedMs, "New dictionary word", word + " (remove it in Settings → Dictation)", ToolTipIcon.Info);
+        shell.AddCard(DictationCards.Learned(word));
     }
 
     /// <summary>UI thread: the Undo on the learned-word card forgets the word again.</summary>
@@ -396,8 +457,14 @@ internal sealed partial class TrayApplicationContext
             if (_talk.State == CompanionVoiceState.Listening) await _talk.EndListeningAsync();
             // ponytail: polls for the in-flight delivery to finish (max 30 s); a TalkOrchestrator "turn finished" task if this needs precision.
             for (var waited = 0; _talk.State != CompanionVoiceState.Idle && waited < 30_000; waited += 50) await Task.Delay(50);
-            if (!Same()) return;
             if (_talk.State != CompanionVoiceState.Idle) Log("dictation_finish_timeout");
+            // The queued phrases are delivered, in order, before dictation ends; each is bounded (keys 10 s, tidy-up 6 s).
+            if (session is not null)
+            {
+                try { await session.Deliveries.WhenIdle().WaitAsync(TimeSpan.FromSeconds(30)); }
+                catch (TimeoutException) { Log("dictation_finish_delivery_timeout"); }
+            }
+            if (!Same()) return;
             CancelDictation();
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)

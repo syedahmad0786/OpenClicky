@@ -1198,6 +1198,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
     {
         var hidden = DictationHidden;
         CancelTalk();
+        _dictationSession?.Cancel.Cancel(); // pending hands-free deliveries stop
         _dictationActive = false;
         _dictationTarget = null;
         _dictationSession = null;

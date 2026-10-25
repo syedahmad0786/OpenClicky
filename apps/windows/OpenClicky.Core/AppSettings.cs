@@ -87,6 +87,8 @@ public sealed class AppSettings
     public bool DictationAutoDetect { get; set; } = true;
     /// <summary>Tidy dictated text (punctuation, filler words) with the model provider.</summary>
     public bool DictationCleanup { get; set; } = true;
+    /// <summary>The one-time "Tidy up with AI is on" card has been shown.</summary>
+    public bool DictationCleanupNoticeShown { get; set; }
     public string DictationLanguage { get; set; } = "en";
     /// <summary>At most 50 words of 60 characters, de-duplicated ignoring case.</summary>
     public List<string> DictionaryWords { get; set; } = [];
