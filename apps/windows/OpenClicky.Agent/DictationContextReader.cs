@@ -12,9 +12,7 @@ namespace OpenClicky.Agent;
 /// </summary>
 public static class DictationContextReader
 {
-    private const int AddressBarBudgetMs = 150, AddressBarMaxDepth = 12;
-    private static readonly HashSet<string> Browsers = new(StringComparer.OrdinalIgnoreCase)
-        { "chrome", "msedge", "firefox", "brave", "vivaldi", "opera" };
+    private const int AddressBarBudgetMs = 150;
 
     /// <summary>The field's context, or null when the budget runs out, the field is protected or unreadable, or UIA fails.</summary>
     public static async Task<DictationFieldContext?> ReadAsync(DictationTarget target, TimeSpan budget, CancellationToken ct)
@@ -52,7 +50,7 @@ public static class DictationContextReader
             var processId = element.Current.ProcessId;
             var (appName, processName) = Describe(processId);
             var singleLine = element.Current.ControlType == ControlType.Edit && !value.Contains('\n') && !value.Contains('\r');
-            var host = Browsers.Contains(processName) ? SiteHost(target.Window, clock, budget) : null;
+            var host = BrowserAddressReader.IsBrowser(processName) ? SiteHost(target.Window, clock, budget) : null;
             return DictationFieldContext.FromValue(appName, host, value, start, length, singleLine);
         }
         catch (Exception) { return null; } // any UIA failure (element gone, COM, access) means "no context"
@@ -72,39 +70,9 @@ public static class DictationContextReader
     }
 
     /// <summary>
-    /// The host in the first Edit control named like an address bar, walking the window's browser chrome only (a Document subtree
-    /// is the page and is skipped), within <see cref="AddressBarBudgetMs"/> and what is left of <paramref name="budget"/>.
+    /// The host of the browser window's address bar (see <see cref="BrowserAddressReader"/>: the page is never read), within
+    /// <see cref="AddressBarBudgetMs"/> and what is left of <paramref name="budget"/>. Only the host is kept.
     /// </summary>
-    private static string? SiteHost(IntPtr window, Stopwatch clock, TimeSpan budget)
-    {
-        if (window == IntPtr.Zero) return null;
-        var deadline = Math.Min(clock.ElapsedMilliseconds + AddressBarBudgetMs, budget.TotalMilliseconds);
-        var cache = new CacheRequest { TreeFilter = Automation.ControlViewCondition };
-        cache.Add(AutomationElement.NameProperty);
-        cache.Add(AutomationElement.ControlTypeProperty);
-        using var _ = cache.Activate();
-        var walker = TreeWalker.ControlViewWalker;
-
-        string? Walk(AutomationElement parent, int depth)
-        {
-            for (var child = walker.GetFirstChild(parent, cache); child is not null; child = walker.GetNextSibling(child, cache))
-            {
-                if (clock.ElapsedMilliseconds >= deadline) return null;
-                var type = child.Cached.ControlType;
-                if (type == ControlType.Document) continue; // the page: never read
-                if (type == ControlType.Edit)
-                {
-                    if (child.Cached.Name.Contains("address", StringComparison.OrdinalIgnoreCase))
-                        return child.TryGetCurrentPattern(ValuePattern.Pattern, out var p)
-                            ? DictationFieldContext.HostOf(((ValuePattern)p).Current.Value) : null;
-                    continue;
-                }
-                if (depth < AddressBarMaxDepth && Walk(child, depth + 1) is { } found) return found;
-            }
-            return null;
-        }
-
-        try { return Walk(AutomationElement.FromHandle(window), 0); }
-        catch (Exception) { return null; }
-    }
+    private static string? SiteHost(IntPtr window, Stopwatch clock, TimeSpan budget) =>
+        DictationFieldContext.HostOf(BrowserAddressReader.Read(window, clock, Math.Min(clock.ElapsedMilliseconds + AddressBarBudgetMs, budget.TotalMilliseconds)));
 }

@@ -241,6 +241,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         try { _work.RecoverInterrupted(DateTimeOffset.UtcNow); }
         catch (Exception ex) when (ex is not OutOfMemoryException) { Log("job_recover_error=" + ex.GetType().Name); }
         IndexWork();
+        ResumeUserSteps();
         _lease.Changed += OnLeaseChanged;
         _routineTimer.Tick += (_, _) => { RunDueRoutine(); RequestShellPush(); };
         _routineTimer.Start();

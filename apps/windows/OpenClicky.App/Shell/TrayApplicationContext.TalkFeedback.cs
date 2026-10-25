@@ -180,6 +180,9 @@ internal sealed partial class TrayApplicationContext
             case (var id, JobAnnouncer.OpenAction) when id.StartsWith(JobAnnouncer.CardIdPrefix, StringComparison.Ordinal):
                 _shell?.OpenJob(id[JobAnnouncer.CardIdPrefix.Length..]);
                 return false;
+            // The user's own step: Open page keeps the card up for I'm done.
+            case (var id, JobCards.OpenPageAction or JobCards.DoneAction) when JobCards.JobIdOf(id) is { } jobId:
+                return UserStepCardAction(jobId, actionId);
             default:
                 Log("shell: card action not handled: " + actionId);
                 return false;

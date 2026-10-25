@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using OpenClicky.Agent;
 using OpenClicky.Core;
 using OpenClicky.Core.Agent;
 using OpenClicky.Core.Shell;
@@ -34,6 +35,10 @@ internal sealed partial class TrayApplicationContext
     /// <summary>UI thread: the follow-up each job last started with (none: its own request), so Try again asks the same.
     /// ponytail: in memory only; after a restart Try again runs the job's own request.</summary>
     private readonly Dictionary<string, string?> _lastFollowUps = new(StringComparer.Ordinal);
+    /// <summary>UI thread: each needs-you job's open step and the token that ends its address watch.</summary>
+    private readonly Dictionary<string, (UserStep Step, CancellationTokenSource Watch)> _userSteps = new(StringComparer.Ordinal);
+    /// <summary>What one address read may take; a step watch reads every <see cref="UserStepWatch.Poll"/>, off the UI thread.</summary>
+    private static readonly TimeSpan AddressReadBudget = TimeSpan.FromMilliseconds(300);
     private const string SteerTooLate = "That job has already finished — ask a follow-up instead.";
     /// <summary>UI thread: scheduled runs in flight; the PC stays awake while any is.</summary>
     private int _routineRuns;
@@ -180,8 +185,10 @@ internal sealed partial class TrayApplicationContext
                     ClassicMessage("That job is already running or waiting for a slot.");
                     return false;
                 case JobAdmission.Outcome.Queued:
+                    EndUserStep(jobId, UserStepEnd.Superseded);
                     return Queue(jobId, followUp, routineId, fromTalk);
             }
+            EndUserStep(jobId, UserStepEnd.Superseded); // a run the user started by hand answers a step still waiting
         }
         string prompt;
         JobRun run;
@@ -321,12 +328,15 @@ internal sealed partial class TrayApplicationContext
     private void FinishJob(JobRun work, string status, string text, JobResult? result = null, bool replyDelivered = false)
     {
         var summary = status == AgentProgressStates.Completed ? result?.Summary ?? JobPrompt.FirstSentence(text) : text;
+        // A run that ended by asking for the user's own step waits for them (needs-you) instead of being done.
+        var step = status == AgentProgressStates.Completed ? result?.YourTurn : null;
         // The run's last checklist is stored with its result so the card keeps it after the run (even a stopped or failed one).
         if (work.Live.Plan.Count > 0) result = (result ?? JobResult.Parse("", "")) with { Plan = work.Live.Plan };
         try
         {
-            _work.RecordJobRun(work.Job.Id, status, summary, DateTimeOffset.UtcNow);
+            _work.RecordJobRun(work.Job.Id, step is null ? status : WorkJobStates.NeedsYou, summary, DateTimeOffset.UtcNow);
             _work.SetJobResult(work.Job.Id, result?.ToJson() ?? "");
+            _work.SetUserStep(work.Job.Id, step is null ? null : UserStepWatch.ToJson(step));
             if (work.FromTalk && result?.Title is { } title) _work.RenameJob(work.Job.Id, title);
             _work.AppendRunLog(work.Job, work.Ask, status, text);
             if (work.RoutineId is { } routineId && _work.Routines(work.Job.Id).FirstOrDefault(r => r.Id == routineId) is { } routine)
@@ -342,6 +352,7 @@ internal sealed partial class TrayApplicationContext
             _home.RefreshWork();
             _jobOutputs.Remove(work.Job.Id);
             RequestShellPush();
+            if (step is not null) { BeginUserStep(work.Job with { Title = shownTitle }, step); return; }
             AnnounceJob(status == AgentProgressStates.Completed ? JobEvent.Done : status == AgentProgressStates.Failed ? JobEvent.Failed : JobEvent.Stopped,
                 shownTitle, work.Job.Id, replyDelivered: work.FromTalk && replyDelivered);
         });
@@ -402,6 +413,7 @@ internal sealed partial class TrayApplicationContext
             Restore(queued.Before);
             return;
         }
+        if (_userSteps.ContainsKey(id)) { EndUserStep(id, UserStepEnd.Stopped); return; }
         Log("shell: job.stop ignored, that job is not running");
     }
 
@@ -432,6 +444,102 @@ internal sealed partial class TrayApplicationContext
 
     /// <summary>Try again: a new run asked the same as the last one.</summary>
     void IShellHost.RetryJob(string id) => StartJob(id, _lastFollowUps.GetValueOrDefault(id), routineId: null);
+
+    /// <summary>Superseded: another run of the job started (a follow-up or retry), so the step no longer waits.</summary>
+    private enum UserStepEnd { Done, TimedOut, Stopped, Superseded }
+
+    /// <summary>UI thread: a job is waiting for the user's own step (already stored). Its card says what to do, the announcement is made as
+    /// for any job that needs the user (not again when <paramref name="resumed"/> after a restart), and the address watch starts, its
+    /// six hours counted from when the step was asked. The step text is untrusted and never logged.</summary>
+    private void BeginUserStep(WorkJob job, UserStep step, bool resumed = false)
+    {
+        if (_userSteps.Remove(job.Id, out var previous)) previous.Watch.Cancel();
+        var watch = new CancellationTokenSource();
+        _userSteps[job.Id] = (step, watch);
+        if (!resumed) AnnounceJob(JobEvent.NeedsYou, job.Title, job.Id);
+        _shell?.RemoveCard(JobAnnouncer.CardId(job.Id)); // the your-turn card says it better than the plain "Needs you" one
+        _shell?.AddCard(JobCards.YourTurn(job, step));
+        _ = WatchUserStepAsync(job.Id, new UserStepWatch(step, step.AskedAt), watch.Token);
+    }
+
+    /// <summary>Off the UI thread: every <see cref="UserStepWatch.Poll"/>, reads the browser address (only when the step names text to wait
+    /// for) and asks the watch. The address is compared and dropped; it is never logged or stored.</summary>
+    private async Task WatchUserStepAsync(string jobId, UserStepWatch watch, CancellationToken token)
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(UserStepWatch.Poll);
+            while (await timer.WaitForNextTickAsync(token).ConfigureAwait(false))
+            {
+                var address = string.IsNullOrWhiteSpace(watch.Step.DoneWhenUrlContains) ? null
+                    : await BrowserAddressReader.ReadAsync(AddressReadBudget, token).ConfigureAwait(false);
+                var status = watch.Check(DateTimeOffset.UtcNow, address);
+                if (status == UserStepStatus.Waiting) continue;
+                OnUi(() => EndUserStep(jobId, status == UserStepStatus.Done ? UserStepEnd.Done : UserStepEnd.TimedOut, token));
+                return;
+            }
+        }
+        catch (OperationCanceledException) { } // the step ended another way
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Log("user_step_watch_error=" + ex.GetType().Name); }
+    }
+
+    /// <summary>UI thread: the user's step is over. Done carries the job on with a follow-up run (through admission); a timeout or a stop
+    /// ends the job as Stopped. <paramref name="watch"/>: the watch that decided, ignored when the step has since been replaced.</summary>
+    private void EndUserStep(string jobId, UserStepEnd end, CancellationToken? watch = null)
+    {
+        if (!_userSteps.TryGetValue(jobId, out var open) || watch is { } decided && open.Watch.Token != decided) return;
+        _userSteps.Remove(jobId);
+        open.Watch.Cancel();
+        _shell?.RemoveCard(JobCards.YourTurnId(jobId));
+        try
+        {
+            _work.SetUserStep(jobId, null);
+            if (end is UserStepEnd.TimedOut or UserStepEnd.Stopped)
+                _work.RecordJobRun(jobId, WorkJobStates.Stopped, end == UserStepEnd.TimedOut ? "Waited six hours for your step; stopped." : "Stopped by you.", DateTimeOffset.UtcNow);
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Log("user_step_end_error=" + ex.GetType().Name); }
+        if (end == UserStepEnd.Done && !StartJob(jobId, $"The user finished this step: {open.Step.Step}. Carry on with the job.", routineId: null))
+        {
+            // It could not start (not signed in, job removed): the job must not stay waiting on a step that is over.
+            try
+            {
+                if (_work.GetJob(jobId).Status == WorkJobStates.NeedsYou)
+                    _work.RecordJobRun(jobId, WorkJobStates.Stopped, "Couldn't carry on after your step; try again.", DateTimeOffset.UtcNow);
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { Log("user_step_end_error=" + ex.GetType().Name); }
+        }
+        IndexWork();
+        _home.RefreshWork();
+        RequestShellPush();
+    }
+
+    /// <summary>The your-turn card's actions. Open page opens only the stored http(s) page, and only on this click. Returns whether the card stays.</summary>
+    private bool UserStepCardAction(string jobId, string actionId)
+    {
+        if (!_userSteps.TryGetValue(jobId, out var open)) return false;
+        if (actionId == JobCards.DoneAction) { EndUserStep(jobId, UserStepEnd.Done); return false; }
+        if (actionId == JobCards.OpenPageAction && UserStepWatch.PageToOpen(open.Step) is { } page) OpenUrl(page.AbsoluteUri);
+        return true;
+    }
+
+    /// <summary>UI thread, at start-up after <see cref="WorkStore.RecoverInterrupted"/>: needs-you jobs keep waiting, their six hours counted
+    /// from when the step was asked. One whose step cannot be read is stopped, for nothing could end it.</summary>
+    private void ResumeUserSteps()
+    {
+        try
+        {
+            foreach (var job in _work.Jobs().Where(j => j.Status == WorkJobStates.NeedsYou))
+            {
+                if (UserStepWatch.FromJson(job.UserStepJson) is { } step) BeginUserStep(job, step, resumed: true);
+                else
+                {
+                    _work.SetUserStep(job.Id, null);
+                    _work.RecordJobRun(job.Id, WorkJobStates.Stopped, WorkStore.InterruptedSummary, DateTimeOffset.UtcNow);
+                }
+            }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Log("user_step_resume_error=" + ex.GetType().Name); }
+    }
 
     /// <summary>The steer is kept for the run's desktop observations and goes into its session (held until the session exists).
     /// True: sent or held; false: the run has ended; null: the engine could not be reached. The text is never logged.</summary>
