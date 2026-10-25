@@ -93,7 +93,12 @@ public sealed record ShellState(
     ShellGeneral General,
     ShellUpdate Update,
     DocumentView? Document,
-    SettingsView Settings);
+    SettingsView Settings)
+{
+    /// <summary>The first-run tour; omitted from the wire while none runs.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public OnboardingView? Onboarding { get; init; }
+}
 
 public sealed record Device(string Id, string Name, DeviceState State);
 public sealed record Hotkey(IReadOnlyList<string> Keys, HotkeyTrigger Trigger);
@@ -263,6 +268,7 @@ public static class ShellIntentParser
         "settings.section" => OneOf(m, "section", ShellContract.Sections),
         "settings.patch" => Patch(m),
         "settings.action" => OneOf(m, "action", SettingsActions) && OptionalStr(m, "arg", MaxActionArgLength),
+        "onboarding" => OneOf(m, "action", OnboardingContract.Actions),
         _ => false,
     };
 
