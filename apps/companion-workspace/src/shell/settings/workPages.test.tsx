@@ -54,10 +54,10 @@ it("Integrations: connector rows show status and tools, search filters by name o
   expect(screen.getByText("1 tool")).toBeInTheDocument();
   expect(screen.getByText("Reconnect required")).toBeInTheDocument();
   expect(screen.getByText("Error")).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Test Notion" }));
+  fireEvent.click(screen.getByRole("button", { name: "Test Notion · Work" }));
   expect(posts("settings.action")).toEqual([{ kind: "settings.action", action: "connector.test", arg: "notion" }]);
 
-  const search = screen.getByRole("searchbox", { name: "Search connectors" });
+  const search = screen.getByRole("searchbox", { name: "Search integrations" });
   fireEvent.change(search, { target: { value: "slack.com" } });
   expect(screen.queryByText("Notion")).toBeNull();
   expect(screen.getByText("Slack")).toBeInTheDocument();
@@ -69,10 +69,10 @@ it("Integrations: connector rows show status and tools, search filters by name o
 it("Integrations: Remove asks in-page first, then posts connector.remove", () => {
   const posts = host();
   render(<SettingsPanel state={make("integrations")} />);
-  fireEvent.click(screen.getByRole("button", { name: "Remove Notion" }));
+  fireEvent.click(screen.getByRole("button", { name: "Remove Notion · Work" }));
   expect(posts("settings.action")).toEqual([]);
   fireEvent.click(screen.getByRole("button", { name: "Keep" }));
-  fireEvent.click(screen.getByRole("button", { name: "Remove Notion" }));
+  fireEvent.click(screen.getByRole("button", { name: "Remove Notion · Work" }));
   fireEvent.click(screen.getByRole("button", { name: "Remove connector" }));
   expect(posts("settings.action")).toEqual([{ kind: "settings.action", action: "connector.remove", arg: "notion" }]);
 });
@@ -81,7 +81,7 @@ it("Integrations: the add form needs a name and an https (or local http) URL, th
   const posts = host();
   render(<SettingsPanel state={make("integrations")} />);
   const f = addForm();
-  expect(f.add).toBeDisabled(); // Sign in with browser is the default and is not available yet
+  expect(f.add).toBeDisabled(); // empty
   fireEvent.click(screen.getByRole("radio", { name: "None" }));
 
   expect(f.add).toBeDisabled(); // empty
@@ -101,7 +101,7 @@ it("Integrations: the add form needs a name and an https (or local http) URL, th
   expect(f.add).toBeEnabled();
   fireEvent.click(f.add);
   expect(posts("settings.action")).toEqual([
-    { kind: "settings.action", action: "connector.add", arg: JSON.stringify({ name: "Linear", url: "https://mcp.linear.app/mcp", auth: "none" }) },
+    { kind: "settings.action", action: "connector.add", arg: JSON.stringify({ name: "Linear", kind: "remote", url: "https://mcp.linear.app/mcp", auth: "none" }) },
   ]);
   // The form stays open with its values until the host reports the connector (or a toast says why not).
   expect(screen.getByRole("textbox", { name: "Name" })).toHaveValue(" Linear ");
@@ -160,13 +160,13 @@ it("Integrations: a toast that was already showing does not unlock the form, a c
   } finally { vi.useRealTimers(); }
 });
 
-it("Integrations: local http addresses are accepted, API key auth is sent, browser sign-in is disabled with a note", () => {
+it("Integrations: local http addresses are accepted, API key auth is sent, the hint follows the authentication", () => {
   const posts = host();
   render(<SettingsPanel state={make("integrations")} />);
   const f = addForm();
-  expect(screen.getByText("Browser sign-in arrives with the connectors update.")).toBeInTheDocument();
+  expect(screen.getByText("Opens your browser to sign in. OpenClicky never sees your password.")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("radio", { name: "API key" }));
-  expect(screen.queryByText("Browser sign-in arrives with the connectors update.")).toBeNull();
+  expect(screen.queryByText("Opens your browser to sign in. OpenClicky never sees your password.")).toBeNull();
   fireEvent.change(f.name, { target: { value: "Local" } });
   fireEvent.change(f.url, { target: { value: "http://127.0.0.1:8123/mcp" } });
   expect(f.add).toBeEnabled();
@@ -174,17 +174,17 @@ it("Integrations: local http addresses are accepted, API key auth is sent, brows
   expect(f.add).toBeEnabled();
   fireEvent.click(f.add);
   expect(posts("settings.action")).toEqual([
-    { kind: "settings.action", action: "connector.add", arg: JSON.stringify({ name: "Local", url: "http://localhost/mcp", auth: "apiKey" }) },
+    { kind: "settings.action", action: "connector.add", arg: JSON.stringify({ name: "Local", kind: "remote", url: "http://localhost/mcp", auth: "apiKey" }) },
   ]);
 });
 
-it("Integrations: the add form refuses input over 512 characters and Cancel closes it without posting", () => {
+it("Integrations: the add form refuses input over 8,000 characters and Cancel closes it without posting", () => {
   const posts = host();
   render(<SettingsPanel state={make("integrations")} />);
   const f = addForm();
   fireEvent.click(screen.getByRole("radio", { name: "None" }));
   fireEvent.change(f.name, { target: { value: "Long" } });
-  fireEvent.change(f.url, { target: { value: `https://example.com/${"a".repeat(600)}` } });
+  fireEvent.change(f.url, { target: { value: `https://example.com/${"a".repeat(8_000)}` } });
   expect(f.add).toBeDisabled();
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   expect(screen.queryByRole("textbox", { name: "Name" })).toBeNull();
@@ -350,9 +350,9 @@ it.each(["https://mcp.linear.app/mcp", "https://example.com:8443/a?b=c", "http:/
 it("Remove confirm: focus goes to Keep, the row is an alert, and Keep returns focus to the Remove button", () => {
   host();
   render(<SettingsPanel state={make("integrations")} />);
-  const remove = screen.getByRole("button", { name: "Remove Notion" });
+  const remove = screen.getByRole("button", { name: "Remove Notion · Work" });
   fireEvent.click(remove);
-  expect(screen.getByRole("alert")).toHaveTextContent("Remove Notion?");
+  expect(screen.getByRole("alert")).toHaveTextContent("Remove Notion · Work?");
   expect(screen.getByRole("button", { name: "Keep" })).toHaveFocus();
   fireEvent.click(screen.getByRole("button", { name: "Keep" }));
   expect(screen.queryByRole("alert")).toBeNull();

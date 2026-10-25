@@ -78,3 +78,11 @@
 .settings-empty { margin: 32px 0; text-align: center; font-size: 14px; color: var(--text-2); }
 .settings-empty p { margin: 0 0 10px; }
 .settings-empty__example { font-size: 13px; font-style: italic; color: var(--text-3); }
+
+/* Integrations: accounts, catalog, custom connector editor */
+.settings-add-account { display: flex; padding: 10px 16px; border-top: 1px solid var(--hairline); }
+.settings-disclosure { align-self: flex-start; padding: 0; font: inherit; font-size: 13px; color: var(--accent-light); background: transparent; border: 0; cursor: pointer; }
+.settings-disclosure::before { content: "\25B8  "; }
+.settings-disclosure[aria-expanded="true"]::before { content: "\25BE  "; }
+.settings-disclosure:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; }
+.settings-connector-secret-hint { margin: 0; padding: 0 16px 12px; }
