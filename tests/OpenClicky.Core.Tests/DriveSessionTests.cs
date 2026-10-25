@@ -58,22 +58,56 @@ public class DriveSessionTests
     public async Task ConsentTimeoutDeclines()
     {
         var never = new TaskCompletionSource<bool>();
-        var drive = Session(AgentAccessMode.FullAccess, _ => never.Task, TimeSpan.FromMilliseconds(50));
+        var prompt = CancellationToken.None;
+        var drive = Session(AgentAccessMode.FullAccess, ct => { prompt = ct; return never.Task; }, TimeSpan.FromMilliseconds(50));
         Assert.False(await drive.EnsureConsentAsync(CancellationToken.None));
         Assert.Equal(DriveEnd.Declined, drive.EndedBy);
+        Assert.True(prompt.IsCancellationRequested); // the card or dialog is told to come down
         Assert.Equal(TimeSpan.FromSeconds(60), DriveSession.ConsentTimeout);
     }
 
-    [Fact]
-    public async Task AccessSnapshotIsFixed()
+    [Theory]
+    [InlineData(AgentAccessMode.Preview)]
+    [InlineData(AgentAccessMode.ConfirmEach)]
+    [InlineData(AgentAccessMode.Auto)]
+    [InlineData(AgentAccessMode.FullAccess)]
+    public async Task AccessSnapshotIsFixed(AgentAccessMode mode)
     {
-        var mode = AgentAccessMode.ConfirmEach;
+        // Through a whole drive (consent, take-back, a safety hold, resume, end) the snapshot never moves, in particular never to Full.
         var drive = Session(mode, _ => Task.FromResult(true));
-        mode = AgentAccessMode.FullAccess; // a later settings change does not reach a running session
         await drive.EnsureConsentAsync(CancellationToken.None);
+        drive.OnPhysicalInput(PhysicalKind.Key, 0, 0);
+        drive.Resume(0, 0);
+        drive.Suspend();
+        drive.Resume(0, 0);
         drive.End(DriveEnd.Finished);
-        Assert.Equal(AgentAccessMode.ConfirmEach, drive.Access);
-        Assert.Equal(AgentAccessMode.FullAccess, mode);
+        Assert.Equal(mode, drive.Access);
+        Assert.Null(typeof(DriveSession).GetProperty(nameof(DriveSession.Access))!.SetMethod); // no way to change it
+    }
+
+    [Fact]
+    public async Task SuspendHoldsUntilResume()
+    {
+        var drive = await Driving();
+        drive.Suspend();
+        Assert.Equal(DrivePhase.TakenBack, drive.Phase);
+        Assert.False(drive.OnPhysicalInput(PhysicalKind.Key, 0, 0));
+        drive.Resume(5, 5);
+        Assert.Equal(DrivePhase.Driving, drive.Phase);
+    }
+
+    [Fact]
+    public async Task EachCallerTokenCancelsOnlyItsWait()
+    {
+        var answer = new TaskCompletionSource<bool>();
+        var drive = Session(AgentAccessMode.Auto, _ => answer.Task);
+        var first = drive.EnsureConsentAsync(CancellationToken.None);
+        using var gone = new CancellationTokenSource();
+        var second = drive.EnsureConsentAsync(gone.Token);
+        gone.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => second);
+        answer.SetResult(true);
+        Assert.True(await first);
     }
 
     [Fact]

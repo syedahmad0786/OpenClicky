@@ -10,7 +10,8 @@ public static class ProcessIntegrity
 {
     private const uint ProcessQueryLimitedInformation = 0x1000, TokenQuery = 0x0008;
     private const int TokenIntegrityLevel = 25;
-    private static readonly Lazy<int> OwnRid = new(() => OfProcess(GetCurrentProcess(), ownsHandle: false) ?? 0x2000);
+    private const uint GaRoot = 2;
+    private static readonly Lazy<int> OwnRid = new(() => OfCurrentProcess() ?? 0x2000);
 
     /// <summary>The integrity of the process that owns <paramref name="hwnd"/>; null when the window, process or token can't be read.</summary>
     public static int? Of(nint hwnd)
@@ -19,6 +20,18 @@ public static class ProcessIntegrity
         var process = OpenProcess(ProcessQueryLimitedInformation, false, pid);
         return process == 0 ? null : OfProcess(process, ownsHandle: true);
     }
+
+    /// <summary>The integrity of the top-level window under a screen point (where a click or scroll lands); null when unreadable.</summary>
+    public static int? AtPoint(int x, int y)
+    {
+        var window = WindowFromPoint(new NativePoint { X = x, Y = y });
+        if (window == 0) return null;
+        var root = GetAncestor(window, GaRoot);
+        return Of(root == 0 ? window : root);
+    }
+
+    /// <summary>OpenClicky's own integrity, or null when its own token can't be read.</summary>
+    public static int? OfCurrentProcess() => OfProcess(GetCurrentProcess(), ownsHandle: false);
 
     /// <summary>OpenClicky's own integrity (Medium when it somehow cannot be read).</summary>
     public static int Own() => OwnRid.Value;
@@ -49,6 +62,15 @@ public static class ProcessIntegrity
 
     [DllImport("user32.dll")]
     private static extern uint GetWindowThreadProcessId(nint hwnd, out uint processId);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint { public int X, Y; }
+
+    [DllImport("user32.dll")]
+    private static extern nint WindowFromPoint(NativePoint point);
+
+    [DllImport("user32.dll")]
+    private static extern nint GetAncestor(nint window, uint flags);
 
     [DllImport("kernel32.dll")]
     private static extern nint GetCurrentProcess();

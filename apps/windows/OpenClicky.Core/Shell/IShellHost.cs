@@ -32,6 +32,8 @@ public interface IShellHost
     /// <summary>A button on a card the controller still shows; <paramref name="actionId"/> is one of that card's actions.
     /// Return true to keep the card, false to remove it.</summary>
     bool CardAction(string cardId, string actionId);
+    /// <summary>The user closed a card the controller still showed (no action ran).</summary>
+    void CardDismissed(string cardId) { }
     /// <summary>A button on a saved-drawing chat row; <paramref name="id"/> is a drawing the last pushed state offered and <paramref name="action"/> one of ShellIntentParser.DrawingActions.</summary>
     void DrawingAction(string id, string action);
 }

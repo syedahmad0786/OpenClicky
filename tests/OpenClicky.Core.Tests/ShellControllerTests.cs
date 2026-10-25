@@ -36,6 +36,7 @@ public class ShellControllerTests
         public void DrawingAction(string id, string action) => Calls.Add($"drawing:{id}:{action}");
         public bool KeepCard { get; set; }
         public bool CardAction(string cardId, string actionId) { Calls.Add($"card:{cardId}:{actionId}"); return KeepCard; }
+        public void CardDismissed(string cardId) => Calls.Add("dismissed:" + cardId);
     }
 
     private sealed class FakeSurface : IShellSurface
@@ -414,6 +415,8 @@ public class ShellControllerTests
         surface.Send(new { kind = "card.dismiss", cardId = TalkCards.MutedSpeakerId });
         Assert.Empty(CardIds(surface));
         Assert.Equal(2, host.Calls.Count(c => c.StartsWith("card:"))); // dismiss never runs an action
+        surface.Send(new { kind = "card.dismiss", cardId = TalkCards.MutedSpeakerId }); // no longer shown: the host hears nothing
+        Assert.Equal(["dismissed:" + TalkCards.MutedSpeakerId], host.Calls.Where(c => c.StartsWith("dismissed:")));
     }
 
     [Fact]

@@ -30,17 +30,20 @@ public sealed class DriveSession(AgentAccessMode accessSnapshot, Func<Cancellati
 
     /// <summary>
     /// True once the user said yes. Preview never asks and never drives; otherwise the user is asked once per session and the
-    /// answer is kept. No, or no answer within 60 s, ends the session as declined.
+    /// answer is kept. No, or no answer within 60 s, ends the session as declined. Each caller's own token cancels its wait.
     /// </summary>
     public Task<bool> EnsureConsentAsync(CancellationToken ct)
     {
         if (Access == AgentAccessMode.Preview) return Task.FromResult(false);
         lock (_gate)
         {
-            if (_consent is not null) return _consent;
-            if (_phase == DrivePhase.Ended) return Task.FromResult(false);
-            _phase = DrivePhase.AwaitingConsent;
-            return _consent = AskAsync(ct);
+            if (_consent is null)
+            {
+                if (_phase == DrivePhase.Ended) return Task.FromResult(false);
+                _phase = DrivePhase.AwaitingConsent;
+                _consent = AskAsync(ct);
+            }
+            return _consent.WaitAsync(ct);
         }
     }
 
@@ -90,6 +93,9 @@ public sealed class DriveSession(AgentAccessMode accessSnapshot, Func<Cancellati
 
     /// <summary>The user's pointer is on OpenClicky's own window or a confirm dialog: the baseline follows it.</summary>
     public void Rebase(int x, int y) { lock (_gate) _baseline = (x, y); }
+
+    /// <summary>OpenClicky stopped driving on its own (the window refused input): held like a take-back until the user resumes.</summary>
+    public void Suspend() { lock (_gate) if (_phase == DrivePhase.Driving) _phase = DrivePhase.TakenBack; }
 
     /// <summary>The user resumed after taking over: driving again, watched from where the cursor is now.</summary>
     public void Resume(int x, int y)

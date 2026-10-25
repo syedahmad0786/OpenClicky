@@ -34,9 +34,13 @@ internal sealed class WinFormsAgentConfirm : IAgentConfirm
     public Task<bool> ConfirmTalkAsync(string summary, bool restoreTarget, CancellationToken cancellationToken = default)
         => ConfirmCoreAsync(summary, Wording.Talk, restoreTarget, cancellationToken);
 
-    private enum Wording { Action, Task, Talk }
+    /// <summary>Classic drive consent, asked once per task before its first mouse or keyboard input; the target is restored after.</summary>
+    public Task<bool> ConfirmDriveAsync(string question, string detail, CancellationToken cancellationToken = default)
+        => ConfirmCoreAsync(detail, Wording.Drive, true, cancellationToken, question);
 
-    private Task<bool> ConfirmCoreAsync(string summary, Wording wording, bool restoreTarget, CancellationToken cancellationToken)
+    private enum Wording { Action, Task, Talk, Drive }
+
+    private Task<bool> ConfirmCoreAsync(string summary, Wording wording, bool restoreTarget, CancellationToken cancellationToken, string? question = null)
     {
         var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         void Show()
@@ -53,7 +57,7 @@ internal sealed class WinFormsAgentConfirm : IAgentConfirm
             _isDialogOpen = true;
             try
             {
-                using var dialog = new AgentConfirmDialog(summary, wording);
+                using var dialog = new AgentConfirmDialog(summary, wording, question);
                 using var registration = cancellationToken.Register(() => _ui.Post(_ =>
                 {
                     if (!dialog.IsDisposed) dialog.Close();
@@ -91,10 +95,11 @@ internal sealed class WinFormsAgentConfirm : IAgentConfirm
     /// <summary>Top-most Yes/No form that fully closes before SendInput continues.</summary>
     private sealed class AgentConfirmDialog : Form
     {
-        public AgentConfirmDialog(string summary, Wording wording)
+        public AgentConfirmDialog(string summary, Wording wording, string? question)
         {
             var wholeTask = wording == Wording.Task;
             var talk = wording == Wording.Talk;
+            var drive = wording == Wording.Drive;
             Text = talk ? "OpenClicky" : "OpenClicky Agent";
             AppTheme.Apply(this);
             FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -111,14 +116,15 @@ internal sealed class WinFormsAgentConfirm : IAgentConfirm
                 Dock = DockStyle.Fill, Multiline = true, ReadOnly = true,
                 ScrollBars = ScrollBars.Vertical, BorderStyle = BorderStyle.None,
                 BackColor = AppTheme.Background, ForeColor = AppTheme.Ink,
-                Text = (talk ? "Do this?" : wholeTask ? "Approve this task plan?" : "Allow this one action?") + "\r\n\r\n" + summary
-                    + (talk ? "\r\n\r\nNothing happens if you decline." : "\r\n\r\nThe task stops if you decline or press Escape."),
+                Text = (drive ? question : talk ? "Do this?" : wholeTask ? "Approve this task plan?" : "Allow this one action?") + "\r\n\r\n" + summary
+                    + (drive ? "\r\n\r\nThe task stops if you choose Not now or press Escape."
+                        : talk ? "\r\n\r\nNothing happens if you decline." : "\r\n\r\nThe task stops if you decline or press Escape."),
                 AccessibleName = "Proposed desktop action",
             };
 
-            var yes = AppTheme.Button(talk ? "Allow" : wholeTask ? "Approve task" : "Allow action", true);
+            var yes = AppTheme.Button(drive ? "Let OpenClicky drive" : talk ? "Allow" : wholeTask ? "Approve task" : "Allow action", true);
             yes.DialogResult = DialogResult.Yes;
-            var no = AppTheme.Button(talk ? "Don't" : "Stop task");
+            var no = AppTheme.Button(drive ? "Not now" : talk ? "Don't" : "Stop task");
             no.DialogResult = DialogResult.No;
             var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 58, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(0,12,0,0) };
             buttons.Controls.AddRange(new Control[] { no, yes });

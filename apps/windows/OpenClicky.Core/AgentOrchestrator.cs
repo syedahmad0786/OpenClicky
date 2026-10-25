@@ -262,6 +262,13 @@ public sealed class AgentOrchestrator
             prior.Add($"step {step}: {plan.ToolName} → success={result.Success} {result.Message}");
             _log($"agent_result success={result.Success} tool={plan.ToolName}");
 
+            if (!result.Success && result.ObserveAgain)
+            {
+                // Like a changed foreground: the next step waits out the pause (beforeStep), then plans from a fresh look.
+                _onReply?.Invoke(result.Message);
+                Progress(step, "observing", result.Message, plan.ToolName);
+                continue;
+            }
             if (!result.Success)
             {
                 var msg = $"I stopped because {plan.ToolName} failed: {result.Message}";

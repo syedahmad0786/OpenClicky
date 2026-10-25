@@ -461,7 +461,9 @@ internal static class Program
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         var own = ProcessIntegrity.Own();
         Console.WriteLine($"own_integrity=0x{own:X}");
-        if (own < 0x1000) { Console.Error.WriteLine("FAIL: own integrity unreadable"); return 50; }
+        // Own() falls back to Medium: the token itself must be readable, and give a real level.
+        if (ProcessIntegrity.OfCurrentProcess() is not { } read || read != own || read is < 0x1000 or > 0x4000)
+        { Console.Error.WriteLine("FAIL: own integrity unreadable"); return 50; }
         if (ProcessIntegrity.Of(0) is not null || !OpenClicky.Core.CompanionCursor.DriveGuard.Refuses(ProcessIntegrity.Of(0), own))
         { Console.Error.WriteLine("FAIL: no window must read as unreadable and be refused"); return 52; }
         using var fixture = Process.Start(new ProcessStartInfo(Environment.ProcessPath!, ["--harvest-fixture", "OpenClicky integrity fixture"])
@@ -475,6 +477,9 @@ internal static class Program
             Console.WriteLine($"fixture_integrity=0x{theirs:X}");
             if (theirs != own || OpenClicky.Core.CompanionCursor.DriveGuard.Refuses(theirs, own))
             { Console.Error.WriteLine("FAIL: a same-integrity fixture must be read and allowed"); return 54; }
+            var under = ProcessIntegrity.AtPoint((int)layout["button"][0], (int)layout["button"][1]); // where a click would land
+            Console.WriteLine($"point_integrity=0x{under:X}");
+            if (under != own) { Console.Error.WriteLine("FAIL: the window under the click target must read like the fixture"); return 56; }
         }
         finally { try { fixture.Kill(); } catch (InvalidOperationException) { } }
         // Last: creating a Form installs a WinForms synchronization context with no message loop to resume awaits on.

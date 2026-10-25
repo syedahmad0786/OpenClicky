@@ -168,6 +168,12 @@ internal sealed partial class TrayApplicationContext
         }
     }
 
+    /// <summary>Closing the consent card is a "not now"; closing any other card changes nothing.</summary>
+    void IShellHost.CardDismissed(string cardId)
+    {
+        if (cardId == CompanionCards.DriveConsentId) AnswerDriveConsent(false);
+    }
+
     /// <summary>The NAudio recorder that is capturing now (the shared one, else the local recognizer's), if any has a level.</summary>
     private NAudioMicrophoneRecorder? RecordingMic() =>
         _mic is NAudioMicrophoneRecorder { IsRecording: true } shared ? shared

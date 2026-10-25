@@ -360,7 +360,10 @@ public sealed class ShellController : IDisposable
                 _host.DrawingAction(id!, intent.GetString("action")!);
                 break;
             case "card.dismiss":
-                RemoveCard(intent.GetString("cardId")!);
+                var dismissed = intent.GetString("cardId")!;
+                var wasShown = _cards.Any(c => c.Card.Id == dismissed);
+                RemoveCard(dismissed);
+                if (wasShown) _host.CardDismissed(dismissed);
                 break;
             case "card.action":
                 // Only an action the card actually offers reaches the host; anything else (a toast, a stale card) just dismisses.

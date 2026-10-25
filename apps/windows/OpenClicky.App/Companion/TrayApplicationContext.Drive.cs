@@ -37,6 +37,7 @@ internal sealed partial class TrayApplicationContext
     private void EndDrive(DriveSession drive, DriveEnd reason)
     {
         drive.End(reason);
+        Log("drive_end=" + drive.EndedBy);
         if (ReferenceEquals(_drive, drive)) _drive = null;
         OnUi(() =>
         {
@@ -69,7 +70,7 @@ internal sealed partial class TrayApplicationContext
         if (!await shellShown.Task.WaitAsync(ct).ConfigureAwait(false))
         {
             var card = CompanionCards.DriveConsent();
-            return await _confirm.ConfirmNonInputAsync(card.Title + Environment.NewLine + card.Body, ct).ConfigureAwait(false);
+            return await _confirm.ConfirmDriveAsync(card.Title, card.Body!, ct).ConfigureAwait(false);
         }
         try { return await answer.Task.WaitAsync(ct).ConfigureAwait(false); }
         finally
@@ -98,30 +99,68 @@ internal sealed partial class TrayApplicationContext
     private async Task<ActionResult> ExecuteDriveInputAsync(ActionRequest request, bool confirmed, CancellationToken ct)
     {
         if (_drive is not { } drive) return new(false, "No task is running, so no input was sent.", false);
-        if (!await drive.EnsureConsentAsync(ct).ConfigureAwait(false)) return new(false, DriveDeclinedMessage, false);
-        // Taken back after the step boundary was passed: nothing is sent once the user has the mouse.
-        if (drive.Phase != DrivePhase.Driving) return new(false, DriveTakenBackMessage, false);
-        if (DriveGuard.Refuses(ProcessIntegrity.Of(ForegroundWindowInfo.GetHandle()), ProcessIntegrity.Own()))
+        if (!await drive.EnsureConsentAsync(ct).ConfigureAwait(false))
+        {
+            CancelTask(); // a "no" ends the run (Auto/Full on OpenWork would otherwise get this answer on every call)
+            return new(false, DriveDeclinedMessage, false);
+        }
+        // Taken back after the step boundary was passed: nothing is sent once the user has the mouse. Paused; look again after.
+        if (drive.Phase != DrivePhase.Driving) return new(false, DriveTakenBackMessage, false, ObserveAgain: true);
+        if (RefusesIntegrity(request))
         {
             Log("drive_refused integrity");
+            drive.Suspend(); // not driving while held: the pill comes down and the companion may detach again
             PauseTask();
-            return new(false, DriveElevatedMessage, false);
+            OnUi(HideDrivingPill);
+            return new(false, DriveElevatedMessage, false, ObserveAgain: true);
         }
-        if (Interlocked.Exchange(ref _drivingPillShown, 1) == 0) OnUi(ShowDrivingPill);
+        if (Interlocked.Exchange(ref _drivingPillShown, 1) == 0) OnUi(ShowDrivingCard);
         drive.BeginAgentAction();
         try { return await ExecuteLegacyAsync(request, confirmed, ct).ConfigureAwait(false); }
         finally
         {
             var p = System.Windows.Forms.Cursor.Position;
             drive.NoteAgentCursor(p.X, p.Y);
+            OnUi(ShowClassicDrivingBubble); // after the action: a click's pointer label is never cut short
         }
     }
 
-    private void ShowDrivingPill()
+    /// <summary>
+    /// The foreground window, and for a click or scroll the top-level window where it lands, must not run above OpenClicky's
+    /// integrity (or be unreadable). Clicks carry their target; a scroll lands under the cursor.
+    /// </summary>
+    private static bool RefusesIntegrity(ActionRequest request)
     {
-        if (_drive is not { Phase: DrivePhase.Driving }) return;
-        if (_shell is { IsActive: true } shell) shell.AddCard(CompanionCards.Driving());
-        else _overlay.ShowResponding(ClassicDrivingText);
+        var own = ProcessIntegrity.Own();
+        if (DriveGuard.Refuses(ProcessIntegrity.Of(ForegroundWindowInfo.GetHandle()), own)) return true;
+        if (request.ToolName == AgentToolNames.Click)
+            return !int.TryParse(request.Arguments.GetValueOrDefault("x"), out var x) || !int.TryParse(request.Arguments.GetValueOrDefault("y"), out var y)
+                || DriveGuard.Refuses(ProcessIntegrity.AtPoint(x, y), own);
+        if (request.ToolName == AgentToolNames.Scroll)
+        {
+            var p = System.Windows.Forms.Cursor.Position;
+            return DriveGuard.Refuses(ProcessIntegrity.AtPoint(p.X, p.Y), own);
+        }
+        return false;
+    }
+
+    /// <summary>UI thread: the shell's Esc pill, once per stretch of driving.</summary>
+    private void ShowDrivingCard()
+    {
+        if (_drive is { Phase: DrivePhase.Driving } && _shell is { IsActive: true } shell) shell.AddCard(CompanionCards.Driving());
+    }
+
+    /// <summary>UI thread: classic mode has no pill; the bubble says it instead, again after each action (each capture hides it).</summary>
+    private void ShowClassicDrivingBubble()
+    {
+        if (_drive is { Phase: DrivePhase.Driving } && _shell is not { IsActive: true }) _overlay.ShowResponding(ClassicDrivingText);
+    }
+
+    /// <summary>UI thread: the user took over, or the window refused input. The paused progress line takes the pill's place.</summary>
+    private void HideDrivingPill()
+    {
+        _drivingPillShown = 0;
+        _shell?.RemoveCard(CompanionCards.DrivingId);
     }
 
     /// <summary>
@@ -145,8 +184,7 @@ internal sealed partial class TrayApplicationContext
         }
         if (!drive.OnPhysicalInput(kind, p.X, p.Y)) return true;
         Log("drive_taken_back kind=" + kind);
-        _drivingPillShown = 0;
-        _shell?.RemoveCard(CompanionCards.DrivingId); // the paused progress line takes its place
+        HideDrivingPill();
         PauseTask();
         return true;
     }
