@@ -1,5 +1,6 @@
 using System.Text.Json;
 using OpenClicky.Core.Agent;
+using OpenClicky.Core.CompanionCursor;
 using OpenClicky.Core.Work;
 using OpenClicky.Providers;
 
@@ -67,6 +68,20 @@ public sealed class DesktopLeaseTests
             Assert.Equal("native-task", lease.Holder);
         Assert.Null(lease.Holder);
         Assert.Equal(["native-task", null], seen);
+    }
+
+    [Fact]
+    public void LastHolderStaysOnTheScreenOnlyWhileDrivingOrBriefly()
+    {
+        var now = DateTimeOffset.UtcNow;
+        Assert.True(DesktopLease.StillOnScreen(holdsLease: true, DrivePhase.Idle, null, now));
+        Assert.True(DesktopLease.StillOnScreen(false, DrivePhase.Driving, now.AddMinutes(-5), now));
+        Assert.True(DesktopLease.StillOnScreen(false, DrivePhase.AwaitingConsent, null, now));
+        Assert.True(DesktopLease.StillOnScreen(false, DrivePhase.TakenBack, now.AddMinutes(-5), now));
+        Assert.True(DesktopLease.StillOnScreen(false, DrivePhase.Idle, now.AddSeconds(-10), now));
+        Assert.False(DesktopLease.StillOnScreen(false, DrivePhase.Idle, now.AddSeconds(-11), now));
+        Assert.False(DesktopLease.StillOnScreen(false, DrivePhase.Ended, now.AddSeconds(-11), now));
+        Assert.False(DesktopLease.StillOnScreen(false, DrivePhase.Idle, null, now));
     }
 
     [Fact]

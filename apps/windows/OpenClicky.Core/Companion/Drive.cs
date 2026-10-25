@@ -124,6 +124,14 @@ public sealed class DriveSession(AgentAccessMode accessSnapshot, Func<Cancellati
 public static class DriveGuard
 {
     /// <summary>
+    /// Agent input is never sent into OpenClicky itself: not while any of its confirm dialogs is open (another run's click or
+    /// Tab+Space could answer it), and not when the foreground window or the click/scroll point (<paramref name="pointIsOwn"/>,
+    /// null for keys) is one of its windows.
+    /// </summary>
+    public static bool RefusesOwnTarget(bool confirmOpen, bool foregroundIsOwn, bool? pointIsOwn) =>
+        confirmOpen || foregroundIsOwn || pointIsOwn == true;
+
+    /// <summary>
     /// A window whose process integrity (Low 0x1000, Medium 0x2000, High 0x3000, System 0x4000) is above ours, or cannot be
     /// read, is refused: Windows (UIPI) would silently drop our input. Never elevate or work around it.
     /// </summary>

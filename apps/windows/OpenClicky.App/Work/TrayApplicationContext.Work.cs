@@ -39,7 +39,13 @@ internal sealed partial class TrayApplicationContext
     /// <summary>A native task or a job run is open (running or paused).</summary>
     private bool TaskOpen => _taskCts is not null || !_jobRuns.IsEmpty;
 
-    private RunHandle? ScreenRun => Volatile.Read(ref _screen);
+    /// <summary>The runs the last pause paused: a resume (button or voice) resumes these, wherever the screen has gone since.</summary>
+    private IReadOnlyList<RunHandle> _lastPaused = [];
+
+    /// <summary>The last holder while it still counts as on the screen (<see cref="DesktopLease.StillOnScreen"/>): holding the
+    /// lease, driving, or within 10 s of giving it back. A job that only looked at the screen a while ago is a background job.</summary>
+    private RunHandle? ScreenRun => Volatile.Read(ref _screen) is { } run
+        && DesktopLease.StillOnScreen(_lease.Holder == run.Holder, run.Drive.Phase, run.ReleasedAt, DateTimeOffset.UtcNow) ? run : null;
     private RunHandle? NativeRun => _runHandles.TryGetValue(DesktopLease.NativeTaskHolder, out var run) ? run : null;
 
     /// <summary>The one run a resume or a "change task" acts on: the run on the screen, else the native task.</summary>
@@ -90,13 +96,26 @@ internal sealed partial class TrayApplicationContext
     /// position now (another run may have moved it), and the last run's Esc pill comes down.</summary>
     private void OnLeaseChanged()
     {
-        if (_lease.Holder is not { } holder || !_runHandles.TryGetValue(holder, out var run)) return;
+        if (_lease.Holder is not { } holder) { Volatile.Read(ref _screen)?.MarkReleased(DateTimeOffset.UtcNow); return; }
+        if (!_runHandles.TryGetValue(holder, out var run)) return;
+        run.MarkHolding();
+        if (run.Control.IsPaused) OnUi(RequestShellPush); // paused before it took the screen: its card says it holds it
         var previous = Interlocked.Exchange(ref _screen, run);
         if (ReferenceEquals(previous, run)) return;
         var p = System.Windows.Forms.Cursor.Position;
         run.Drive.Rebase(p.X, p.Y);
         if (previous is not null) OnUi(HideDrivingPill);
     }
+
+    /// <summary>The paused runs a resume acts on: those the last pause paused that are still open and paused; else every open
+    /// paused run, so a paused job is never left out of reach.</summary>
+    private IReadOnlyList<RunHandle> ResumeTargets()
+    {
+        var last = Volatile.Read(ref _lastPaused).Where(run => run.Control.IsPaused && IsOpen(run)).ToList();
+        return last.Count > 0 ? last : _runHandles.Values.Where(run => run.Control.IsPaused).ToList();
+    }
+
+    private bool IsOpen(RunHandle run) => _runHandles.TryGetValue(run.Holder, out var open) && ReferenceEquals(open, run);
 
     /// <summary>Takes the screen for <paramref name="run"/>; while it waits, its card (or Tasks row) says so.</summary>
     private async Task<IDisposable> LeaseScreenAsync(RunHandle run, CancellationToken token)
@@ -142,17 +161,23 @@ internal sealed partial class TrayApplicationContext
     /// </summary>
     private bool StartJob(string jobId, string? followUp, string? routineId, bool fromTalk = false, QueuedStart? queued = null)
     {
-        if (queued is null && _admission.Contains(jobId))
-        {
-            ClassicMessage("That job is already running or waiting for a slot.");
-            return false;
-        }
         if (_settings.AuthProvider != AuthProvider.ChatGPT || !ProviderFactory.IsChatGptSignedIn(_secrets))
         {
             ClassicMessage("Jobs run on the bundled OpenWork runtime. Continue with ChatGPT in Settings first.");
             return AbandonSlot(jobId, queued);
         }
-        if (queued is null && !_admission.TryStart(jobId)) return Queue(jobId, followUp, routineId, fromTalk);
+        if (queued is null)
+        {
+            // One step, before any database write: a run that finishes in between hands this job its slot instead of stranding it.
+            switch (_admission.TryStartOrEnqueue(jobId))
+            {
+                case JobAdmission.Outcome.Refused:
+                    ClassicMessage("That job is already running or waiting for a slot.");
+                    return false;
+                case JobAdmission.Outcome.Queued:
+                    return Queue(jobId, followUp, routineId, fromTalk);
+            }
+        }
         string prompt;
         JobRun run;
         try
@@ -188,19 +213,25 @@ internal sealed partial class TrayApplicationContext
         return true;
     }
 
-    /// <summary>All five slots are taken: the job waits its turn, its card saying so.</summary>
+    /// <summary>UI thread, after <see cref="JobAdmission.TryStartOrEnqueue"/> queued the job: it waits its turn, its card saying so.
+    /// A slot handed to it meanwhile starts it once this returns (<see cref="StartQueued"/> is posted to this thread).</summary>
     private bool Queue(string jobId, string? followUp, string? routineId, bool fromTalk)
     {
-        try
-        {
-            var before = _work.GetJob(jobId);
-            _work.SetJobState(jobId, WorkJobStates.Queued, DateTimeOffset.UtcNow);
-            _queuedStarts[jobId] = new(followUp, routineId, fromTalk, before);
-            _admission.Enqueue(jobId);
-        }
+        WorkJob before;
+        try { before = _work.GetJob(jobId); }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
             ClassicMessage("Could not queue the job: " + ex.Message);
+            ReleaseSlot(jobId); // out of the queue, or on to the next job if it was just given a slot
+            return false;
+        }
+        _queuedStarts[jobId] = new(followUp, routineId, fromTalk, before);
+        try { _work.SetJobState(jobId, WorkJobStates.Queued, DateTimeOffset.UtcNow); }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            ClassicMessage("Could not queue the job: " + ex.Message);
+            _queuedStarts.Remove(jobId);
+            ReleaseSlot(jobId);
             return false;
         }
         IndexWork();
@@ -310,10 +341,11 @@ internal sealed partial class TrayApplicationContext
         return files;
     }
 
-    /// <summary>UI thread, for the shell push: what a job's card says it is doing right now (<paramref name=running/>: its
+    /// <summary>UI thread, for the shell push: what a job's card says it is doing right now (<paramref name="running"/>: its
     /// newest step phrase), or that it waits for the screen or for a slot. A job that is neither running nor queued has none.</summary>
     private string? JobLiveLine(WorkJob job, JobRun? run, string? running) =>
-        run is { WaitingForScreen: true } ? DesktopLease.WaitingLine
+        run is { Control.IsPaused: true } && _lease.Holder == job.Id ? DesktopLease.PausedHolderLine
+        : run is { WaitingForScreen: true } ? DesktopLease.WaitingLine
         : run is not null ? running
         : _queuedStarts.ContainsKey(job.Id) ? JobAdmission.WaitingLine
         : null;

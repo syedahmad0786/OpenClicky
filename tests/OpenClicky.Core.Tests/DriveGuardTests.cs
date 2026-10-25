@@ -7,6 +7,16 @@ public class DriveGuardTests
     private const int Low = 0x1000, Medium = 0x2000, High = 0x3000, SystemRid = 0x4000;
 
     [Fact]
+    public void InputIntoOpenClickyItselfIsRefused()
+    {
+        Assert.False(DriveGuard.RefusesOwnTarget(confirmOpen: false, foregroundIsOwn: false, pointIsOwn: false));
+        Assert.False(DriveGuard.RefusesOwnTarget(false, false, null)); // a key press has no point
+        Assert.True(DriveGuard.RefusesOwnTarget(confirmOpen: true, foregroundIsOwn: false, pointIsOwn: false)); // any OpenClicky prompt is up
+        Assert.True(DriveGuard.RefusesOwnTarget(false, foregroundIsOwn: true, null)); // typing would land in OpenClicky
+        Assert.True(DriveGuard.RefusesOwnTarget(false, false, pointIsOwn: true)); // a click on an OpenClicky window
+    }
+
+    [Fact]
     public void HigherIntegrityRefuses()
     {
         Assert.True(DriveGuard.Refuses(High, Medium));

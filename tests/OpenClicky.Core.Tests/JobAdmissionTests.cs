@@ -46,6 +46,20 @@ public sealed class JobAdmissionTests
     }
 
     [Fact]
+    public void StartOrQueueIsOneStep()
+    {
+        var admission = new JobAdmission(max: 1);
+        Assert.Equal(JobAdmission.Outcome.Started, admission.TryStartOrEnqueue("a"));
+        Assert.Equal(JobAdmission.Outcome.Queued, admission.TryStartOrEnqueue("b"));
+        Assert.Equal(JobAdmission.Outcome.Refused, admission.TryStartOrEnqueue("a"));
+        Assert.Equal(JobAdmission.Outcome.Refused, admission.TryStartOrEnqueue("b"));
+        // A run finishing right after b was refused a slot hands it the slot: b is never stranded behind an empty queue.
+        Assert.Equal("b", admission.Finish("a"));
+        Assert.Equal(1, admission.Running);
+        Assert.Empty(admission.Queued);
+    }
+
+    [Fact]
     public void SameJobNeverTwice()
     {
         var admission = new JobAdmission(max: 1);

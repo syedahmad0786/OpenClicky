@@ -116,11 +116,29 @@ public class JobAndConnectorToolsTests
         public void Delete(string name) => _values.Remove(name);
     }
 
+    [Fact]
+    public async Task ConnectorApprovalHoldsTheScreenAsTheAskingRun()
+    {
+        var server = new FakeMcp();
+        using var connector = new RemoteMcpConnector("mail", "Mail", new ConnectorSecret("https://mcp.example.test/mcp", "Authorization", "Bearer k"), server);
+        var lease = new OpenClicky.Core.Work.DesktopLease();
+        var host = new Host { Lease = lease };
+        var session = new DesktopToolSession(host, AgentAccessMode.ConfirmEach, connectors: [connector], lease: lease, leaseHolder: "job-1");
+
+        await Call(session, "connector_call", new { connector = "mail", tool = "send_email", arguments = "{}", rationale = "send it" });
+        Assert.Equal(1, host.ConfirmCalls);
+        Assert.Equal("job-1", host.HolderAtConfirm); // no other run's input can reach the approval dialog
+        Assert.Null(lease.Holder);
+        Assert.Contains("send_email", server.CalledTools);
+    }
+
     private sealed class Host : IDesktopToolHost
     {
         public int ConfirmCalls;
         public bool ConfirmResult = true;
         public ActionRequest? LastRequest;
+        public OpenClicky.Core.Work.DesktopLease? Lease;
+        public string? HolderAtConfirm;
         public Task<DesktopToolObservation> ObserveAsync(bool includeScreens, bool includeUia, CancellationToken token) =>
             Task.FromResult(new DesktopToolObservation("obs", 1, "Test", null, []));
         public Task<DesktopToolContext> GetCurrentContextAsync(CancellationToken token) => Task.FromResult(new DesktopToolContext(1, "Test"));
@@ -128,6 +146,7 @@ public class JobAndConnectorToolsTests
         {
             ConfirmCalls++;
             LastRequest = request;
+            HolderAtConfirm = Lease?.Holder;
             return Task.FromResult(ConfirmResult);
         }
         public Task<ActionResult> ExecuteAsync(ActionRequest request, bool confirmed, CancellationToken token) =>

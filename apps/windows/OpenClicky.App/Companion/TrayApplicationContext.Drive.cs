@@ -19,6 +19,7 @@ internal sealed partial class TrayApplicationContext
     private const string DriveElevatedMessage = "That window runs as administrator, so Windows won't let me control it. Do this step yourself, then say resume task.";
     private const string DriveTakenBackMessage = "You took over, so I didn't do that step. Say resume task when you want me to continue.";
     private const string ClassicDrivingText = "driving · esc stops";
+    private const string DriveOwnWindowMessage = "An OpenClicky window or prompt is in the way, so no input was sent. Look again before acting.";
 
     /// <summary>The drive session of the run on the screen; null when no run has used the screen.</summary>
     private DriveSession? ScreenDrive => ScreenRun?.Drive;
@@ -112,9 +113,14 @@ internal sealed partial class TrayApplicationContext
         {
             Log("drive_refused integrity");
             drive.Suspend(); // not driving while held: the pill comes down and the companion may detach again
-            PauseRun(run);
+            PauseRuns([run]);
             OnUi(HideDrivingPill);
             return new(false, DriveElevatedMessage, false, ObserveAgain: true);
+        }
+        if (RefusesOwnTarget(request))
+        {
+            Log("drive_refused own_window");
+            return new(false, DriveOwnWindowMessage, false, ObserveAgain: true);
         }
         if (Interlocked.Exchange(ref _drivingPillShown, 1) == 0) OnUi(ShowDrivingCard);
         drive.BeginAgentAction();
@@ -145,6 +151,29 @@ internal sealed partial class TrayApplicationContext
         }
         return false;
     }
+
+    /// <summary>
+    /// Never into OpenClicky: refused while any of its confirm dialogs is open, or when the foreground window or the click/scroll
+    /// point is one of its windows. The built-in sandbox test window (the demo's only target) is the one exception.
+    /// </summary>
+    private bool RefusesOwnTarget(ActionRequest request)
+    {
+        bool Own(nint window) => ForegroundWindowInfo.IsCurrentProcessWindow(window) && !IsSandboxWindow(window);
+        bool? point = null;
+        if (request.ToolName == AgentToolNames.Click && int.TryParse(request.Arguments.GetValueOrDefault("x"), out var x)
+            && int.TryParse(request.Arguments.GetValueOrDefault("y"), out var y))
+            point = ForegroundWindowInfo.IsCurrentProcessWindowAt(x, y) && !InSandbox(x, y);
+        else if (request.ToolName == AgentToolNames.Scroll)
+        {
+            var p = System.Windows.Forms.Cursor.Position;
+            point = ForegroundWindowInfo.IsCurrentProcessWindowAt(p.X, p.Y) && !InSandbox(p.X, p.Y);
+        }
+        return DriveGuard.RefusesOwnTarget(_confirm.IsDialogOpen, Own(ForegroundWindowInfo.GetHandle()), point);
+    }
+
+    private bool IsSandboxWindow(nint window) => _sandboxDemo && window != 0 && window == _sandboxWindow;
+
+    private bool InSandbox(int x, int y) => _sandboxDemo && _sandbox is { IsDisposed: false } box && box.Bounds.Contains(x, y);
 
     /// <summary>UI thread: the shell's Esc pill, once per stretch of driving.</summary>
     private void ShowDrivingCard()

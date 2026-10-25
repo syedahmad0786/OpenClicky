@@ -57,9 +57,23 @@ internal sealed class JobRun(WorkJob job, string ask, string? routineId, AgentAc
 /// An open run as the screen sees it: a job run or the native task, registered for the run's whole life under its desktop lease
 /// holder name. Esc, the drive cards, take-back and the settings guard act through this; its access snapshot never widens.
 /// </summary>
-internal sealed record RunHandle(string Holder, CancellationTokenSource Cts, AgentTaskControl Control, string TaskId,
-    AgentAccessMode Access, DriveSession Drive, JobRun? Job)
+internal sealed class RunHandle(string holder, CancellationTokenSource cts, AgentTaskControl control, string taskId,
+    AgentAccessMode access, DriveSession drive, JobRun? job)
 {
+    private long _releasedAtTicks; // UTC ticks of the last time it gave the lease back; 0 while it holds it (or never held it)
+
+    public string Holder { get; } = holder;
+    public CancellationTokenSource Cts { get; } = cts;
+    public AgentTaskControl Control { get; } = control;
+    public string TaskId { get; } = taskId;
+    public AgentAccessMode Access { get; } = access;
+    public DriveSession Drive { get; } = drive;
+    public JobRun? Job { get; } = job;
+
+    public DateTimeOffset? ReleasedAt => Interlocked.Read(ref _releasedAtTicks) is var t and > 0 ? new DateTimeOffset(t, TimeSpan.Zero) : null;
+    public void MarkHolding() => Interlocked.Exchange(ref _releasedAtTicks, 0);
+    public void MarkReleased(DateTimeOffset at) => Interlocked.Exchange(ref _releasedAtTicks, at.UtcTicks);
+
     /// <summary>Cancels the run and lets a paused run see it; a no-op once the run has ended.</summary>
     public void Stop()
     {

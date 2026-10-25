@@ -100,8 +100,8 @@ internal sealed partial class TrayApplicationContext
             case "access.rememberHistory": ResetShellChat(); break;
             // As the classic OnSettingsApplied: a narrower mode stops the runs that started wider (none ever widens).
             case "access.mode": CancelRunsWiderThan(_settings.AgentAccess); _home.RefreshAccess(); break;
-            // A new provider or proxy must not serve any run or turn in flight.
-            case "account.provider" or "advanced.useLocalProxy" or "advanced.proxyUrl":
+            // A new provider or proxy must not serve any run or turn in flight; a running job's hosts copied the old deny list.
+            case "account.provider" or "advanced.useLocalProxy" or "advanced.proxyUrl" or "access.denyList":
                 EngineSettingsChanged();
                 CancelAllRuns();
                 CancelTalk();

@@ -37,6 +37,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
     private bool _demoTalk;
     private OpenClicky.Sandbox.SandboxForm? _sandbox;
     private bool _sandboxDemo;
+    private nint _sandboxWindow;
     private readonly System.Windows.Forms.Timer _guideTimer = new() { Interval = 750 };
     private AppSwitchGuide _appGuide = new();
     private string? _responseWindow;
@@ -663,6 +664,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         _sandbox.ResumeLayout(true);
         _sandbox.Show();
         _sandbox.Activate();
+        _sandboxWindow = _sandbox.Handle; // read on this thread; the drive gate compares it from the task's thread
         _sandboxDemo = true;
         _home.SetConnection("Offline action demo · only the test window");
         try { await _talk.SubmitTextAsync("openclicky agent click the green button then type hello in the test window", remember: false); }
@@ -812,8 +814,8 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             if (work is not null)
             {
                 var browser = _chromePipe is { IsConnected: true } pipe && _chromeConfig is { } configuration
-                    ? new ChromeBridgeSession(new TaskChromeHost(new ChromeBridgeHost(pipe), control),
-                        new ChromeApprovalBroker(_confirm, control), access, configuration.AllowedOrigins,
+                    ? new ChromeBridgeSession(new TaskChromeHost(new ChromeBridgeHost(pipe), control, t => LeaseScreenAsync(me, t)),
+                        new ChromeApprovalBroker(_confirm, control, t => LeaseScreenAsync(me, t)), access, configuration.AllowedOrigins,
                         AgentDenyList.ParseExtraFragments(_settings.AgentDenyListExtra)) : null;
                 var connectors = OpenConnectors();
                 OpenCodeTaskResult result;
@@ -938,9 +940,14 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             + ". Voice can pause, resume, stop, or change task. Never claim its work finished before its verified receipt.\n");
 
     /// <summary>Pauses the run on the screen and any native task (a job that is not using the screen keeps going).</summary>
-    private void PauseTask()
+    private void PauseTask() => PauseRuns(ForegroundRuns().ToList());
+
+    /// <summary>Pauses these runs and remembers them, so the next resume resumes exactly these.</summary>
+    private void PauseRuns(IReadOnlyList<RunHandle> runs)
     {
-        foreach (var run in ForegroundRuns()) PauseRun(run);
+        if (runs.Count == 0) return;
+        Volatile.Write(ref _lastPaused, runs);
+        foreach (var run in runs) PauseRun(run);
     }
 
     private void PauseRun(RunHandle run)
@@ -969,22 +976,31 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
 
     private async Task ResumeTaskAsync()
     {
-        // The run is read once: during the wait another run may take the screen, and this resume is still for this one.
-        if (TargetRun is not { } run || !run.Control.IsPaused) return;
-        CancellationToken token;
-        try { token = run.Cts.Token; } catch (ObjectDisposedException) { return; }
+        // The runs are read once (those the last pause paused): during the wait another run may take the screen.
+        var runs = ResumeTargets();
+        if (runs.Count == 0) return;
         _home.MinimizeForRequest();
         _settingsForm.Hide();
-        var revision = run.Control.PauseRevision;
+        var revisions = runs.Select(run => run.Control.PauseRevision).ToList();
         var destination = ForegroundWindowInfo.GetHandle();
-        try
+        try { await Task.Delay(3000, _lifetime.Token); }
+        catch (OperationCanceledException) { return; }
+        if (!TryResumeRuns(runs, revisions, destination != ForegroundWindowInfo.GetHandle()))
+            ClassicStatus("Still paused because you took over. Resume when the destination is ready.");
+    }
+
+    /// <summary>Resumes each run still open whose pause has not been renewed since; false if any stayed paused.</summary>
+    private bool TryResumeRuns(IReadOnlyList<RunHandle> runs, IReadOnlyList<long> revisions, bool destinationChanged)
+    {
+        var all = !destinationChanged;
+        for (var i = 0; i < runs.Count && !destinationChanged; i++)
         {
-            await Task.Delay(3000, token);
-            ResumeDrive(run); // before the resume: the task may send its next input at once
-            if (destination != ForegroundWindowInfo.GetHandle() || !run.Control.TryResume(revision))
-                ClassicStatus("Still paused because you took over. Resume when the destination is ready.");
+            if (!IsOpen(runs[i])) continue;
+            ResumeDrive(runs[i]); // before the resume: the task may send its next input at once
+            all &= runs[i].Control.TryResume(revisions[i]);
         }
-        catch (OperationCanceledException) { }
+        OnUi(RequestShellPush); // a resumed holder's card leaves "Paused - holding the screen"
+        return all;
     }
 
     private async Task<bool> HandleTaskVoiceAsync(string text, CancellationToken token)
@@ -1018,6 +1034,15 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         }
         if (command.Kind is not (TaskVoiceCommandKind.Stop or TaskVoiceCommandKind.Pause or TaskVoiceCommandKind.Resume or TaskVoiceCommandKind.ChangeTask))
             return false;
+        if (command.Kind == TaskVoiceCommandKind.Resume)
+        {
+            // As the Resume button: the runs the last pause paused.
+            var paused = ResumeTargets();
+            if (paused.Count == 0) { Reply("Nothing is paused right now."); return true; }
+            var revisions = paused.Select(r => r.Control.PauseRevision).ToList();
+            await Task.Delay(750, token).ConfigureAwait(false);
+            Reply(TryResumeRuns(paused, revisions, destinationChanged: false) ? "Resuming the desktop task." : "The task stayed paused because you took over. Say resume task when ready."); return true;
+        }
         // Voice acts on the run on the screen (Stop and Pause also on any native task, as Esc does); a background job is stopped from its card.
         if (TargetRun is not { } run) { Reply("No task is using the screen right now. Stop or change a job from its card."); return true; }
         if (command.Kind == TaskVoiceCommandKind.Stop)
@@ -1027,13 +1052,6 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             PauseTask();
             Reply("The desktop task is paused at the next action boundary.");
             return true;
-        }
-        if (command.Kind == TaskVoiceCommandKind.Resume)
-        {
-            var revision = run.Control.PauseRevision;
-            await Task.Delay(750, token).ConfigureAwait(false);
-            ResumeDrive(run);
-            Reply(run.Control.TryResume(revision) ? "Resuming the desktop task." : "The task stayed paused because you took over. Say resume task when ready."); return true;
         }
         if (command.Kind == TaskVoiceCommandKind.ChangeTask)
         {
@@ -1045,7 +1063,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
                 _taskSteering = instruction;
                 Interlocked.Increment(ref _steeringRevision);
             }
-            PauseRun(run);
+            PauseRuns([run]);
             Reply("Updated the task guidance. Say resume task when you are ready.");
             return true;
         }
@@ -1222,13 +1240,14 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         }
     }
 
-    /// <summary>What every run talks to (provider and proxy), as of the last settings apply; set at startup.</summary>
-    private (AuthProvider, bool, string) _engineSettings;
+    /// <summary>What every run was started with and cannot pick up later: the provider and proxy it talks to and the extra protected
+    /// titles its hosts copied. As of the last settings apply; set at startup.</summary>
+    private (AuthProvider, bool, string, string?) _engineSettings;
 
-    /// <summary>True when the provider or proxy differs from the last apply (and remembers the new one).</summary>
+    /// <summary>True when the provider, proxy or deny list differs from the last apply (and remembers the new one).</summary>
     private bool EngineSettingsChanged()
     {
-        var now = (_settings.AuthProvider, _settings.UseLocalProxy, _settings.LocalProxyBaseUrl);
+        var now = (_settings.AuthProvider, _settings.UseLocalProxy, _settings.LocalProxyBaseUrl, _settings.AgentDenyListExtra);
         var changed = now != _engineSettings;
         _engineSettings = now;
         return changed;
@@ -1315,7 +1334,8 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
 
     private void OnSettingsApplied()
     {
-        // A new provider or proxy must not serve a run in flight; otherwise only runs wider than the new access mode stop.
+        // A new provider, proxy or deny list must not be missed by a run in flight (its hosts copied the old ones); otherwise only runs
+        // wider than the new access mode stop.
         if (EngineSettingsChanged()) CancelAllRuns();
         else CancelRunsWiderThan(_settings.AgentAccess);
         CancelTalk();
@@ -1414,21 +1434,30 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         base.ExitThreadCore();
     }
 
-    private sealed class ChromeApprovalBroker(WinFormsAgentConfirm confirm, AgentTaskControl control) : IChromeActionBroker
+    /// <summary>A browser action's approval. The dialog takes the screen as the asking run, so no other run's input can land on it.</summary>
+    private sealed class ChromeApprovalBroker(WinFormsAgentConfirm confirm, AgentTaskControl control, Func<CancellationToken, Task<IDisposable>> screen) : IChromeActionBroker
     {
         public async Task<bool> ApproveAsync(ActionRequest request, CancellationToken token)
         {
             await control.WaitAsync(token).ConfigureAwait(false);
+            using var held = await screen(token).ConfigureAwait(false);
             return await confirm.ConfirmNonInputAsync(request.ToolName + "\n" + request.Rationale + "\n"
                 + string.Join("\n", request.Arguments.Select(argument => argument.Key + ": " + argument.Value)), token).ConfigureAwait(false);
         }
     }
 
-    private sealed class TaskChromeHost(IChromeBridgeHost host, AgentTaskControl control) : IChromeBridgeHost
+    /// <summary>The run's browser bridge: every call waits out a pause; an action (click, follow link, type text: focus and
+    /// clicks in the user's page) holds the screen too, so it never interleaves with another run's input. Reads stay lease-free.</summary>
+    private sealed class TaskChromeHost(IChromeBridgeHost host, AgentTaskControl control, Func<CancellationToken, Task<IDisposable>> screen) : IChromeBridgeHost
     {
         public async Task<BrowserContext> GetCurrentContextAsync(CancellationToken token) { await control.WaitAsync(token).ConfigureAwait(false); return await host.GetCurrentContextAsync(token).ConfigureAwait(false); }
         public async Task<BrowserObservation> ObserveAsync(CancellationToken token) { await control.WaitAsync(token).ConfigureAwait(false); return await host.ObserveAsync(token).ConfigureAwait(false); }
-        public async Task<BrowserActionResult> ExecuteAsync(BrowserAction action, CancellationToken token) { await control.WaitAsync(token).ConfigureAwait(false); return await host.ExecuteAsync(action, token).ConfigureAwait(false); }
+        public async Task<BrowserActionResult> ExecuteAsync(BrowserAction action, CancellationToken token)
+        {
+            await control.WaitAsync(token).ConfigureAwait(false);
+            using var held = await screen(token).ConfigureAwait(false);
+            return await host.ExecuteAsync(action, token).ConfigureAwait(false);
+        }
     }
 
     private sealed class SandboxPlanner(OpenClicky.Sandbox.SandboxForm sandbox) : IAgentPlanner

@@ -56,8 +56,8 @@ public sealed class DesktopToolSession
     private readonly string _leaseHolder;
     private readonly Action<bool>? _waitingForScreen;
 
-    /// <param name="lease">When set, every desktop tool call (all of <see cref="ToolNames"/> but search_memory) holds it as
-    /// <paramref name="leaseHolder"/>; <paramref name="waitingForScreen"/> hears true while the call waits for it, then false.</param>
+    /// <param name="lease">When set, every desktop tool call (all of <see cref="ToolNames"/> but search_memory), and a connector
+    /// approval dialog, holds it as <paramref name="leaseHolder"/>; <paramref name="waitingForScreen"/> hears true while the call waits for it, then false.</param>
     public DesktopToolSession(IDesktopToolHost host, AgentAccessMode access, IEnumerable<string>? denyListExtra = null,
         CancellationToken taskToken = default, ChromeBridgeSession? browser = null, Action<string>? onDestinationObserved = null,
         JobOutputTools? jobFiles = null, IReadOnlyList<RemoteMcpConnector>? connectors = null,
@@ -161,10 +161,17 @@ public sealed class DesktopToolSession
                 ["tool"] = remote.Name,
                 ["arguments"] = shown[..Math.Min(shown.Length, 600)],
             }, values.TryGetValue("rationale", out var rationale) ? rationale : null);
-            if (AgentAccessPolicy.RequiresConfirmation(_access, request) && !await _host.ConfirmAsync(request, token).ConfigureAwait(false))
+            if (AgentAccessPolicy.RequiresConfirmation(_access, request))
             {
-                _endedByRejection = true;
-                return Error("The user declined the connector action.");
+                bool approved;
+                // The approval dialog takes the screen as this run, so no other run's input can land on it.
+                using (await LeaseScreenAsync(token).ConfigureAwait(false))
+                    approved = await _host.ConfirmAsync(request, token).ConfigureAwait(false);
+                if (!approved)
+                {
+                    _endedByRejection = true;
+                    return Error("The user declined the connector action.");
+                }
             }
         }
         RemoteMcpCallResult result;

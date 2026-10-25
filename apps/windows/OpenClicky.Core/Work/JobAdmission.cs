@@ -21,6 +21,21 @@ public sealed class JobAdmission(int max = 5)
     /// <summary>Running or queued.</summary>
     public bool Contains(string jobId) { lock (_gate) return _running.Contains(jobId) || _queued.Contains(jobId); }
 
+    public enum Outcome { Started, Queued, Refused }
+
+    /// <summary>In one step: takes a slot, or queues the job when all are taken (so a run finishing in between hands it the slot);
+    /// refused when the job is already running or queued.</summary>
+    public Outcome TryStartOrEnqueue(string jobId)
+    {
+        lock (_gate)
+        {
+            if (_running.Contains(jobId) || _queued.Contains(jobId)) return Outcome.Refused;
+            if (_running.Count < max) { _running.Add(jobId); return Outcome.Started; }
+            _queued.Add(jobId);
+            return Outcome.Queued;
+        }
+    }
+
     /// <summary>Takes a slot; false when all are taken or the job is already running or queued.</summary>
     public bool TryStart(string jobId)
     {
