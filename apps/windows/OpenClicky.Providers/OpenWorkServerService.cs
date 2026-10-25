@@ -324,6 +324,7 @@ public sealed class OpenWorkServerService : IAsyncDisposable
             progress?.Report(new(OpenCodeTaskUpdateKind.Started, session.Id, "OpenWork task started."));
             await StageAsync("sending the task prompt", () => _client.SendPromptAsync(session.Id, prompt, cancellationToken), cancellationToken).ConfigureAwait(false);
             string? lastText = null;
+            var seenTools = new HashSet<string>();
             DateTimeOffset? idleWithoutTerminalSince = null;
             while (true)
             {
@@ -335,6 +336,8 @@ public sealed class OpenWorkServerService : IAsyncDisposable
                 var snapshot = await StageAsync("reading task progress", () => _client.GetMessagesAsync(session.Id, cancellationToken), cancellationToken).ConfigureAwait(false);
                 var error = OpenCodeWorkspaceService.GetAssistantError(snapshot.Messages);
                 if (error is not null) throw new InvalidOperationException(error);
+                foreach (var tool in NewToolCalls(snapshot.Messages, seenTools))
+                    progress?.Report(new(OpenCodeTaskUpdateKind.ToolUsed, session.Id, tool.Tool, Tool: tool));
                 var visible = snapshot.Messages.LastOrDefault(message => message.Role == "assistant" && !string.IsNullOrWhiteSpace(message.Text));
                 if (visible is not null && visible.Text != lastText)
                 {
@@ -375,6 +378,12 @@ public sealed class OpenWorkServerService : IAsyncDisposable
             _runLock.Release();
         }
     }
+
+    /// <summary>The assistant's tool calls that started since <paramref name="seen"/> was last filled, in order. A call still
+    /// pending has no input yet, so it is reported once it runs.</summary>
+    internal static IReadOnlyList<OpenCodeToolCall> NewToolCalls(IEnumerable<OpenCodeMessageSummary> messages, ISet<string> seen) =>
+        messages.Where(m => m.Role == "assistant").SelectMany(m => m.Tools ?? [])
+            .Where(t => t.Status != "pending" && seen.Add(t.CallId)).ToList();
 
     public Task<OpenCodeTaskResult> RunTaskAsync(
         string title, string prompt, IProgress<OpenCodeTaskUpdate>? progress = null,

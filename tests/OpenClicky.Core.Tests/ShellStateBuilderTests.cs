@@ -193,6 +193,25 @@ public class ShellStateBuilderTests
     }
 
     [Fact]
+    public void PlanComesFromTheLiveRunWhileWorkingAndFromTheStoredResultAfter()
+    {
+        PlanStep[] live = [new("Find it", true), new("Write it", false)];
+        var stored = (Work.JobResult.Parse("Done.", "") with { Plan = [new PlanStep("Old step", true)] }).ToJson();
+        var job = Job("p", "running", Now) with { ResultJson = stored };
+
+        var running = ShellStateBuilder.Build(Inputs([new ShellJobInput(job, [], ["Clicking"], "Clicking", Plan: live)])).Jobs.Single();
+        Assert.Equal(live, running.Plan);
+        Assert.Equal("Clicking", running.LiveLine);
+
+        var finished = ShellStateBuilder.Build(Inputs([new ShellJobInput(job with { Status = "completed" }, [], [], Plan: live)])).Jobs.Single();
+        Assert.Equal([new PlanStep("Old step", true)], finished.Plan);
+
+        var many = Enumerable.Range(0, 40).Select(i => new PlanStep("Step " + i, false)).ToList();
+        Assert.Equal(24, ShellStateBuilder.Build(Inputs([new ShellJobInput(job, [], [], Plan: many)])).Jobs.Single().Plan.Count);
+        Assert.Empty(ShellStateBuilder.Build(Inputs([new ShellJobInput(Job("q", "running"), [], [])])).Jobs.Single().Plan);
+    }
+
+    [Fact]
     public void DisplayNameAccentAndStatus()
     {
         var settings = new AppSettings { ChatGptAccountEmail = "ahmad.b@example.com", AccentColor = "not a colour" };

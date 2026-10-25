@@ -5,6 +5,7 @@ using OpenClicky.Core;
 using OpenClicky.Core.Settings;
 using OpenClicky.Core.Shell;
 using OpenClicky.Core.Updates;
+using OpenClicky.Core.Work;
 
 namespace OpenClicky.App;
 
@@ -152,15 +153,18 @@ internal sealed partial class TrayApplicationContext : IShellHost
         var allJobs = ShellSource<IReadOnlyList<WorkJob>>("jobs", () => _work.Jobs(), []);
         var jobs = ShellSource("jobs", () => allJobs.OrderByDescending(j => j.LastRunAt ?? j.CreatedAt).Take(ShellStateBuilder.MaxJobs).Select(job =>
         {
-            var steps = _taskRuns.LastOrDefault(r => r.JobId == job.Id)?.Events
-                .Select(e => e.Message).Where(m => !string.IsNullOrWhiteSpace(m)).TakeLast(ShellStateBuilder.MaxBullets).ToList() ?? [];
+            // A working job shows its own step phrases and checklist; before its first tool call, the last run events.
+            var live = _activeJob is { } active && active.Job.Id == job.Id ? active.Live : JobLiveState.Empty;
+            var steps = live.Steps.Count > 0 ? live.Steps.TakeLast(ShellStateBuilder.MaxBullets).ToList()
+                : _taskRuns.LastOrDefault(r => r.JobId == job.Id)?.Events
+                    .Select(e => e.Message).Where(m => !string.IsNullOrWhiteSpace(m)).TakeLast(ShellStateBuilder.MaxBullets).ToList() ?? [];
             if (!_jobOutputs.TryGetValue(job.Id, out var files))
                 _jobOutputs[job.Id] = files = ShellSource<IReadOnlyList<string>>("job outputs", () =>
                 {
                     var output = _work.OutputFolder(job);
                     return _work.Outputs(job).Take(ShellStateBuilder.MaxFiles).Select(name => Path.Combine(output, name)).ToList();
                 }, []);
-            return new ShellJobInput(job, files, steps, steps.LastOrDefault(), routines.Any(r => r.JobId == job.Id && RoutineSchedule.IsDue(r, now)));
+            return new ShellJobInput(job, files, steps, live.LiveLine ?? steps.LastOrDefault(), routines.Any(r => r.JobId == job.Id && RoutineSchedule.IsDue(r, now)), live.Plan);
         }).ToList(), []);
         // History is cached only once it loaded; a failed load is retried on the next push.
         var chat = _shellTurns ?? ShellSource<IReadOnlyList<ConversationTurn>>("history", () =>

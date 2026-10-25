@@ -70,6 +70,10 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
     /// <summary>One run of a saved job; Display is the bounded line shown in Tasks.</summary>
     private sealed record JobRun(WorkJob Job, string Ask, string? RoutineId)
     {
+        private JobLiveState _live = JobLiveState.Empty;
+        /// <summary>The run's checklist and step phrases so far. Written by the engine's polling thread, read by the shell and when the run is recorded.</summary>
+        public JobLiveState Live { get => Volatile.Read(ref _live); set => Volatile.Write(ref _live, value); }
+
         public string Display => $"{Job.Title}: {Ask}"[..Math.Min(Job.Title.Length + 2 + Ask.Length, 4000)];
     }
     private readonly WorkStore _work = new();
@@ -791,6 +795,8 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
     private void FinishJob(JobRun work, string status, string text, JobResult? result = null)
     {
         var summary = status == AgentProgressStates.Completed ? result?.Summary ?? JobPrompt.FirstSentence(text) : text;
+        // The run's last checklist is stored with its result so the card keeps it after the run (even a stopped or failed one).
+        if (work.Live.Plan.Count > 0) result = (result ?? JobResult.Parse("", "")) with { Plan = work.Live.Plan };
         try
         {
             _work.RecordJobRun(work.Job.Id, status, summary, DateTimeOffset.UtcNow);
@@ -902,7 +908,8 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
                         host, access, p => RecordProgress(id, p), token, runtimeDirectory: RuntimePath("openwork"), browser: browser,
                         workspaceDirectory: work is null ? null : _work.JobFolder(work.Job),
                         jobFiles: work is null ? null : new JobOutputTools(_work.OutputFolder(work.Job)),
-                        connectors: connectors).ConfigureAwait(false);
+                        connectors: connectors,
+                        toolUsed: work is null ? null : call => { work.Live = work.Live.Apply(call.Tool, call.Input); OnUi(RequestShellPush); }).ConfigureAwait(false);
                 }
                 finally { foreach (var connector in connectors) connector.Dispose(); }
                 var answer = result.Messages.LastOrDefault(m => m.Role == "assistant" && !string.IsNullOrWhiteSpace(m.Text))?.Text ?? "";

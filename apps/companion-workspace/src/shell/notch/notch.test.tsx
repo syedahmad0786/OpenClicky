@@ -126,6 +126,20 @@ it("the featured job card shows its parts, caps bullets and posts its intents", 
   expect(host.posts("job.dismiss")).toEqual([{ kind: "job.dismiss", id: "job-working" }]);
 });
 
+it("the featured job renders its plan as a checklist with how many steps are done", () => {
+  mockHost();
+  const plan = [true, true, false, false, false].map((done, i) => ({ text: `Step ${i + 1}`, done }));
+  const { rerender } = render(<Notch state={open("home", { featured: { ...fixture.featured!, plan } })} />);
+  expect(screen.getByText("2 of 5 steps")).toBeInTheDocument();
+  const boxes = screen.getAllByRole("checkbox");
+  expect(boxes).toHaveLength(5);
+  expect(boxes.map((b) => b.getAttribute("aria-checked"))).toEqual(["true", "true", "false", "false", "false"]);
+  expect(screen.getByText("Step 3")).toBeInTheDocument();
+  rerender(<Notch state={open("home", { featured: { ...fixture.featured!, plan: [] } })} />);
+  expect(screen.queryByText(/steps$/)).toBeNull();
+  expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
+});
+
 it("a working job can be stopped", () => {
   const host = mockHost();
   render(<Notch state={open()} />);

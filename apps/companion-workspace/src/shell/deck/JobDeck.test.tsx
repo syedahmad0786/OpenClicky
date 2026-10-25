@@ -30,6 +30,17 @@ it("alternates sides, newest nearest the panel, tilted 3 to 5 degrees", () => {
   }
 });
 
+it("shows a thin progress bar on a card only when the job has a plan", () => {
+  mockHost();
+  const plan = [true, true, false, false].map((done, i) => ({ text: `Step ${i}`, done }));
+  render(<JobDeck jobs={[job(2, { state: "working", plan }), job(1)]} featuredId={null} />);
+  const bar = screen.getByRole("progressbar");
+  expect(bar.getAttribute("aria-valuenow")).toBe("2");
+  expect(bar.getAttribute("aria-valuemax")).toBe("4");
+  expect(bar.firstElementChild).toHaveStyle({ width: "50%" });
+  expect(screen.getAllByRole("progressbar")).toHaveLength(1);
+});
+
 it("skips the featured job", () => {
   mockHost();
   render(<JobDeck jobs={jobs(3)} featuredId="job-3" />);

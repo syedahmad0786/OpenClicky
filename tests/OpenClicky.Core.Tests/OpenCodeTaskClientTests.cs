@@ -205,6 +205,33 @@ public class OpenCodeTaskClientTests
         Assert.Equal("idle", snapshot.Status.Type);
     }
 
+    [Fact]
+    public async Task Messages_SurfaceToolPartsWithTheirInput()
+    {
+        var call = 0;
+        using var http = new HttpClient(new Handler((request, _) => Task.FromResult(++call == 1
+            ? Json("""
+                [{"info":{"id":"msg_ai","role":"assistant"},"parts":[
+                  {"type":"text","text":"Working"},
+                  {"type":"tool","callID":"call_1","tool":"todowrite","state":{"status":"completed","input":{"todos":[{"content":"A","status":"pending"}]},"output":"x"}},
+                  {"type":"tool","callID":"call_2","tool":"openclicky_click","state":{"status":"pending","input":{}}},
+                  {"type":"tool","tool":"bash","state":{"status":"running","input":{}}},
+                  {"type":"tool","callID":"call_3","tool":"openclicky_hotkey","state":{"status":"running"}},
+                  {"type":"step-start"}]}]
+                """)
+            : Json("{}"))));
+        using var client = new OpenCodeTaskClient("http://localhost:4096/", null, null, http);
+
+        var message = Assert.Single((await client.GetMessagesAsync("ses_123")).Messages);
+
+        Assert.Equal("Working", message.Text);
+        Assert.Equal(["call_1", "call_2", "call_3"], message.Tools!.Select(t => t.CallId));
+        Assert.Equal(["completed", "pending", "running"], message.Tools!.Select(t => t.Status));
+        Assert.Equal("todowrite", message.Tools![0].Tool);
+        Assert.Equal("A", message.Tools[0].Input!.Value.GetProperty("todos")[0].GetProperty("content").GetString());
+        Assert.Null(message.Tools[2].Input);
+    }
+
     [Theory]
     [InlineData("https://127.0.0.1:4096/")]
     [InlineData("http://127.0.0.2:4096/")]

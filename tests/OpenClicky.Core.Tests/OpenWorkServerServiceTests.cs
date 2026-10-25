@@ -421,6 +421,24 @@ public sealed class OpenWorkServerServiceTests
         Content = new StringContent(body, Encoding.UTF8, "application/json"),
     };
 
+    private static OpenCodeToolCall Tool(string id, string status) => new(id, "openclicky_click", status, null);
+
+    [Fact]
+    public void NewToolCalls_ReportsEachStartedCallOnce_InOrder_SkippingPendingAndUserMessages()
+    {
+        var seen = new HashSet<string>();
+        OpenCodeMessageSummary[] messages =
+        [
+            new("m0", "user", "", null, null, [Tool("u", "running")]),
+            new("m1", "assistant", "", null, null, [Tool("a", "completed"), Tool("b", "pending")]),
+            new("m2", "assistant", "", null, null, [Tool("c", "running")]),
+        ];
+        Assert.Equal(["a", "c"], OpenWorkServerService.NewToolCalls(messages, seen).Select(t => t.CallId));
+        Assert.Empty(OpenWorkServerService.NewToolCalls(messages, seen));
+        messages[1] = messages[1] with { Tools = [Tool("a", "completed"), Tool("b", "running")] };
+        Assert.Equal(["b"], OpenWorkServerService.NewToolCalls(messages, seen).Select(t => t.CallId));
+    }
+
     private sealed class Handler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token) => send(request, token);

@@ -16,7 +16,12 @@ public sealed record OpenCodeMessageSummary(
     string Role,
     string Text,
     string? FinishReason,
-    string? Error);
+    string? Error,
+    IReadOnlyList<OpenCodeToolCall>? Tools = null);
+
+/// <summary>One tool part of a message. <see cref="Status"/> is the engine's: pending, running, completed or error.
+/// <see cref="Input"/> is a detached copy of the tool arguments (untrusted), or null.</summary>
+public sealed record OpenCodeToolCall(string CallId, string Tool, string Status, JsonElement? Input);
 
 public sealed record OpenCodeMessageSnapshot(
     IReadOnlyList<OpenCodeMessageSummary> Messages,
@@ -544,10 +549,21 @@ public sealed class OpenCodeTaskClient : IDisposable
             }
 
             var text = new StringBuilder();
+            var tools = new List<OpenCodeToolCall>();
             if (item.TryGetProperty("parts", out var parts) && parts.ValueKind == JsonValueKind.Array)
             {
                 foreach (var part in parts.EnumerateArray())
                 {
+                    if (part.ValueKind == JsonValueKind.Object && OptionalString(part, "type") == "tool"
+                        && OptionalString(part, "callID", MaxSessionIdCharacters) is { Length: > 0 } callId
+                        && OptionalString(part, "tool", 200) is { Length: > 0 } tool)
+                    {
+                        var state = part.TryGetProperty("state", out var s) && s.ValueKind == JsonValueKind.Object ? s : (JsonElement?)null;
+                        JsonElement? input = state is { } st && st.TryGetProperty("input", out var i) && i.ValueKind == JsonValueKind.Object ? i.Clone() : null;
+                        tools.Add(new OpenCodeToolCall(callId, tool, state is { } status ? OptionalString(status, "status", 32) ?? "pending" : "pending", input));
+                        continue;
+                    }
+
                     if (part.ValueKind != JsonValueKind.Object
                         || OptionalString(part, "type") != "text"
                         || OptionalString(part, "text", MaxResponseBytes) is not { } partText)
@@ -590,7 +606,8 @@ public sealed class OpenCodeTaskClient : IDisposable
                 RequiredString(info, "role", 32),
                 text.ToString(),
                 OptionalString(info, "finish", 200),
-                error));
+                error,
+                tools));
         }
 
         return messages;

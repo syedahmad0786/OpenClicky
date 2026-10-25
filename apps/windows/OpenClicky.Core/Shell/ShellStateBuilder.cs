@@ -6,9 +6,10 @@ using OpenClicky.Core.Work;
 
 namespace OpenClicky.Core.Shell;
 
-/// <summary>One saved job plus what the host knows about it right now. <see cref="Files"/> are full paths.</summary>
+/// <summary>One saved job plus what the host knows about it right now. <see cref="Files"/> are full paths.
+/// <see cref="Plan"/> is the running job's live checklist; a job that is not working shows the plan stored with its result.</summary>
 public sealed record ShellJobInput(WorkJob Job, IReadOnlyList<string> Files, IReadOnlyList<string> Bullets,
-    string? LiveLine = null, bool HasDueRoutine = false);
+    string? LiveLine = null, bool HasDueRoutine = false, IReadOnlyList<PlanStep>? Plan = null);
 
 /// <summary>Everything <see cref="ShellStateBuilder"/> needs. Host-owned data in the constructor, controller-owned in init props.</summary>
 public sealed record ShellInputs(
@@ -118,7 +119,8 @@ public static class ShellStateBuilder
                 (result?.Next ?? []).Take(MaxNext).Select(n => Cut(n, 160)).ToList(),
                 UsableFiles(JobFiles(input)).Select(path => new JobFile(Cut(Path.GetFileName(path), 260), path, FileKind(path))).ToList(),
                 state == JobState.Working && !string.IsNullOrWhiteSpace(input.LiveLine) ? Cut(input.LiveLine, 400) : null,
-                [],
+                (state == JobState.Working ? input.Plan ?? [] : result?.Plan ?? []).Take(JobProgress.MaxPlan)
+                    .Select(step => new PlanStep(Cut(step.Text, 400), step.Done)).ToList(),
                 Iso(job.LastRunAt ?? job.CreatedAt));
         }
     }

@@ -14,6 +14,10 @@ public class OpenCodeCompanionConfigurationTests
         var root = doc.RootElement;
         Assert.Equal("deny", root.GetProperty("permission").GetProperty("*").GetString());
         Assert.Equal("allow", root.GetProperty("permission").GetProperty("openclicky_*").GetString());
+        // The only engine tool beyond the broker is the session checklist, which touches nothing outside the session.
+        Assert.Equal("allow", root.GetProperty("permission").GetProperty("todowrite").GetString());
+        Assert.Equal(3, root.GetProperty("permission").EnumerateObject().Count());
+        Assert.Contains("todowrite", root.GetProperty("agent").GetProperty("companion").GetProperty("prompt").GetString());
         Assert.Single(root.GetProperty("enabled_providers").EnumerateArray());
         Assert.Equal("http://127.0.0.1:31234/v1", root.GetProperty("provider").GetProperty(OpenCodeCompanionConfiguration.ProviderId)
             .GetProperty("options").GetProperty("baseURL").GetString());

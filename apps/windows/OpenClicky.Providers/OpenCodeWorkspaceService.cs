@@ -15,6 +15,7 @@ public enum OpenCodeTaskUpdateKind
     Completed,
     Failed,
     Aborted,
+    ToolUsed,
 }
 
 public sealed record OpenCodeTaskUpdate(
@@ -22,7 +23,8 @@ public sealed record OpenCodeTaskUpdate(
     string SessionId,
     string Text,
     OpenCodeMessageSummary? Message = null,
-    OpenCodePermissionRequest? Permission = null);
+    OpenCodePermissionRequest? Permission = null,
+    OpenCodeToolCall? Tool = null);
 
 public sealed record OpenCodeTaskResult(
     string SessionId,

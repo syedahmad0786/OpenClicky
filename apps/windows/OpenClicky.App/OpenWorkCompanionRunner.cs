@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using OpenClicky.Core;
+using OpenClicky.Core.Work;
 using OpenClicky.Providers;
 
 namespace OpenClicky.App;
@@ -10,7 +11,7 @@ internal static class OpenWorkCompanionRunner
     public static async Task<OpenCodeTaskResult> RunAsync(string task, AppSettings settings, ISecretStore secrets,
         IDesktopToolHost host, AgentAccessMode access, Action<AgentProgress> progress,
         CancellationToken token, string? runtimeDirectory = null, string? workspaceDirectory = null, ChromeBridgeSession? browser = null,
-        JobOutputTools? jobFiles = null, IReadOnlyList<RemoteMcpConnector>? connectors = null)
+        JobOutputTools? jobFiles = null, IReadOnlyList<RemoteMcpConnector>? connectors = null, Action<OpenCodeToolCall>? toolUsed = null)
     {
         if (settings.AuthProvider != AuthProvider.ChatGPT || !ProviderFactory.IsChatGptSignedIn(secrets))
             throw new InvalidOperationException("Continue with ChatGPT in Settings before running a task.");
@@ -51,10 +52,13 @@ internal static class OpenWorkCompanionRunner
                 };
                 progress(new(0, "planning", completed ? $"{label} completed in {elapsedMilliseconds} ms" : label));
             });
-        var updates = new Progress<OpenCodeTaskUpdate>(update =>
+        // In order, on the polling thread: a plan update must not be overtaken by an older one (Progress<T> posts to the pool).
+        var updates = new InlineProgress<OpenCodeTaskUpdate>(update =>
         {
-            if (update.Kind == OpenCodeTaskUpdateKind.Message)
-                progress(new(0, "planning", update.Text));
+            if (update is { Kind: OpenCodeTaskUpdateKind.ToolUsed, Tool: { } call }) toolUsed?.Invoke(call);
+            // The reply streams in as it is written; its trailing result block is never shown as progress.
+            else if (update.Kind == OpenCodeTaskUpdateKind.Message && JobProgress.LiveText(update.Text) is { Length: > 0 } text)
+                progress(new(0, "planning", text));
         });
         var result = await work.RunTaskAsync(task[..Math.Min(task.Length, 80)], task, updates, token);
         if (session.WasDeclined)
@@ -64,5 +68,10 @@ internal static class OpenWorkCompanionRunner
         if (session.HasUnverifiedAppLaunch)
             throw new InvalidOperationException("OpenWork returned a result after an app launch whose destination was not verified. The task was not marked successful.");
         return result;
+    }
+
+    private sealed class InlineProgress<T>(Action<T> report) : IProgress<T>
+    {
+        public void Report(T value) => report(value);
     }
 }

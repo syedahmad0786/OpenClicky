@@ -20,6 +20,22 @@ const PRIMARY_LABEL: Record<JobCard["state"], string> = {
 };
 const running = (job: JobCard) => job.state === "queued" || job.state === "working";
 
+/** The job's checklist, read-only: how many steps are done, then each step with a tick. */
+function PlanChecklist({ plan }: { plan: JobCard["plan"] }) {
+  const done = plan.filter((step) => step.done).length;
+  return (
+    <div className="notch-job__plan" role="group" aria-label="Plan">
+      <p className="notch-job__plan-count">{done} of {plan.length} steps</p>
+      {plan.map((step, i) => (
+        <div key={i} role="checkbox" aria-checked={step.done} aria-readonly="true" data-done={step.done} className="notch-job__step">
+          <span className="notch-job__tick" aria-hidden="true">{step.done ? "✓" : ""}</span>
+          <span className="notch-job__step-text">{step.text}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function FeaturedJob({ job }: { job: JobCard }) {
   const dismissible = !running(job) && job.state !== "needsYou";
   return (
@@ -30,6 +46,7 @@ function FeaturedJob({ job }: { job: JobCard }) {
       ) : null}
       {job.summary ? <p className="notch-job__summary">{job.summary}</p> : null}
       {job.stat ? <p className="notch-job__stat"><strong>{job.stat.value}</strong> {job.stat.label}</p> : null}
+      {job.plan.length ? <PlanChecklist plan={job.plan} /> : null}
       {job.state === "working" && job.liveLine ? <p className="notch-job__live">{job.liveLine}</p> : null}
       {job.bullets.length ? <ul className="notch-job__bullets">{job.bullets.slice(0, 4).map((b, i) => <li key={i}>{b}</li>)}</ul> : null}
       {job.next.slice(0, 3).map((step, i) => <p key={i} className="notch-job__next">{step}</p>)}

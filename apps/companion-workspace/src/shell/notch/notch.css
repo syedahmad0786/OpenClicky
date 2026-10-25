@@ -73,6 +73,11 @@
 .notch-job__summary { margin: 0 0 8px; padding: 8px 10px; background: rgb(42 38 32 / 0.07); border-radius: 8px; }
 .notch-job__stat { margin: 0 0 8px; font-size: 12px; }
 .notch-job__stat strong { margin-right: 4px; font: 700 22px/1 var(--font-display); }
+.notch-job__plan { margin: 0 0 8px; }
+.notch-job__plan-count { margin: 0 0 4px; font-size: 11px; opacity: 0.7; }
+.notch-job__step { display: flex; gap: 6px; align-items: baseline; font-size: 12px; line-height: 1.35; }
+.notch-job__step[data-done="true"] .notch-job__step-text { text-decoration: line-through; opacity: 0.6; }
+.notch-job__tick { flex: none; width: 12px; text-align: center; }
 .notch-job__live { margin: 0 0 8px; font-size: 12px; font-style: italic; opacity: 0.75; }
 .notch-job__bullets { margin: 0 0 8px; padding-left: 18px; }
 .notch-job__next { margin: 0 0 4px; font-size: 12px; opacity: 0.8; }
