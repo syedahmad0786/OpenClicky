@@ -28,6 +28,12 @@ public static class ProactiveCards
         return new(cardId, NotchCardKind.Activity, title.Length == 0 ? "Meeting" : title, MeetingCountdown.Text(e.StartsAt, now), actions);
     }
 
+    /// <summary>The connect nudge for an app the user has spent a while in. Connect opens Settings only on the click.</summary>
+    public static NotchCard Nudge(NudgeApp app) => new(NudgePrefix + app.Id, NotchCardKind.Tip, $"Connect {app.Name}?",
+        $"You've spent a while in {app.Name}. Connect it in Integrations so I can help with it.",
+        [new(ConnectAction, "Connect", CardActionStyle.Primary), new(NotNowAction, "Not now", CardActionStyle.Secondary),
+         new(NeverAction, "Never ask", CardActionStyle.Secondary)], NudgeMs);
+
     /// <summary>One card per event, stable across ticks; the event id is hashed so a huge id cannot blow the id cap.</summary>
     public static string MeetingCardId(string eventId) =>
         MeetingPrefix + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(eventId)))[..16].ToLowerInvariant();
