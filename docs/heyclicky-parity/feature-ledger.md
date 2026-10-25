@@ -121,8 +121,8 @@ Quiet: cards wait during calls (microphone in use by another app), presentations
 4. Turn on Suggestions with a signed-in provider: up to three cards arrive one at a time; Do it sends the shown message; Don't suggest is not repeated tomorrow.
 5. Turn on Connect nudges, use Slack or Gmail for 10 s: "Connect Slack?" appears; Connect opens Integrations; it does not return for 48 h.
 6. Start a Teams/Zoom call or present PowerPoint: no proactive card appears, and a shown one goes away until the call ends.
-+
-+## 5.
+7. Turn on Do Not Disturb (Focus): note whether proactive cards stay hidden; the simple adapter may miss some Focus modes, and E's detector should catch them.
+
 ## 5. Connectors and browser (sub-projects F, G)
 
 | ID | Feature | HeyClicky behaviour | OpenClicky today | RE |
