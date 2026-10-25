@@ -11,6 +11,7 @@ public class DictationFlowTests
         public List<string> Calls { get; } = [];
         public string? Inserted { get; private set; }
         public Func<Exception>? ReadThrows { get; init; }
+        public Func<Exception>? InsertThrows { get; init; }
 
         public Task<DictationFieldContext?> ReadContextAsync(CancellationToken ct)
         {
@@ -22,6 +23,7 @@ public class DictationFlowTests
         public Task<FieldInsertOutcome> InsertAsync(string text, CancellationToken ct)
         {
             Calls.Add("insert");
+            if (InsertThrows is not null) throw InsertThrows();
             Inserted = text;
             return Task.FromResult(new FieldInsertOutcome(verified, "", verified ? text : "", verified ? "ok" : "not seen"));
         }
@@ -153,6 +155,32 @@ public class DictationFlowTests
         var d = await DictationFlow.DeliverAsync("send it now", field, null, On, _ => { }, default);
         Assert.Equal(DictationDeliveryKind.Inserted, d.Kind);
         Assert.Equal("send it now", field.Inserted);
+    }
+
+    [Fact]
+    public async Task InsertFailureGoesToClipboard()
+    {
+        string? copied = null;
+        var ctx = new DictationFieldContext("App", null, "Hello", "", "", false);
+        var field = new FakeField(ctx) { InsertThrows = () => new InvalidOperationException("typing failed") };
+        var d = await DictationFlow.DeliverAsync("send it now", field, null, On, t => copied = t, default);
+        Assert.Equal(DictationDeliveryKind.Clipboard, d.Kind);
+        Assert.Equal(" send it now", d.Text);
+        Assert.Equal(" send it now", copied);
+        Assert.False(d.Insert!.Verified);
+        Assert.Equal("typing failed", d.Insert.Message);
+    }
+
+    [Theory]
+    [InlineData("今日は会議です", 1)]   // 7 CJK/kana characters
+    [InlineData("明日会議です", 1)]     // 6
+    [InlineData("สวัสดีครับ", 1)]       // Thai, 10
+    [InlineData("明日会議で", 0)]       // 5
+    public async Task NoSpaceScriptTranscriptsReachTheCleanerFromSixCharacters(string raw, int expectedCalls)
+    {
+        var cleaner = Returns("Tidied");
+        await DictationFlow.DeliverAsync(raw, new FakeField(null), cleaner, On, _ => { }, default);
+        Assert.Equal(expectedCalls, cleaner.Count);
     }
 
     [Fact]

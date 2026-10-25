@@ -34,7 +34,7 @@ public static class DictationTextFit
     }
 
     // ponytail: BMP ranges only (CJK ideographs, kana, Thai, CJK and fullwidth punctuation); add surrogate-pair ranges if Ext-B text shows up.
-    private static bool IsNoSpaceScript(char c) =>
+    internal static bool IsNoSpaceScript(char c) =>
         c is (>= '　' and <= 'ヿ') or (>= '㐀' and <= '䶿') or (>= '一' and <= '鿿')
             or (>= '฀' and <= '๿') or (>= '豈' and <= '﫿') or (>= '＀' and <= '￯');
 }

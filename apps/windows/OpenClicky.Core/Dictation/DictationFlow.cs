@@ -38,7 +38,7 @@ public static class DictationFlow
             catch (Exception) when (!ct.IsCancellationRequested) { }
         }
 
-        if (options.Cleanup && cleaner is not null && WordCount(text) > 2)
+        if (options.Cleanup && cleaner is not null && LongEnoughToTidy(text))
             text = await TryCleanAsync(text, context, cleaner, options, ct) ?? text;
 
         var fitted = DictationTextFit.Fit(text, context?.BeforeText ?? "", context?.AfterText ?? "", context?.SingleLine ?? false);
@@ -47,7 +47,9 @@ public static class DictationFlow
         FieldInsertOutcome? insert = null;
         if (field is not null)
         {
-            insert = await field.InsertAsync(fitted, ct);
+            // An insert that throws counts as unverified, so the text still reaches the clipboard.
+            try { insert = await field.InsertAsync(fitted, ct); }
+            catch (Exception ex) when (!ct.IsCancellationRequested) { insert = new(false, null, null, ex.Message); }
             if (insert.Verified) return new(DictationDeliveryKind.Inserted, fitted, insert);
         }
         copyToClipboard(fitted);
@@ -71,5 +73,8 @@ public static class DictationFlow
         }
     }
 
-    private static int WordCount(string text) => text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length;
+    // More than 2 words, or at least 6 characters of a script written without spaces (CJK, kana, Thai).
+    private static bool LongEnoughToTidy(string text) =>
+        text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length > 2
+        || text.Count(DictationTextFit.IsNoSpaceScript) >= 6;
 }
