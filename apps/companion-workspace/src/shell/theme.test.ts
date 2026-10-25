@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { ACCENTS } from "./ui/accents";
 
 // Reads the real tokens out of theme.css (both themes, every accent) and checks WCAG contrast for the pairs the UI draws.
-const css = readFileSync(resolve(__dirname, "theme.css"), "utf8");
+const css = readFileSync(resolve(__dirname, "theme.css"), "utf8").replace(/\r\n/g, "\n"); // a CRLF checkout reads the same
 
 type Rgba = [number, number, number, number];
 type Tokens = Record<string, string>;
