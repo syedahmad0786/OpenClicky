@@ -85,8 +85,10 @@ public sealed class AppSettings
     public bool Captions { get; set; } = true;
     public string? OutputDeviceId { get; set; }
     public bool DictationAutoDetect { get; set; } = true;
+    /// <summary>Tidy dictated text (punctuation, filler words) with the model provider.</summary>
+    public bool DictationCleanup { get; set; } = true;
     public string DictationLanguage { get; set; } = "en";
-    /// <summary>At most 50 words of 40 characters, de-duplicated ignoring case.</summary>
+    /// <summary>At most 50 words of 60 characters, de-duplicated ignoring case.</summary>
     public List<string> DictionaryWords { get; set; } = [];
     public HotkeyBinding TalkHotkey { get; set; } = HotkeyBinding.DefaultTalk;
     public HotkeyBinding TextHotkey { get; set; } = HotkeyBinding.DefaultText;

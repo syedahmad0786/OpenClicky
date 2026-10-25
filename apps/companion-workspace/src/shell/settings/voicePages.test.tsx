@@ -164,7 +164,25 @@ it("Dictation: dictionary adds on Enter, dedupes case-insensitively and removes"
   expect(postMessage).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Remove OpenClicky" }));
   expect(posts("settings.patch")).toEqual([{ kind: "settings.patch", key: "dictation.dictionary", value: ["Ahmad"] }]); // builds on the optimistic list
-  expect(input).toHaveAttribute("maxlength", "40");
+  expect(input).toHaveAttribute("maxlength", "60");
+});
+
+it("Dictation: a 60-character word is accepted whole", () => {
+  const posts = host();
+  render(<SettingsPanel state={make("dictation")} />);
+  const input = screen.getByRole("textbox", { name: "Add a word" });
+  const word = "w".repeat(60);
+  fireEvent.change(input, { target: { value: word } });
+  fireEvent.keyDown(input, { key: "Enter" });
+  expect(posts("settings.patch")).toEqual([{ kind: "settings.patch", key: "dictation.dictionary", value: ["OpenClicky", "Ahmad", word] }]);
+});
+
+it("Dictation: the tidy-up toggle explains what is sent and posts dictation.cleanup", () => {
+  const posts = host();
+  render(<SettingsPanel state={make("dictation", (s) => { s.settings.dictation.cleanup = true; })} />);
+  expect(screen.getByText("Fixes punctuation and filler words. Sends what you said, the app name and the text around the cursor to your model provider. Your voice stays on this PC.")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("switch", { name: "Tidy up with AI" }));
+  expect(posts("settings.patch")).toEqual([{ kind: "settings.patch", key: "dictation.cleanup", value: false }]);
 });
 
 it("Dictation: dictionary cap of 50 is enforced in the UI", () => {

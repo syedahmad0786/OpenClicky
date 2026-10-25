@@ -24,6 +24,9 @@ public class ShellSettingsBuilderTests
         Assert.True(v.Dictation.AutoDetect);
         Assert.Equal("en", v.Dictation.Language);
         Assert.Empty(v.Dictation.Dictionary);
+        Assert.True(v.Dictation.Cleanup);
+        Assert.Equal(WhisperState.Missing, v.Dictation.Multilingual);
+        Assert.Equal(0, v.Dictation.MultilingualProgress);
         Assert.Equal(["Ctrl", "Alt"], Keys(v.Shortcuts.Talk));
         Assert.Equal(HotkeyTrigger.Hold, v.Shortcuts.Talk.Trigger);
         Assert.Equal(["Ctrl"], Keys(v.Shortcuts.Text));
@@ -243,7 +246,7 @@ public class ShellSettingsBuilderTests
             new SettingsVoice(Long(500), [.. Enumerable.Range(0, 300).Select(i => new VoiceOption("v" + i, Long(500), Long(500), true))], 99, true, true, Long(500), devices),
             new SettingsMicrophone(Long(500), devices, WhisperState.Downloading, 7),
             new SettingsDictation(true, Long(500), [.. Enumerable.Range(0, 500).Select(i => new DictationLanguage("c" + i, Long(500), Long(500)))],
-                [.. Enumerable.Range(0, 500).Select(i => i + Long(100))]),
+                [.. Enumerable.Range(0, 500).Select(i => i + Long(100))], true, WhisperState.Downloading, 7),
             new SettingsShortcuts(
                 new Hotkey([.. Enumerable.Repeat("Ctrl", 30)], HotkeyTrigger.Hold), new Hotkey([], HotkeyTrigger.Hold),
                 new Hotkey([Long(100)], HotkeyTrigger.DoubleTap), SettingsView.Default.Shortcuts.HandsFree),
@@ -264,7 +267,8 @@ public class ShellSettingsBuilderTests
         Assert.Equal(1, clamped.Microphone.WhisperProgress);
         Assert.Equal(128, clamped.Dictation.Languages.Count);
         Assert.Equal(50, clamped.Dictation.Dictionary.Count);
-        Assert.All(clamped.Dictation.Dictionary, w => Assert.True(w.Length <= 40));
+        Assert.All(clamped.Dictation.Dictionary, w => Assert.True(w.Length <= 60));
+        Assert.Equal(1, clamped.Dictation.MultilingualProgress);
         Assert.Equal(6, clamped.Shortcuts.Talk.Keys.Count);
         Assert.Equal(["Ctrl"], Keys(clamped.Shortcuts.Text));
         Assert.Equal(24, clamped.Shortcuts.Dictate.Keys[0].Length);

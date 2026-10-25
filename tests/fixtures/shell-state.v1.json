@@ -129,7 +129,8 @@
     "dictation": {
       "autoDetect": true, "language": "en",
       "languages": [{ "code": "en", "name": "English", "native": "English" }, { "code": "ur", "name": "Urdu", "native": "اردو" }],
-      "dictionary": ["OpenClicky", "Ahmad"]
+      "dictionary": ["OpenClicky", "Ahmad"],
+      "cleanup": true, "multilingual": "missing", "multilingualProgress": 0
     },
     "shortcuts": {
       "talk": { "keys": ["Ctrl", "Alt"], "trigger": "hold" },

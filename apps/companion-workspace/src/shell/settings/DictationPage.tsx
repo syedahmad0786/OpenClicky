@@ -4,7 +4,7 @@ import { CloseIcon, Group, PillButton, Row, SearchField, Tile, Toggle } from "..
 import { Page, patch } from "./common";
 
 const MAX_WORDS = 50;
-const MAX_WORD_LENGTH = 40;
+const MAX_WORD_LENGTH = 60;
 
 function Dictionary({ words: hostWords }: { words: readonly string[] }) {
   // Optimistic copy so two quick adds build on each other; it follows the host whenever the host's list changes.
@@ -55,6 +55,9 @@ export function DictationPage({ state }: { state: ShellState }) {
       <Group title="Language">
         <Row title="Auto-detect language" description="Work out the language you are speaking each time.">
           <Toggle label="Auto-detect language" checked={d.autoDetect} onChange={(value) => patch("dictation.autoDetect", value)} />
+        </Row>
+        <Row title="Tidy up with AI" description="Fixes punctuation and filler words. Sends what you said, the app name and the text around the cursor to your model provider. Your voice stays on this PC.">
+          <Toggle label="Tidy up with AI" checked={d.cleanup} onChange={(value) => patch("dictation.cleanup", value)} />
         </Row>
       </Group>
       <Group title="Languages" className="settings-tiles">

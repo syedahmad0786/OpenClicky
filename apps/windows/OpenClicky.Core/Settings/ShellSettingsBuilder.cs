@@ -56,7 +56,8 @@ public static class ShellSettingsBuilder
             account,
             new SettingsVoice(voice, voices, SettingsCatalog.SnapSpeed(s.SpeechSpeed), s.Captions, s.SpeakReplies, outputId, outputs),
             new SettingsMicrophone(micId, mics, runtime.Whisper, runtime.WhisperProgress),
-            new SettingsDictation(s.DictationAutoDetect, SettingsCatalog.Languages.Any(l => l.Code == s.DictationLanguage) ? s.DictationLanguage : "en", SettingsCatalog.Languages, s.DictionaryWords ?? []),
+            new SettingsDictation(s.DictationAutoDetect, SettingsCatalog.Languages.Any(l => l.Code == s.DictationLanguage) ? s.DictationLanguage : "en", SettingsCatalog.Languages, s.DictionaryWords ?? [],
+                s.DictationCleanup, WhisperState.Missing, 0),
             new SettingsShortcuts(
                 HotkeyBinding.OrDefault(s.TalkHotkey, HotkeyBinding.DefaultTalk).ToView(),
                 HotkeyBinding.OrDefault(s.TextHotkey, HotkeyBinding.DefaultText).ToView(),
@@ -138,7 +139,8 @@ public static class ShellSettingsBuilder
             new SettingsMicrophone(CutOrNull(mic.DeviceId, 160), Devs(mic.Devices, mic.DeviceId), mic.Whisper,
                 Math.Clamp(double.IsFinite(mic.WhisperProgress) ? mic.WhisperProgress : 0, 0, 1)),
             new SettingsDictation(dictation.AutoDetect, Cut(dictation.Language, 16), languages,
-                SettingsCatalog.CleanDictionary(dictation.Dictionary)),
+                SettingsCatalog.CleanDictionary(dictation.Dictionary), dictation.Cleanup, dictation.Multilingual,
+                Math.Clamp(double.IsFinite(dictation.MultilingualProgress) ? dictation.MultilingualProgress : 0, 0, 1)),
             new SettingsShortcuts(
                 Key(shortcuts.Talk, HotkeyBinding.DefaultTalk), Key(shortcuts.Text, HotkeyBinding.DefaultText),
                 Key(shortcuts.Dictate, HotkeyBinding.DefaultDictate), Key(shortcuts.HandsFree, HotkeyBinding.DefaultHandsFree)),

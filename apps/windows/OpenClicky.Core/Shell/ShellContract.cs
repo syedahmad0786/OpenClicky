@@ -114,7 +114,8 @@ public sealed record SettingsVoice(
 public sealed record SettingsMicrophone(string? DeviceId, IReadOnlyList<Device> Devices, WhisperState Whisper, double WhisperProgress);
 
 public sealed record SettingsDictation(
-    bool AutoDetect, string Language, IReadOnlyList<DictationLanguage> Languages, IReadOnlyList<string> Dictionary);
+    bool AutoDetect, string Language, IReadOnlyList<DictationLanguage> Languages, IReadOnlyList<string> Dictionary,
+    bool Cleanup, WhisperState Multilingual, double MultilingualProgress);
 
 public sealed record SettingsShortcuts(Hotkey Talk, Hotkey Text, Hotkey Dictate, Hotkey HandsFree);
 public sealed record SettingsCursor(string Colour, bool Hidden, bool ScreenHighlight, bool ShakeToDetach);
@@ -144,7 +145,7 @@ public sealed record SettingsView(
         new SettingsAccount(AccountProvider.Chatgpt, null, "", "", [], false, ""),
         new SettingsVoice("windows-default", [new VoiceOption("windows-default", "Windows default", "Installed voice", true)], 1, true, true, null, []),
         new SettingsMicrophone(null, [], WhisperState.Missing, 0),
-        new SettingsDictation(true, "en", [new DictationLanguage("en", "English", "English")], []),
+        new SettingsDictation(true, "en", [new DictationLanguage("en", "English", "English")], [], true, WhisperState.Missing, 0),
         new SettingsShortcuts(
             new Hotkey(["Ctrl", "Alt"], HotkeyTrigger.Hold),
             new Hotkey(["Ctrl"], HotkeyTrigger.DoubleTap),

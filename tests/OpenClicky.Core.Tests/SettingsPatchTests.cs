@@ -79,7 +79,7 @@ public class SettingsPatchTests
         {
             ("voice.voice", "\"alloy\""), ("voice.speed", "1.25"), ("voice.captions", "false"), ("voice.readReplies", "false"),
             ("voice.outputDeviceId", "\"spk-1\""), ("microphone.deviceId", "\"mic-1\""),
-            ("dictation.autoDetect", "false"), ("dictation.language", "\"fr\""), ("dictation.dictionary", "[\"Clicky\"]"),
+            ("dictation.autoDetect", "false"), ("dictation.cleanup", "false"), ("dictation.language", "\"fr\""), ("dictation.dictionary", "[\"Clicky\"]"),
             ("shortcuts.text", "{\"keys\":[\"F9\"],\"trigger\":\"doubleTap\"}"),
             ("shortcuts.dictate", "{\"keys\":[\"Alt\",\"D\"],\"trigger\":\"hold\"}"),
             ("shortcuts.handsFree", "{\"keys\":[\"Ctrl\",\"Alt\"],\"trigger\":\"doubleTap\"}"),
@@ -169,16 +169,36 @@ public class SettingsPatchTests
         Assert.Equal(50, s.DictionaryWords.Count);
         Assert.Equal("CLICKY", s.DictionaryWords[0]);
         Assert.Single(s.DictionaryWords, w => w.Equals("clicky", StringComparison.OrdinalIgnoreCase));
-        Assert.All(s.DictionaryWords, w => Assert.InRange(w.Length, 1, 40));
+        Assert.All(s.DictionaryWords, w => Assert.InRange(w.Length, 1, 60));
 
         var longWord = "[\"" + new string('y', 500) + "\"]";
         Assert.Equal(PatchResult.Applied, Apply(s, "dictation.dictionary", longWord, out _));
-        Assert.Equal(new string('y', 40), Assert.Single(s.DictionaryWords));
+        Assert.Equal(new string('y', 60), Assert.Single(s.DictionaryWords));
 
         Assert.Equal(PatchResult.Applied, Apply(s, "access.denyList", "\"" + new string('d', 5_000) + "\"", out _));
         Assert.Equal(2_000, s.AgentDenyListExtra!.Length);
         Assert.Equal(PatchResult.Applied, Apply(s, "access.denyList", "\"   \"", out _));
         Assert.Null(s.AgentDenyListExtra);
+    }
+
+    [Fact]
+    public void DictationCleanupPatches()
+    {
+        var s = new AppSettings();
+        Assert.True(s.DictationCleanup);
+        Assert.Equal(PatchResult.Applied, Apply(s, "dictation.cleanup", "false", out _));
+        Assert.False(s.DictationCleanup);
+        Assert.Equal(PatchResult.Rejected, Apply(s, "dictation.cleanup", "\"no\"", out _));
+    }
+
+    [Fact]
+    public void DictionaryWordUpTo60Chars()
+    {
+        var s = new AppSettings();
+        Assert.Equal(PatchResult.Applied, Apply(s, "dictation.dictionary", "[\"" + new string('a', 60) + "\"]", out _));
+        Assert.Equal(new string('a', 60), Assert.Single(s.DictionaryWords));
+        Assert.Equal(PatchResult.Applied, Apply(s, "dictation.dictionary", "[\"" + new string('b', 61) + "\"]", out _));
+        Assert.Equal(new string('b', 60), Assert.Single(s.DictionaryWords));
     }
 
     [Fact]

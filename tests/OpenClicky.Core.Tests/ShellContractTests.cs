@@ -203,6 +203,8 @@ public class ShellContractTests
         Assert.Equal(DeviceState.Unavailable, s.Microphone.Devices[1].State);
         Assert.Equal(WhisperState.Downloading, s.Microphone.Whisper);
         Assert.Equal(["OpenClicky", "Ahmad"], s.Dictation.Dictionary);
+        Assert.True(s.Dictation.Cleanup);
+        Assert.Equal(WhisperState.Missing, s.Dictation.Multilingual);
         Assert.Equal(HotkeyTrigger.DoubleTap, s.Shortcuts.HandsFree.Trigger);
         Assert.Equal(ChromeState.Waiting, s.Integrations.Chrome);
         Assert.Equal([ConnectorStatus.Connected, ConnectorStatus.NeedsSignIn], s.Integrations.Connectors.Select(c => c.Status));

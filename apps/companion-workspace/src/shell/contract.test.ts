@@ -77,8 +77,8 @@ describe("shell contract", () => {
     const dictionary = (words: string[]) => ({ ...fixture, settings: { ...fixture.settings, dictation: { ...fixture.settings.dictation, dictionary: words } } });
     expect(parseShellState(dictionary(Array(50).fill("w")))).not.toBeNull();
     expect(parseShellState(dictionary(Array(51).fill("w")))).toBeNull();
-    expect(parseShellState(dictionary(["x".repeat(40)]))).not.toBeNull();
-    expect(parseShellState(dictionary(["x".repeat(41)]))).toBeNull();
+    expect(parseShellState(dictionary(["x".repeat(60)]))).not.toBeNull();
+    expect(parseShellState(dictionary(["x".repeat(61)]))).toBeNull();
     const speed = (value: number) => ({ ...fixture, settings: { ...fixture.settings, voice: { ...fixture.settings.voice, speed: value } } });
     expect(parseShellState(speed(0.5))).not.toBeNull();
     expect(parseShellState(speed(3))).toBeNull();

@@ -10,17 +10,27 @@ public static class SettingsCatalog
     public static readonly IReadOnlyList<string> OpenAiVoices = Speech.VoiceCatalog.OpenAiIds;
     public const string WindowsDefaultVoice = "windows-default";
     public const string DefaultProxyUrl = "http://127.0.0.1:8787";
-    public const int MaxDictionaryWords = 50, MaxWordLength = 40, MaxDenyListChars = 2_000, MaxIdLength = 160, MaxVoiceLength = 80;
+    public const int MaxDictionaryWords = 50, MaxWordLength = 60, MaxDenyListChars = 2_000, MaxIdLength = 160, MaxVoiceLength = 80;
 
     public static readonly IReadOnlyList<DictationLanguage> Languages =
     [
         new("en", "English", "English"), new("es", "Spanish", "Español"), new("fr", "French", "Français"),
         new("de", "German", "Deutsch"), new("it", "Italian", "Italiano"), new("pt", "Portuguese", "Português"),
         new("nl", "Dutch", "Nederlands"), new("sv", "Swedish", "Svenska"), new("pl", "Polish", "Polski"),
-        new("tr", "Turkish", "Türkçe"), new("ru", "Russian", "Русский"),
-        new("uk", "Ukrainian", "Українська"),
-        new("ar", "Arabic", "العربية"), new("hi", "Hindi", "हिन्दी"),
-        new("ja", "Japanese", "日本語"), new("ko", "Korean", "한국어"), new("zh", "Chinese", "中文"),
+        new("tr", "Turkish", "Türkçe"), new("ru", "Russian", "Русский"), new("uk", "Ukrainian", "Українська"),
+        new("ar", "Arabic", "العربية"), new("hi", "Hindi", "हिन्दी"), new("ja", "Japanese", "日本語"),
+        new("ko", "Korean", "한국어"), new("zh", "Chinese", "中文"), new("cs", "Czech", "Čeština"),
+        new("da", "Danish", "Dansk"), new("fi", "Finnish", "Suomi"), new("no", "Norwegian", "Norsk"),
+        new("el", "Greek", "Ελληνικά"), new("he", "Hebrew", "עברית"), new("hu", "Hungarian", "Magyar"),
+        new("ro", "Romanian", "Română"), new("sk", "Slovak", "Slovenčina"), new("bg", "Bulgarian", "Български"),
+        new("hr", "Croatian", "Hrvatski"), new("sr", "Serbian", "Српски"), new("sl", "Slovenian", "Slovenščina"),
+        new("lt", "Lithuanian", "Lietuvių"), new("lv", "Latvian", "Latviešu"), new("et", "Estonian", "Eesti"),
+        new("ca", "Catalan", "Català"), new("gl", "Galician", "Galego"), new("id", "Indonesian", "Bahasa Indonesia"),
+        new("ms", "Malay", "Bahasa Melayu"), new("vi", "Vietnamese", "Tiếng Việt"), new("th", "Thai", "ไทย"),
+        new("tl", "Tagalog", "Tagalog"), new("fa", "Persian", "فارسی"), new("ur", "Urdu", "اردو"),
+        new("bn", "Bengali", "বাংলা"), new("ta", "Tamil", "தமிழ்"), new("te", "Telugu", "తెలుగు"),
+        new("mr", "Marathi", "मराठी"), new("ml", "Malayalam", "മലയാളം"), new("sw", "Swahili", "Kiswahili"),
+        new("af", "Afrikaans", "Afrikaans"), new("cy", "Welsh", "Cymraeg"),
     ];
 
     /// <summary>The offered accent matching <paramref name="colour"/> (any case), else the default.</summary>
@@ -29,7 +39,7 @@ public static class SettingsCatalog
 
     public static double SnapSpeed(double speed) => Speeds.FirstOrDefault(s => Math.Abs(s - speed) < 1e-9, 1);
 
-    /// <summary>Trimmed, control-character-free words, de-duplicated ignoring case, each cut to 40 chars, at most 50.</summary>
+    /// <summary>Trimmed, control-character-free words, de-duplicated ignoring case, each cut to 60 chars, at most 50.</summary>
     public static List<string> CleanDictionary(IEnumerable<string?>? words)
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
