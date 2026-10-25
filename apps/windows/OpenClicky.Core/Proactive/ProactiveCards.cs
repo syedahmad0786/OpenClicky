@@ -34,6 +34,18 @@ public static class ProactiveCards
         [new(ConnectAction, "Connect", CardActionStyle.Primary), new(NotNowAction, "Not now", CardActionStyle.Secondary),
          new(NeverAction, "Never ask", CardActionStyle.Secondary)], NudgeMs);
 
+    /// <summary>A daily suggestion. Do it sends the shown prompt through the normal chat path, only on the click.</summary>
+    public static NotchCard Suggestion(Suggestion s)
+    {
+        var body = $"{s.Description}\n\nDo it sends: “{s.Prompt}”";
+        if (body.Length > SuggestionBodyChars) body = body[..(char.IsHighSurrogate(body[SuggestionBodyChars - 1]) ? SuggestionBodyChars - 1 : SuggestionBodyChars)];
+        return new(SuggestionPrefix + s.Id, NotchCardKind.Tip, s.Title, body,
+            [new(DoItAction, "Do it", CardActionStyle.Primary), new(NotNowAction, "Not now", CardActionStyle.Secondary),
+             new(NeverAction, "Don't suggest", CardActionStyle.Secondary)]);
+    }
+
+    public const int SuggestionBodyChars = 2000;
+
     /// <summary>One card per event, stable across ticks; the event id is hashed so a huge id cannot blow the id cap.</summary>
     public static string MeetingCardId(string eventId) =>
         MeetingPrefix + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(eventId)))[..16].ToLowerInvariant();
