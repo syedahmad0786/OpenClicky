@@ -151,6 +151,17 @@ internal sealed partial class TrayApplicationContext
             case (CompanionCards.DrawingSaveId, CompanionCards.ClearAction):
                 _talk.ClearDrawing();
                 return false;
+            // Drive consent is answered only here, by the user's click on the card; the Esc pill's Stop ends the task.
+            case (CompanionCards.DriveConsentId, CompanionCards.DriveAction):
+                AnswerDriveConsent(true);
+                return false;
+            case (CompanionCards.DriveConsentId, CompanionCards.NotNowAction):
+                AnswerDriveConsent(false);
+                return false;
+            case (CompanionCards.DrivingId, CompanionCards.StopAction):
+                CancelTask();
+                _taskControl.Resume();
+                return false;
             default:
                 Log("shell: card action not handled: " + actionId);
                 return false;

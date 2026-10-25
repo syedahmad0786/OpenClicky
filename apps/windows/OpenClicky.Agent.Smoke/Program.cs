@@ -17,6 +17,7 @@ internal static class Program
         if (args.Length >= 2 && args[0] == "--harvest-fixture") return HarvestFixture(args[1]);
         if (args.Contains("--harvest", StringComparer.OrdinalIgnoreCase)) return await RunHarvestAsync().ConfigureAwait(true);
         if (args.Contains("--snap", StringComparer.OrdinalIgnoreCase)) return await RunSnapAsync().ConfigureAwait(true);
+        if (args.Contains("--integrity", StringComparer.OrdinalIgnoreCase)) return await RunIntegrityAsync().ConfigureAwait(true);
         Console.WriteLine("OpenClicky agent↔sandbox smoke starting…");
 
         var sandboxExe = ResolveSandboxExe(args);
@@ -449,6 +450,41 @@ internal static class Program
         if (await Task.WhenAny(reading, Task.Delay(TimeSpan.FromSeconds(20))).ConfigureAwait(true) != reading || layout.Count < 3) return null;
         await Task.Delay(500).ConfigureAwait(true); // painted and on top
         return layout;
+    }
+
+    /// <summary>
+    /// Drive's elevation guard reads integrity only: this process, a window of its own, and a fixture process it started (same
+    /// integrity) are read alike and allowed; no window reads as unreadable and is refused. Nothing is clicked or typed.
+    /// </summary>
+    private static async Task<int> RunIntegrityAsync()
+    {
+        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+        var own = ProcessIntegrity.Own();
+        Console.WriteLine($"own_integrity=0x{own:X}");
+        if (own < 0x1000) { Console.Error.WriteLine("FAIL: own integrity unreadable"); return 50; }
+        if (ProcessIntegrity.Of(0) is not null || !OpenClicky.Core.CompanionCursor.DriveGuard.Refuses(ProcessIntegrity.Of(0), own))
+        { Console.Error.WriteLine("FAIL: no window must read as unreadable and be refused"); return 52; }
+        using var fixture = Process.Start(new ProcessStartInfo(Environment.ProcessPath!, ["--harvest-fixture", "OpenClicky integrity fixture"])
+        { UseShellExecute = false, RedirectStandardOutput = true })!;
+        try
+        {
+            if (await ReadFixtureAsync(fixture).ConfigureAwait(true) is not { } layout) { Console.Error.WriteLine("FAIL: integrity fixture did not start"); return 53; }
+            var button = AutomationElement.FromPoint(new System.Windows.Point(layout["button"][0], layout["button"][1]));
+            if (button.Current.ProcessId != fixture.Id) { Console.Error.WriteLine("FAIL: the fixture is not on top"); return 55; }
+            var theirs = ProcessIntegrity.Of(button.Current.NativeWindowHandle);
+            Console.WriteLine($"fixture_integrity=0x{theirs:X}");
+            if (theirs != own || OpenClicky.Core.CompanionCursor.DriveGuard.Refuses(theirs, own))
+            { Console.Error.WriteLine("FAIL: a same-integrity fixture must be read and allowed"); return 54; }
+        }
+        finally { try { fixture.Kill(); } catch (InvalidOperationException) { } }
+        // Last: creating a Form installs a WinForms synchronization context with no message loop to resume awaits on.
+        using (var form = new Form { ShowInTaskbar = false })
+        {
+            _ = form.Handle;
+            if (ProcessIntegrity.Of(form.Handle) != own) { Console.Error.WriteLine("FAIL: own window integrity differs"); return 51; }
+        }
+        Console.WriteLine("PASS: integrity guard");
+        return 0;
     }
 
     /// <summary>

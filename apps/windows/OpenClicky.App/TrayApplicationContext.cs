@@ -3,6 +3,7 @@ using OpenClicky.Capture;
 using OpenClicky.App.Speech;
 using OpenClicky.Core;
 using OpenClicky.Core.Agent;
+using OpenClicky.Core.CompanionCursor;
 using OpenClicky.Core.Input;
 using OpenClicky.Input;
 using OpenClicky.Overlay;
@@ -290,7 +291,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         _physicalInput.UserActivity += activity =>
         {
             if (activity.MouseButtonDown) _hotkey.NotifyMouseButton(); // Ctrl+click is not a Ctrl tap
-            PauseTaskUnlessConfirming();
+            if (!HandleDriveInput(activity)) PauseTaskUnlessConfirming(); // a drive watches for take-back itself
             if (activity.MayChangeScreen && !_confirm.IsDialogOpen
                 && _talk.State is CompanionVoiceState.Processing or CompanionVoiceState.Pointing or CompanionVoiceState.Responding)
                 _talk.CancelCurrentTurn();
@@ -845,10 +846,15 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         var token = job.Token;
         var taskResultCommitted = false;
         var jobRecorded = false;
+        // One drive session per run, on the run's access snapshot: consent comes before the per-action confirm (ConfirmEach), or
+        // at the first input action (Auto, after its plan approval; Full). Preview never asks and never drives.
+        var drive = BeginDrive(access);
+        var driveEnd = DriveEnd.Finished;
+        var confirm = new DriveConsentConfirm(_confirm, drive);
         try
         {
             if (!await initialization.ConfigureAwait(false)) return;
-            var host = new WindowsDesktopToolHost(_capture, _confirm, ExecuteMappedAsync,
+            var host = new WindowsDesktopToolHost(_capture, confirm, ExecuteMappedAsync,
                 _taskControl.WaitAsync, () => _taskSteering, p => RecordProgress(id, p),
                 _overlay.Hide, AgentDenyList.ParseExtraFragments(_settings.AgentDenyListExtra));
             if (access == AgentAccessMode.Auto)
@@ -892,7 +898,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             _capture,
             new SteeredPlanner(planner, () => _taskSteering),
             ExecuteMappedAsync,
-            _confirm,
+            confirm,
             _overlay,
             _tts,
             Log,
@@ -915,11 +921,13 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         }
         catch (OperationCanceledException)
         {
+            driveEnd = DriveEnd.Stopped;
             RecordProgress(id, new(0, "stopped", "Stopped by you"));
             if (work is not null && !jobRecorded) { FinishJob(work, AgentProgressStates.Stopped, "Stopped by you."); jobRecorded = true; }
         }
         catch (Exception ex)
         {
+            driveEnd = DriveEnd.Failed;
             Log("task_error=" + ex.GetType().Name);
             var failure = "Task could not finish: " + ex.Message;
             RecordProgress(id, new(0, "failed", failure));
@@ -930,6 +938,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         finally
         {
             if (work is not null && !jobRecorded) FinishJob(work, AgentProgressStates.Stopped, "The run ended before it started its work.");
+            EndDrive(drive, driveEnd);
             Interlocked.CompareExchange(ref _taskCts, null, job);
             _runningTaskId = null;
             _activeTaskGoal = "";
@@ -1005,6 +1014,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         try
         {
             await Task.Delay(3000, job.Token);
+            ResumeDrive(); // before the resume: the task may send its next input at once
             if (destination != ForegroundWindowInfo.GetHandle() || !_taskControl.TryResume(revision))
                 ClassicStatus("Still paused because you took over. Resume when the destination is ready.");
         }
@@ -1098,6 +1108,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         {
             var revision = _taskControl.PauseRevision;
             await Task.Delay(750, token).ConfigureAwait(false);
+            ResumeDrive();
             Reply(_taskControl.TryResume(revision) ? "Resuming the desktop task." : "The task stayed paused because you took over. Say resume task when ready."); return true;
         }
         if (command.Kind == TaskVoiceCommandKind.ChangeTask)
@@ -1502,10 +1513,11 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         return settings;
     }
 
-    private async Task<ActionResult> ExecuteMappedAsync(
-        ActionRequest request,
-        bool confirmed,
-        CancellationToken cancellationToken)
+    /// <summary>Every agent action (native and OpenWork). Mouse and keyboard input goes through the drive gate first.</summary>
+    private Task<ActionResult> ExecuteMappedAsync(ActionRequest request, bool confirmed, CancellationToken cancellationToken) =>
+        IsDriveInput(request.ToolName) ? ExecuteDriveInputAsync(request, confirmed, cancellationToken) : ExecuteLegacyAsync(request, confirmed, cancellationToken);
+
+    private async Task<ActionResult> ExecuteLegacyAsync(ActionRequest request, bool confirmed, CancellationToken cancellationToken)
     {
         var legacy = new AgentActionRequest(request.ToolName, request.Arguments, request.Rationale);
         var result = await _executor.ExecuteAsync(legacy, confirmed, cancellationToken).ConfigureAwait(false);

@@ -15,7 +15,17 @@ public static class CompanionCards
 {
     public const string WalkthroughId = "walkthrough", BackAction = "back", RecheckAction = "recheck", StopAction = "stop";
     public const string DrawingSaveId = "drawing-save", SaveAction = "save", ClearAction = "clear";
+    public const string DriveConsentId = "drive-consent", DriveAction = "drive", NotNowAction = "notNow", DrivingId = "driving";
     public const int MaxBody = 1_000, DrawingOfferMs = 20_000;
+
+    /// <summary>Asked once per task before its first mouse or keyboard input. Only a real click on Drive says yes.</summary>
+    public static NotchCard DriveConsent() => new(DriveConsentId, NotchCardKind.NeedsYou, "Let OpenClicky use your mouse and keyboard?",
+        "For this task only. Move the mouse or press any key to take over; Esc stops.",
+        [new(DriveAction, "Let OpenClicky drive", CardActionStyle.Primary), new(NotNowAction, "Not now", CardActionStyle.Secondary)]);
+
+    /// <summary>The Esc pill: shown while a task drives.</summary>
+    public static NotchCard Driving() => new(DrivingId, NotchCardKind.Activity, "OpenClicky is driving",
+        "Esc stops · move the mouse to take over", [new(StopAction, "Stop", CardActionStyle.Danger)]);
 
     /// <summary>Offered when a turn that drew ends. Dismissing it (or letting it expire) keeps the drawing on screen, unsaved.</summary>
     public static NotchCard SaveDrawing() => new(DrawingSaveId, NotchCardKind.Tip, "Keep this drawing?",
