@@ -214,12 +214,13 @@ public class ShellContractTests
         Assert.Null(s.Routines[0].Last);
         Assert.Equal(AccessModeView.ConfirmEach, s.Access.Mode);
         Assert.False(s.Advanced.UseLocalProxy);
+        Assert.Equal(new SettingsProactive(false, true, false, true, null), s.Proactive);
     }
 
     [Fact]
     public void EverySidebarSectionAndActionIsAccepted()
     {
-        Assert.Equal(16, ShellContract.Sections.Count);
+        Assert.Equal(17, ShellContract.Sections.Count);
         Assert.Equal(29, ShellIntentParser.SettingsActions.Count);
         foreach (var section in ShellContract.Sections)
             Assert.True(ShellIntentParser.TryParse($$"""{"kind":"settings.section","section":"{{section}}"}""", out _), section);

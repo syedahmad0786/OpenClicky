@@ -126,6 +126,7 @@ public sealed record SettingsAgents(
 
 public sealed record SettingsAccess(AccessModeView Mode, string DenyList, bool RememberHistory);
 public sealed record SettingsAdvanced(bool UseLocalProxy, string ProxyUrl, bool ForceGdiCapture);
+public sealed record SettingsProactive(bool MorningBrief, bool Suggestions, bool IntegrationNudges, bool MeetingCountdown, string? CalendarConnector);
 
 public sealed record SettingsView(
     SettingsAccount Account,
@@ -138,7 +139,8 @@ public sealed record SettingsView(
     SettingsAgents Agents,
     IReadOnlyList<RoutineView> Routines,
     SettingsAccess Access,
-    SettingsAdvanced Advanced)
+    SettingsAdvanced Advanced,
+    SettingsProactive Proactive)
 {
     /// <summary>First-run values; the real builder (ShellSettingsBuilder) fills in what the machine knows.</summary>
     public static SettingsView Default { get; } = new(
@@ -156,7 +158,8 @@ public sealed record SettingsView(
         new SettingsAgents("", true, true, true, []),
         [],
         new SettingsAccess(AccessModeView.ConfirmEach, "", true),
-        new SettingsAdvanced(false, "", false));
+        new SettingsAdvanced(false, "", false),
+        new SettingsProactive(false, false, false, false, null));
 }
 
 public static class ShellContract
@@ -169,6 +172,7 @@ public static class ShellContract
     [
         "account", "general", "voice", "microphone", "dictation", "shortcuts", "cursor", "integrations",
         "agents", "routines", "access", "memory", "notes", "clipboard", "tasks", "advanced",
+        "proactive",
     ];
 
     public static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)

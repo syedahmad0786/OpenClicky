@@ -49,6 +49,7 @@ public static class ShellSettingsBuilder
             runtime.SignedInAs, s.ChatGptModel ?? "", s.ChatGptQuickModel ?? "", runtime.Models,
             runtime.OpenRouterKeySet, s.OpenRouterModel ?? "");
 
+        var proactive = s.Proactive ?? new Proactive.ProactiveSettings();
         var voices = Voices(runtime, s.VoiceId);
         var voice = voices.Any(v => v.Id == s.VoiceId) ? s.VoiceId : SettingsCatalog.WindowsDefaultVoice;
         var (outputId, outputs) = Devices(s.OutputDeviceId, runtime.RenderDevices, UnavailableOutput);
@@ -72,7 +73,8 @@ public static class ShellSettingsBuilder
                 string.IsNullOrWhiteSpace(s.AgentFolder), s.SpeakJobAnnouncements, s.CursorJobUpdates, runtime.Reach),
             runtime.Routines,
             new SettingsAccess(AccessMode(s.AgentAccess), s.AgentDenyListExtra ?? "", s.PersistConversationHistory),
-            new SettingsAdvanced(s.UseLocalProxy, s.LocalProxyBaseUrl, s.ForceGdiCapture));
+            new SettingsAdvanced(s.UseLocalProxy, s.LocalProxyBaseUrl, s.ForceGdiCapture),
+            new SettingsProactive(proactive.MorningBrief, proactive.Suggestions, proactive.IntegrationNudges, proactive.MeetingCountdown, proactive.CalendarConnector));
         return Clamp(view);
     }
 
@@ -129,6 +131,7 @@ public static class ShellSettingsBuilder
         var agents = v.Agents ?? d.Agents;
         var access = v.Access ?? d.Access;
         var advanced = v.Advanced ?? d.Advanced;
+        var proactive = v.Proactive ?? d.Proactive;
         var voices = WithId(voice.Voices, o => o.Id, MaxVoices, voice.Voice)
             .Select(o => new VoiceOption(Cut(o.Id, 160), Cut(o.Name, 80), Cut(o.Detail, 160), o.Available)).ToList();
         var languages = Take(dictation.Languages, MaxLanguages).Select(l => new DictationLanguage(Cut(l.Code, 16), Cut(l.Name, 80), Cut(l.Native, 80))).ToList();
@@ -157,7 +160,9 @@ public static class ShellSettingsBuilder
                 Cut(r.Schedule, 160), Iso(r.Next), Iso(r.Last), r.Status)).ToList(),
             new SettingsAccess(access.Mode, SettingsCatalog.CleanDenyList(access.DenyList), access.RememberHistory),
             new SettingsAdvanced(advanced.UseLocalProxy, SettingsCatalog.LoopbackUrl(advanced.ProxyUrl, stripUserInfo: true) ?? SettingsCatalog.DefaultProxyUrl,
-                advanced.ForceGdiCapture));
+                advanced.ForceGdiCapture),
+            new SettingsProactive(proactive.MorningBrief, proactive.Suggestions, proactive.IntegrationNudges, proactive.MeetingCountdown,
+                CutOrNull(proactive.CalendarConnector, 80)));
 
         static List<Device> Devs(IReadOnlyList<Device>? devices, string? selected) =>
             WithId(devices, x => x.Id, MaxDevices, selected).Select(x => new Device(Cut(x.Id, 160), Cut(x.Name, 160), x.State)).ToList();

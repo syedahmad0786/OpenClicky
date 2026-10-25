@@ -54,7 +54,7 @@ describe("shell contract", () => {
     const state = parseShellState(fixture)!;
     expect(state.notch.section).toBe("general");
     expect(Object.keys(state.settings).sort()).toEqual(
-      ["account", "advanced", "access", "agents", "cursor", "dictation", "integrations", "microphone", "routines", "shortcuts", "voice"].sort(),
+      ["account", "advanced", "access", "agents", "cursor", "dictation", "integrations", "microphone", "proactive", "routines", "shortcuts", "voice"].sort(),
     );
     expect(state.settings.microphone.devices.map((d) => d.state)).toEqual(["active", "unavailable"]);
     expect(state.settings.integrations.connectors.map((c) => c.toolCount)).toEqual([12, null]);
@@ -85,7 +85,7 @@ describe("shell contract", () => {
   });
 
   it("knows every sidebar section and settings action", () => {
-    expect(settingsSections).toHaveLength(16);
+    expect(settingsSections).toHaveLength(17);
     expect(settingsActions).toHaveLength(29);
     expect(settingsSections).not.toContain("billing");
     expect(settingsActions).not.toContain("formatDisk");

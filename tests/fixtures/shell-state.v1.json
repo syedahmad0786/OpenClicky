@@ -155,6 +155,7 @@
       { "id": "r2", "title": "Weekly backup", "schedule": "Every Friday at 18:00", "next": null, "last": "2026-10-23T18:00:00Z", "status": "paused" }
     ],
     "access": { "mode": "confirmEach", "denyList": "C:\\Windows\\System32", "rememberHistory": true },
-    "advanced": { "useLocalProxy": false, "proxyUrl": "", "forceGdiCapture": false }
+    "advanced": { "useLocalProxy": false, "proxyUrl": "", "forceGdiCapture": false },
+    "proactive": { "morningBrief": false, "suggestions": true, "integrationNudges": false, "meetingCountdown": true, "calendarConnector": null }
   }
 }

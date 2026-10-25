@@ -263,7 +263,8 @@ public class ShellSettingsBuilderTests
             new SettingsAgents(Long(9_000), false, true, true, [.. Enumerable.Range(0, 100).Select(i => new ReachItem("r" + i, Long(500), ReachState.Unknown))]),
             [.. Enumerable.Range(0, 500).Select(i => new RoutineView("r" + i, Long(500), Long(500), "not a date", "2026-10-24T10:00:00+02:00", RoutineStatus.Scheduled))],
             new SettingsAccess(AccessModeView.Auto, Long(50_000), true),
-            new SettingsAdvanced(true, "http://user:pw@localhost:1/" + Long(5_000), false));
+            new SettingsAdvanced(true, "http://user:pw@localhost:1/" + Long(5_000), false),
+            new SettingsProactive(true, false, true, false, Long(500)));
 
         var clamped = ShellSettingsBuilder.Clamp(huge);
         Assert.Equal(64, clamped.Account.Models.Count);
@@ -289,6 +290,7 @@ public class ShellSettingsBuilderTests
         Assert.All(clamped.Routines, r => Assert.True(r.Next is null && r.Last!.EndsWith('Z')));
         Assert.Equal(2_000, clamped.Access.DenyList.Length);
         Assert.Equal("http://127.0.0.1:8787", clamped.Advanced.ProxyUrl); // over 200 chars: back to the default
+        Assert.Equal(80, clamped.Proactive.CalendarConnector!.Length);
 
         // Through the whole shell state: still valid JSON that parses back to the same thing.
         var inputs = new ShellInputs(new AppSettings(), [], [], [], ShellPhase.Idle, DateTimeOffset.UtcNow) { SettingsPage = huge };
@@ -310,5 +312,15 @@ public class ShellSettingsBuilderTests
         Assert.Equal(0.5, state.Settings.Voice.Speed);
         Assert.True(state.Settings.Cursor.Hidden);
         Assert.Equal(ChromeState.Connected, state.Settings.Integrations.Chrome);
+    }
+
+    [Fact]
+    public void ProactiveMapsThrough()
+    {
+        var off = Build().Proactive;
+        Assert.Equal(new SettingsProactive(false, false, false, false, null), off);
+        var s = new AppSettings { Proactive = new() { MorningBrief = true, IntegrationNudges = true, CalendarConnector = "work_cal" } };
+        Assert.Equal(new SettingsProactive(true, false, true, false, "work_cal"), Build(s).Proactive);
+        Assert.Equal(off, Build(new AppSettings { Proactive = null! }).Proactive);
     }
 }

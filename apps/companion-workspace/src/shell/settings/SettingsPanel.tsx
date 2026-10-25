@@ -11,6 +11,7 @@ import { ClipboardPage, MemoryPage, NotesPage, TasksPage } from "./ExtrasPages";
 import { GeneralPage } from "./GeneralPage";
 import { IntegrationsPage } from "./IntegrationsPage";
 import { MicrophonePage } from "./MicrophonePage";
+import { ProactivePage } from "./ProactivePage";
 import { RoutinesPage } from "./RoutinesPage";
 import { ShortcutsPage } from "./ShortcutsPage";
 import { Sidebar } from "./Sidebar";
@@ -38,6 +39,7 @@ function renderPage(section: SettingsSection, state: ShellState) {
     case "notes": return <NotesPage />;
     case "clipboard": return <ClipboardPage />;
     case "tasks": return <TasksPage />;
+    case "proactive": return <ProactivePage state={state} />;
     default: return unknownSection(section);
   }
 }
