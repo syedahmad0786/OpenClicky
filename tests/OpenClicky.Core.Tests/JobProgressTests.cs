@@ -105,6 +105,9 @@ public class JobProgressTests
     [InlineData("Done.\n\n```openclicky-result\n{\"files\":[\"a.md\"]}\n```", "Done.")]
     [InlineData("Done.\n```openclicky-res", "Done.")]
     [InlineData("```openclicky-result\n{}", "")]
+    [InlineData("Done.\n   ```openclicky-result\n{}\n```", "Done.")]
+    [InlineData("Done.\n\t```openclicky-result", "Done.")]
+    [InlineData("Done.\r\n  ```openclicky-res", "Done.")]
     [InlineData("a ``` inline fence stays", "a ``` inline fence stays")]
     public void LiveTextNeverShowsTheResultBlock(string streamed, string expected) =>
         Assert.Equal(expected, JobProgress.LiveText(streamed));

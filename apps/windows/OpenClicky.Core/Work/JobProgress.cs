@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using OpenClicky.Core.Shell;
 
 namespace OpenClicky.Core.Work;
@@ -71,11 +72,14 @@ public static class JobProgress
         return null;
     }
 
-    /// <summary>The streamed reply up to its first line that starts a code fence, so the raw result block is never shown.</summary>
+    // Same opening as JobResult's block: a fence may be indented by spaces or tabs.
+    private static readonly Regex FenceLine = new(@"^[ \t]*```", RegexOptions.Multiline | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
+
+    /// <summary>The streamed reply up to its first line that starts a code fence (indented or not), so the raw result block is never shown.</summary>
     public static string LiveText(string text)
     {
-        var at = text.StartsWith("```", StringComparison.Ordinal) ? 0 : text.IndexOf("\n```", StringComparison.Ordinal);
-        return (at < 0 ? text : text[..at]).Trim();
+        try { return (FenceLine.Match(text) is { Success: true } fence ? text[..fence.Index] : text).Trim(); }
+        catch (RegexMatchTimeoutException) { return ""; }
     }
 
     private static string Name(JsonElement? input, string verb, string fallback, params string[] keys)
