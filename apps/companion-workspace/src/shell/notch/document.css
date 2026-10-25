@@ -3,7 +3,7 @@
 .notch-doc__bar { display: flex; align-items: center; gap: 8px; padding: 2px 18px 8px; }
 .notch-doc__name { flex: 1; min-width: 0; margin: 0; font: 700 18px/1.2 var(--font-display); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .notch-doc__body { font-size: 13px; line-height: 1.5; }
-.notch-doc__body:focus-visible { outline: 2px solid var(--accent-light); outline-offset: -2px; }
+.notch-doc__body:focus-visible { outline-offset: -2px; }
 .notch-doc__empty { margin: 24px 0; text-align: center; font-size: 13px; color: var(--text-2); }
 .notch-doc__note { margin: 0; padding: 4px 18px 12px; font-size: 12px; color: var(--text-2); }
 .notch-doc__pre { margin: 0; font: 12px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -18,15 +18,15 @@
 .notch-md code { padding: 1px 5px; font: 12px ui-monospace, "Cascadia Mono", Consolas, monospace; background: var(--field); border-radius: 4px; }
 .notch-md .notch-doc__pre { margin: 0 0 10px; padding: 8px 10px; background: var(--field); border-radius: 8px; }
 .notch-md .notch-doc__pre code { padding: 0; background: none; }
-.notch-md__link { color: var(--accent-light); text-decoration: underline; text-underline-offset: 2px; }
+.notch-md__link { color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; }
 
 .notch-csv { width: 100%; border-collapse: collapse; font-size: 12px; }
 .notch-csv th, .notch-csv td { padding: 5px 8px; text-align: left; border-bottom: 1px solid var(--hairline); white-space: nowrap; }
 .notch-csv .is-numeric { text-align: right; }
 .notch-csv th { position: sticky; top: 0; z-index: 1; font-weight: 600; color: var(--text-2); background: var(--panel); }
-.notch-csv th button { padding: 0; color: inherit; font: inherit; background: none; border: 0; border-bottom: 1px dashed currentColor; cursor: pointer; }
-.notch-csv th button[aria-pressed="true"] { color: var(--accent-light); }
-.notch-csv th button:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 2px; }
+.notch-csv th button { position: relative; padding: 0; color: inherit; font: inherit; background: none; border: 0; border-bottom: 1px dashed currentColor; cursor: pointer; }
+.notch-csv th button:hover { color: var(--text); }
+.notch-csv th button[aria-pressed="true"] { color: var(--accent-text); }
 
 .notch-doc__stats { display: flex; align-items: baseline; gap: 6px; padding: 8px 18px 10px; font-size: 12px; color: var(--text-2); border-top: 1px solid var(--hairline); }
 .notch-doc__stats b { margin-right: 10px; font-size: 14px; color: var(--text); font-variant-numeric: tabular-nums; }

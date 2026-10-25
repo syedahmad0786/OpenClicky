@@ -51,7 +51,7 @@
 .notch-peek__bar { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px 6px; }
 .notch-peek__tab { display: flex; flex: 1; flex-direction: column; min-height: 0; animation: notch-fade 180ms var(--ease) both; }
 .notch[data-reduced="true"] .notch-peek__tab { animation-duration: 120ms; }
-.notch-tabs .oc-icon-btn { width: 36px; height: 28px; border-radius: 999px; }
+.notch-tabs .oc-icon-btn { position: relative; width: 36px; height: 28px; border-radius: 999px; }
 
 .notch-body { max-height: 280px; padding: 4px 18px 10px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--track-off) transparent; }
 .notch--settings .notch-body { flex: 1; max-height: none; }
@@ -67,18 +67,22 @@
 .notch-job__tag { position: absolute; top: 6px; left: 12px; }
 .notch-job__close {
   position: absolute; top: 6px; right: 8px; display: grid; place-items: center; width: 24px; height: 24px; padding: 0;
-  color: #2a2620; background: transparent; border: 0; border-radius: 50%; cursor: pointer; opacity: 0.6;
+  color: #2a2620; background: transparent; border: 0; border-radius: 50%; cursor: pointer; opacity: 0.7;
+  transition: opacity var(--dur-fast), background-color var(--dur-fast);
 }
-.notch-job__close:hover { opacity: 1; background: rgb(42 38 32 / 0.1); }
+.notch-job__close svg { width: var(--icon-md); height: var(--icon-md); }
+.notch-job__close:hover, .notch-job__close:focus-visible { opacity: 1; background: rgb(42 38 32 / 0.1); }
+.notch-job__close:active { background: rgb(42 38 32 / 0.16); }
 .notch-job__summary { margin: 0 0 8px; padding: 8px 10px; background: rgb(42 38 32 / 0.07); border-radius: 8px; }
 .notch-job__stat { margin: 0 0 8px; font-size: 12px; }
 .notch-job__stat strong { margin-right: 4px; font: 700 22px/1 var(--font-display); }
 .notch-job__plan { margin: 0 0 8px; }
-.notch-job__plan-count { margin: 0 0 4px; font-size: 11px; opacity: 0.7; }
+.notch-job__plan-count { margin: 0 0 4px; font-size: 11px; opacity: 0.82; }
 .notch-job__step { display: flex; gap: 6px; align-items: baseline; font-size: 12px; line-height: 1.35; }
-.notch-job__step[data-done="true"] .notch-job__step-text { text-decoration: line-through; opacity: 0.6; }
-.notch-job__tick { flex: none; width: 12px; text-align: center; }
-.notch-job__live { margin: 0 0 8px; font-size: 12px; font-style: italic; opacity: 0.75; }
+.notch-job__step[data-done="true"] .notch-job__step-text { text-decoration: line-through; opacity: 0.78; }
+.notch-job__tick { display: inline-grid; flex: none; place-items: center; width: 12px; align-self: center; }
+.notch-job__tick svg { width: 12px; height: 12px; }
+.notch-job__live { margin: 0 0 8px; font-size: 12px; font-style: italic; opacity: 0.82; }
 .notch-job__bullets { margin: 0 0 8px; padding-left: 18px; }
 .notch-job__next { margin: 0 0 4px; font-size: 12px; opacity: 0.8; }
 .notch-job__files { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
@@ -87,10 +91,9 @@
 .notch-job__actions { display: flex; gap: 8px; margin-top: 10px; }
 .notch-job__input {
   display: block; box-sizing: border-box; width: 100%; min-height: 34px; max-height: 90px; margin-top: 10px; padding: 7px 14px; resize: none; field-sizing: content;
-  overflow-y: auto; scrollbar-width: none; color: #2a2620; font: 13px/20px var(--font-ui); background: rgb(255 255 255 / 0.6); border: 0; border-radius: 999px; outline: 0;
+  overflow-y: auto; scrollbar-width: none; color: #2a2620; font: 13px/20px var(--font-ui); background: rgb(255 255 255 / 0.6); border: 0; border-radius: 999px;
 }
-.notch-job__input::placeholder { color: rgb(42 38 32 / 0.55); }
-.notch-job__input:focus { box-shadow: 0 0 0 2px rgb(42 38 32 / 0.25); }
+.notch-job__input::placeholder { color: rgb(42 38 32 / 0.72); }
 .notch-job .oc-pill--outline { color: #2a2620; border-color: rgb(42 38 32 / 0.3); }
 .notch-job .oc-pill--outline:hover:not(:disabled) { background: rgb(42 38 32 / 0.08); }
 
@@ -109,7 +112,6 @@
 /* One-line pill, same height as the talk pill (40px); grows upward (the bar is bottom-aligned) up to 4 lines while the text wraps. */
 .notch-chat__input {
   flex: 2 1 0; box-sizing: border-box; min-width: 0; min-height: 40px; max-height: 100px; padding: 10px 16px; resize: none; field-sizing: content;
-  overflow-y: auto; scrollbar-width: none; color: var(--text); font: 13px/20px var(--font-ui); background: var(--field); border: 0; border-radius: 999px; outline: 0;
+  overflow-y: auto; scrollbar-width: none; color: var(--text); font: 13px/20px var(--font-ui); background: var(--field); border: 0; border-radius: 999px;
 }
 .notch-chat__input::placeholder { color: var(--text-3); }
-.notch-chat__input:focus { box-shadow: 0 0 0 2px var(--accent-tint); }

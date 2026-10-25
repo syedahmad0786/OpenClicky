@@ -7,7 +7,7 @@
   position: relative; display: flex; align-items: flex-start; gap: 10px; padding: 10px 34px 10px 12px;
   color: var(--text); background: var(--panel); border-radius: 14px;
   box-shadow: inset 0 0 0 1px var(--panel-border), inset 3px 0 0 var(--tone);
-  animation: notch-card-in 180ms var(--ease) both;
+  animation: notch-card-in var(--dur-slow) var(--ease) both;
 }
 .notch-card[data-kind="needsYou"], .notch-card[data-kind="micTrouble"], .notch-card[data-kind="documentAccess"] { --tone: var(--warn); }
 .notch-card[data-kind="appUpdated"], .notch-card[data-kind="activity"], .notch-card[data-kind="jobUpdate"] { --tone: var(--accent); }
@@ -29,9 +29,11 @@
 .notch-card__close {
   position: absolute; top: 8px; right: 8px; display: grid; place-items: center; width: 22px; height: 22px; padding: 0;
   color: var(--text-2); background: transparent; border: 0; border-radius: 50%; cursor: pointer;
+  transition: background-color var(--dur-fast), color var(--dur-fast);
 }
+.notch-card__close svg { width: var(--icon-sm); height: var(--icon-sm); }
 .notch-card__close:hover { color: var(--text); background: var(--panel-inner); }
-.notch-card__close:focus-visible { outline: 2px solid var(--accent-light); outline-offset: 1px; }
+.notch-card__close:active { background: var(--card-hover); }
 
 @keyframes notch-card-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes notch-card-pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }

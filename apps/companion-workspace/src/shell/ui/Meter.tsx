@@ -13,7 +13,7 @@ export function Meter({ value, max, label, segments = false }: MeterProps) {
     <div role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={max} aria-valuenow={value} className={segments ? "oc-meter oc-meter--bars" : "oc-meter"}>
       {segments
         ? Array.from({ length: max }, (_, i) => <span key={i} className={i < value ? "oc-meter__bar is-lit" : "oc-meter__bar"} />)
-        : <div className="oc-meter__fill" style={{ width: `${pct}%` }} />}
+        : <div className="oc-meter__fill" style={{ transform: `scaleX(${pct / 100})` }} />}
     </div>
   );
 }

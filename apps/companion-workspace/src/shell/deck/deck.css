@@ -19,8 +19,10 @@
   padding: 18px 12px 10px 16px; overflow: hidden; font: inherit; text-align: left; border: 0; cursor: pointer;
   box-shadow: inset 0 0 0 1px var(--paper-edge);
 }
+.deck-card { transition: filter var(--dur-fast); }
 .deck-card:hover { filter: brightness(1.04); }
-.deck-card:focus-visible { outline: 2px solid var(--accent-light); outline-offset: -2px; }
+.deck-card:active { filter: brightness(0.97); }
+.deck-card:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
 .deck-card .oc-paper__handle { top: 0; border-radius: 0 0 5px 5px; }
 .deck-card__stripe { position: absolute; top: 14px; bottom: 10px; left: 6px; width: 4px; background: var(--stripe); border-radius: 2px; }
 .deck-card[data-colour="red"] { --stripe: #e5484d; }
@@ -32,10 +34,11 @@
   font: 600 13px/1.25 var(--font-ui); overflow-wrap: anywhere;
 }
 .deck-card__state { margin-top: auto; font-size: 11px; font-weight: 600; opacity: 0.8; }
-.deck-card__state[data-tone="accent"] { color: var(--accent-deep); opacity: 1; }
-.deck-card__state[data-tone="warn"] { color: #8a5a00; opacity: 1; }
+.deck-card__state[data-tone="accent"] { color: var(--accent-ink); opacity: 1; }
+.deck-card__state[data-tone="warn"] { color: #7a4f00; opacity: 1; }
 .deck-card__progress { display: block; height: 3px; border-radius: 2px; background: rgba(0, 0, 0, 0.12); overflow: hidden; }
 .deck-card__progress > span { display: block; height: 100%; background: currentColor; opacity: 0.55; }
-.deck-card__live { font-size: 11px; font-style: italic; opacity: 0.75; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.deck-card__live { font-size: 11px; font-style: italic; opacity: 0.82; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .deck-more { align-self: center; }
+.deck-more:focus-visible { outline-offset: -2px; } /* the window shows only the pill's own box */
