@@ -2,6 +2,7 @@ import { Fragment, useCallback, useRef, useState } from "react";
 import type { ShellState } from "../contract";
 import type { CatalogItem, Connector } from "../connectorsContract";
 import { Badge, Group, PillButton, Row, SearchField, Segmented } from "../ui";
+import { BrowserCard } from "./BrowserCard";
 import { act, ConfirmRow, Page } from "./common";
 import { ConnectorEditor, labelError, type EditorPreset } from "./ConnectorEditor";
 
@@ -24,23 +25,6 @@ function addedOn(since: string) {
   return `Added ${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
 }
 const titleOf = (c: Connector) => (c.label ? `${c.name} · ${c.label}` : c.name);
-
-function BrowserCard({ chrome }: { chrome: ShellState["settings"]["integrations"]["chrome"] }) {
-  return (
-    <Group title="Browser">
-      <Row title="Chrome" description="Works with Chrome.">
-        {chrome === "notInstalled" ? <PillButton variant="primary" onClick={() => act("chrome.setup")}>Set up Chrome</PillButton> : null}
-        {chrome === "waiting" ? <Badge tone="warn">Waiting for the extension…</Badge> : null}
-        {chrome === "connected" ? <Badge>Connected</Badge> : null}
-      </Row>
-      {chrome === "connected" ? (
-        <Row title="Disconnect Chrome" tone="danger">
-          <PillButton size="sm" variant="danger" aria-label="Disconnect Chrome" onClick={() => act("chrome.setup", "disconnect")}>Disconnect</PillButton>
-        </Row>
-      ) : null}
-    </Group>
-  );
-}
 
 type LabelChoice = "work" | "personal" | "other";
 const LABEL_OPTIONS = [{ value: "work", label: "Work" }, { value: "personal", label: "Personal" }, { value: "other", label: "Other…" }] as const;
@@ -130,7 +114,7 @@ function AvailableRow({ item, onSetUp }: { item: CatalogItem; onSetUp: (preset: 
 const has = (text: string | null, q: string) => (text ?? "").toLowerCase().includes(q);
 
 export function IntegrationsPage({ state }: { state: ShellState }) {
-  const { chrome, connectors, catalog } = state.settings.integrations;
+  const { chrome, browser, connectors, catalog } = state.settings.integrations;
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<{ preset: EditorPreset | null } | null>(null);
   const [open, setOpen] = useState<Open>(null);
@@ -176,7 +160,7 @@ export function IntegrationsPage({ state }: { state: ShellState }) {
 
   return (
     <Page title="Integrations" subtitle="Apps and services your agents can use.">
-      <BrowserCard chrome={chrome} />
+      <BrowserCard chrome={chrome} browser={browser} />
       <p className="settings-note">When an agent uses an app, its request goes to that app, and what comes back goes to your model provider with the task. Keys and sign-ins stay encrypted on this PC.</p>
       <div className="settings-toolbar">
         <div className="settings-toolbar__search"><SearchField label="Search integrations" value={query} onChange={setQuery} /></div>

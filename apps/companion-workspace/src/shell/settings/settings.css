@@ -71,6 +71,11 @@
 .settings-line { display: block; }
 .settings-path { display: block; font-family: var(--font-mono, ui-monospace, monospace); white-space: nowrap; }
 .settings-note { margin: 10px 4px 0; font-size: 12px; color: var(--text-2); }
+.oc-group__card > .settings-note { margin: 0; padding: 10px 16px 12px; border-top: 1px solid var(--hairline); }
+.settings-steps { margin: 0; padding: 4px 16px 8px 36px; font-size: 13px; color: var(--text-2); }
+.settings-steps li { padding: 4px 0; }
+.settings-steps code { display: block; margin: 6px 0; font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; color: var(--text); word-break: break-all; }
+.settings-steps__buttons { display: inline-flex; gap: 8px; }
 .settings-reach { width: 100%; font: inherit; text-align: left; background: transparent; border: 0; border-radius: 0; cursor: pointer; }
 .settings-reach:hover { background: var(--card-hover); }
 .settings-reach:focus-visible { outline: 2px solid var(--accent-light); outline-offset: -2px; }

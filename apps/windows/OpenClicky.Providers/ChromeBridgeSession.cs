@@ -1,26 +1,38 @@
 using System.Text.Json;
 using OpenClicky.Core;
 using OpenClicky.Core.Agent;
+using OpenClicky.Core.Browser;
 
 namespace OpenClicky.Providers;
 
-/// <summary>A bounded browser capability snapshot for one companion task.</summary>
+/// <summary>Who a job's browser work belongs to: its task id, tab-group owner, group title and colour.</summary>
+public sealed record BrowserTaskIdentity(string Task, string Owner, string GroupTitle, string Color);
+
+/// <summary>
+/// One job's gate in front of the browser extension: op validation, the access snapshot (fixed at creation, never widened),
+/// approvals, upload checks, then one command at a time. The deny list travels with every command; it is a convenience
+/// the extension checks, not a security boundary.
+/// </summary>
 public sealed class ChromeBridgeSession
 {
-    public static readonly string[] ToolNames = ["browser_observe", "browser_click", "browser_type_text", "browser_follow_link"];
-    public static readonly string[] McpToolNames = ["openclicky_browser_observe", "openclicky_browser_click", "openclicky_browser_type_text", "openclicky_browser_follow_link"];
-    private readonly IChromeBridgeHost _host;
+    public static readonly string[] ToolNames = ["browser"];
+    public static readonly string[] McpToolNames = ["openclicky_browser"];
+    private static readonly HashSet<string> AppSideArgs = new(["op", "rationale", "say", "save"], StringComparer.Ordinal);
+    private readonly IBrowserBridge _bridge;
     private readonly IChromeActionBroker _broker;
     private readonly AgentAccessMode _access;
-    private readonly HashSet<string> _allowedOrigins;
-    private readonly IReadOnlyList<string> _excludedTitles;
+    private readonly BrowserTaskIdentity _identity;
+    private readonly IReadOnlyList<string> _deny;
+    private readonly string? _outputFolder;
+    private readonly IDisposable _tracker;
+    private readonly IDisposable? _lease;
     private readonly SemaphoreSlim _calls = new(1, 1);
-    private BrowserObservation? _observation;
-    private bool _endedByRejection;
-    private bool _failedApprovedAction;
+    private volatile bool _declined;
+    private volatile bool _failedApprovedAction;
+    private int _ended;
     public AgentAccessMode AccessSnapshot => _access;
     public bool HasFailedApprovedAction => _failedApprovedAction;
-    public bool WasDeclined => _endedByRejection;
+    public bool WasDeclined => _declined;
 
     public static bool TryMapToolName(string name, out string mapped)
     {
@@ -29,15 +41,17 @@ public sealed class ChromeBridgeSession
         return ToolNames.Contains(mapped, StringComparer.Ordinal);
     }
 
-    public ChromeBridgeSession(IChromeBridgeHost host, IChromeActionBroker broker, AgentAccessMode access,
-        IEnumerable<string> allowedOrigins, IEnumerable<string>? excludedTitles = null)
+    public ChromeBridgeSession(IBrowserBridge bridge, IChromeActionBroker broker, AgentAccessMode access,
+        BrowserTaskIdentity identity, IReadOnlyList<string> deny, string? outputFolder, IDisposable? lease = null)
     {
-        _host = host;
+        _bridge = bridge;
         _broker = broker;
         _access = Enum.IsDefined(access) ? access : AgentAccessMode.ConfirmEach;
-        _allowedOrigins = allowedOrigins.Select(NormalizeOrigin).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (_allowedOrigins.Count == 0) throw new ArgumentException("At least one exact HTTP(S) origin is required.", nameof(allowedOrigins));
-        _excludedTitles = excludedTitles?.Where(value => !string.IsNullOrWhiteSpace(value)).ToArray() ?? [];
+        _identity = identity.GroupTitle.Length > 32 ? identity with { GroupTitle = identity.GroupTitle[..32] } : identity;
+        _deny = deny;
+        _outputFolder = outputFolder;
+        _tracker = bridge.TrackTask(identity.Task);
+        _lease = lease;
     }
 
     public async Task<DesktopToolResult> CallAsync(string tool, JsonElement arguments, CancellationToken token)
@@ -47,100 +61,129 @@ public sealed class ChromeBridgeSession
         finally { _calls.Release(); }
     }
 
-    private async Task<DesktopToolResult> CallCoreAsync(string tool, JsonElement arguments, CancellationToken token)
+    /// <summary>Sends <c>end{tidy}</c> once, stops tracking the task and releases <c>lease</c> (e.g. its stop registration). Never throws.</summary>
+    public async Task EndAsync(bool tidy, CancellationToken token)
+    {
+        if (Interlocked.Exchange(ref _ended, 1) == 1) return;
+        try
+        {
+            await _bridge.SendAsync(Command("end", null, JsonSerializer.SerializeToElement(new { tidy })), TimeSpan.FromSeconds(10), token)
+                .ConfigureAwait(false);
+        }
+        catch { /* best effort: the next sweep releases the task's tabs */ }
+        finally { _tracker.Dispose(); _lease?.Dispose(); }
+    }
+
+    private async Task<DesktopToolResult> CallCoreAsync(string tool, JsonElement args, CancellationToken token)
     {
         if (!ToolNames.Contains(tool, StringComparer.Ordinal)) return Error($"Unknown tool '{tool}'.");
-        if (arguments.ValueKind is not (JsonValueKind.Object or JsonValueKind.Undefined)) return Error("Tool arguments must be an object.");
-        if (_endedByRejection) return Error("This browser task ended when the user declined an action. Start a new task to continue.");
+        if (Volatile.Read(ref _ended) == 1) return Error("This job's browser session has ended.");
+        if (_declined) return Error("This job's browser work ended when you declined an action.");
+        var op = args.ValueKind == JsonValueKind.Object && args.TryGetProperty("op", out var o) && o.ValueKind == JsonValueKind.String
+            ? o.GetString()! : "";
+        if (BrowserOps.Validate(op, args) is { } problem) return Error(problem);
+        var kind = BrowserOps.Kind(op, args);
+        if (kind == BrowserOpKind.Lifecycle) return Error("Only OpenClicky ends or sweeps browser work.");
+        var save = op == "screenshot" && Bool(args, "save");
+        if (_access == AgentAccessMode.Preview && (kind is not (BrowserOpKind.Read or BrowserOpKind.Local) || save))
+            return Error("Preview mode: the browser is read-only for this job.");
+        var uploads = BrowserOps.UploadPaths(op, args);
+        if (uploads.Count > 0 && BrowserUploadPolicy.Validate(uploads) is { } refused) return Error(refused);
 
-        if (tool == "browser_observe")
+        var rationale = Text(args, "rationale");
+        var request = new ActionRequest("browser." + op, Flatten(op, args), rationale);
+        var ask = kind switch
         {
-            var beforeRead = await _host.GetCurrentContextAsync(token).ConfigureAwait(false);
-            if (!Allowed(beforeRead)) return Error("This browser origin or title is excluded. No page content was read.");
-            _observation = await _host.ObserveAsync(token).ConfigureAwait(false);
-            if (!Allowed(_observation.Context)) { _observation = null; return Error("The browser destination changed to an excluded page during observation."); }
-            return new(false, [new("text", JsonSerializer.Serialize(new
-            {
-                observation_id = _observation.Id,
-                tab_id = _observation.Context.TabId,
-                frame_id = _observation.Context.FrameId,
-                navigation_revision = _observation.Context.NavigationRevision,
-                origin = _observation.Context.Origin,
-                title = _observation.Context.Title,
-                document = _observation.Document,
-                links = _observation.Links,
-            }))]);
+            BrowserOpKind.AlwaysAsk => _access != AgentAccessMode.FullAccess,
+            BrowserOpKind.Act => AgentAccessPolicy.RequiresConfirmation(_access, request),
+            _ => false,
+        };
+        if (ask && !await _broker.ApproveAsync(request, token).ConfigureAwait(false))
+        {
+            _declined = true;
+            return Error("You declined that browser action.");
         }
 
-        if (_access == AgentAccessMode.Preview) return Error("Preview mode: browser mutations are disabled for this task.");
-        if (_observation is null) return Error("Observe the current browser tab before requesting an action.");
-        var values = ReadArguments(arguments);
-        if (!Take(values, "observation_id", out var observationId) || observationId != _observation.Id)
-            return Error("The action does not match the current browser observation. Observe again.");
-        if (!Take(values, "navigation_revision", out var revisionText) || !long.TryParse(revisionText, out var revision)
-            || revision != _observation.Context.NavigationRevision)
-            return Error("The action does not match the current navigation. Observe again.");
-
-        var validation = Validate(tool, values, _observation);
-        if (validation is not null) return Error(validation);
-        values["tab_id"] = _observation.Context.TabId;
-        values["frame_id"] = _observation.Context.FrameId;
-        values["navigation_revision"] = revision.ToString();
-        var current = await _host.GetCurrentContextAsync(token).ConfigureAwait(false);
-        if (!Allowed(current)) return Error("This browser origin or title is excluded. No action was performed.");
-        if (!SameDocument(current, _observation.Context)) return Error("The tab, frame, or navigation changed. Observe again.");
-
-        var rationale = values.Remove("rationale", out var reason) ? reason : null;
-        var request = new ActionRequest(tool, values, rationale);
-        if (AgentAccessPolicy.RequiresConfirmation(_access, request)
-            && !await _broker.ApproveAsync(request, token).ConfigureAwait(false))
+        var acting = kind is BrowserOpKind.Act or BrowserOpKind.AlwaysAsk;
+        BrowserReply reply;
+        var say = Text(args, "say") is { } note && note.Length > 160 ? note[..160] : Text(args, "say");
+        try { reply = await _bridge.SendAsync(Command(op, say, ModelArgs(args)), Timeout(op, args), token).ConfigureAwait(false); }
+        catch { if (acting) _failedApprovedAction = true; throw; }
+        if (!reply.Ok)
         {
-            _endedByRejection = true;
-            _observation = null;
-            return Error("The user declined the browser action.");
+            if (acting) _failedApprovedAction = true;
+            return Error(reply.Text);
         }
-
-        current = await _host.GetCurrentContextAsync(token).ConfigureAwait(false);
-        if (!Allowed(current)) { _failedApprovedAction = true; return Error("The browser changed to an excluded page before execution. No action was performed."); }
-        if (!SameDocument(current, _observation.Context)) { _failedApprovedAction = true; return Error("The tab, frame, or navigation changed before execution. No action was performed."); }
-        BrowserActionResult result;
-        try { result = await _host.ExecuteAsync(new(tool, values, rationale), token).ConfigureAwait(false); }
-        catch { _failedApprovedAction = true; throw; }
-        if (!result.Success) _failedApprovedAction = true;
-        _observation = null;
-        return new(!result.Success, [new("text", result.Message)]);
+        if (reply.ImageBase64 is not { } image) return new(false, [new("text", reply.Text)]);
+        var mime = reply.ImageMimeType ?? "image/jpeg";
+        var text = save ? reply.Text + "\n" + Save(image) : reply.Text;
+        return new(false, [new("text", text), new("image", null, image, mime)]);
     }
 
-    private static string? Validate(string tool, IReadOnlyDictionary<string, string> values, BrowserObservation observation) => tool switch
+    private string Save(string base64)
     {
-        "browser_click" when !Present(values, "element_id", 128) => "browser_click requires an element_id returned by the observation.",
-        "browser_type_text" when !Present(values, "element_id", 128) || !Present(values, "text", 12_000) => "browser_type_text requires an observed element_id and text (1-12,000 characters).",
-        "browser_follow_link" when !values.TryGetValue("link_id", out var id) || !observation.Links.ContainsKey(id) => "browser_follow_link requires a link_id returned by the observation.",
-        _ => null,
+        if (string.IsNullOrWhiteSpace(_outputFolder)) return "This job has no output folder, so the screenshot was not saved.";
+        try
+        {
+            Directory.CreateDirectory(_outputFolder);
+            var stem = $"screenshot-{DateTime.Now:yyyyMMdd-HHmmss}";
+            var name = stem + ".jpg";
+            for (var n = 2; File.Exists(Path.Combine(_outputFolder, name)); n++) name = $"{stem}-{n}.jpg";
+            File.WriteAllBytes(Path.Combine(_outputFolder, name), Convert.FromBase64String(base64));
+            return $"Saved to the job's output folder as {name}.";
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or FormatException)
+        {
+            return "The screenshot could not be saved to the job's output folder.";
+        }
+    }
+
+    private BrowserCommand Command(string op, string? say, JsonElement args) =>
+        new(op, _identity.Task, _identity.Owner, _identity.GroupTitle, _identity.Color, _deny, say, args);
+
+    // The extension gives wait_for its wait + 10 s; the app adds 5 s more so the extension's answer arrives first.
+    private static TimeSpan Timeout(string op, JsonElement args) => op switch
+    {
+        "download" => TimeSpan.FromSeconds(60),
+        "batch" => TimeSpan.FromSeconds(45),
+        "wait_for" => TimeSpan.FromSeconds((args.TryGetProperty("timeout", out var t) && t.ValueKind == JsonValueKind.Number ? t.GetDouble() : 10) + 15),
+        _ => TimeSpan.FromSeconds(25),
     };
 
-    private static bool SameDocument(BrowserContext left, BrowserContext right) =>
-        left.TabId == right.TabId && left.FrameId == right.FrameId && left.NavigationRevision == right.NavigationRevision
-        && Uri.TryCreate(left.Origin, UriKind.Absolute, out var leftOrigin) && Uri.TryCreate(right.Origin, UriKind.Absolute, out var rightOrigin)
-        && leftOrigin.Scheme == rightOrigin.Scheme && leftOrigin.Authority == rightOrigin.Authority;
+    /// <summary>The args the extension sees: everything but the app-side keys, with nulls (meaning absent) dropped.</summary>
+    private static JsonElement ModelArgs(JsonElement args) => JsonSerializer.SerializeToElement(
+        args.EnumerateObject().Where(p => !AppSideArgs.Contains(p.Name) && p.Value.ValueKind != JsonValueKind.Null)
+            .ToDictionary(p => p.Name, p => DropNulls(p.Value)));
 
-    private bool Allowed(BrowserContext context) => _allowedOrigins.Contains(NormalizeOrigin(context.Origin))
-        && !AgentDenyList.IsDenied(context.Title, _excludedTitles);
-
-    private static string NormalizeOrigin(string value)
+    private static object? DropNulls(JsonElement value) => value.ValueKind switch
     {
-        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https")
-            || uri.UserInfo.Length > 0 || uri.PathAndQuery != "/" || uri.Fragment.Length > 0)
-            throw new ArgumentException("Browser origins must be exact HTTP(S) origins ending in '/'.", nameof(value));
-        return uri.GetLeftPart(UriPartial.Authority) + "/";
+        JsonValueKind.Object => value.EnumerateObject().Where(p => p.Value.ValueKind != JsonValueKind.Null)
+            .ToDictionary(p => p.Name, p => DropNulls(p.Value)),
+        JsonValueKind.Array => value.EnumerateArray().Select(DropNulls).ToArray(),
+        _ => value,
+    };
+
+    /// <summary>What the approval shows: one entry per arg, or one line per batch step.</summary>
+    private static Dictionary<string, string> Flatten(string op, JsonElement args)
+    {
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var p in args.EnumerateObject().Where(p => !AppSideArgs.Contains(p.Name) && p.Value.ValueKind != JsonValueKind.Null))
+        {
+            if (op == "batch" && p.Name == "steps")
+            {
+                var i = 0;
+                foreach (var step in p.Value.EnumerateArray())
+                    values[$"step {++i}"] = Text(step, "op") + " " + string.Join(" ", step.EnumerateObject()
+                        .Where(s => s.Name != "op" && s.Value.ValueKind != JsonValueKind.Null).Select(s => $"{s.Name}={Value(s.Value)}"));
+            }
+            else values[p.Name] = Value(p.Value);
+        }
+        return values;
     }
 
-    private static bool Present(IReadOnlyDictionary<string, string> values, string name, int max) =>
-        values.TryGetValue(name, out var value) && value.Length is > 0 && value.Length <= max;
-    private static bool Take(IDictionary<string, string> values, string name, out string value)
-    { if (values.TryGetValue(name, out value!)) { values.Remove(name); return true; } value = ""; return false; }
-    private static Dictionary<string, string> ReadArguments(JsonElement arguments) => arguments.ValueKind == JsonValueKind.Undefined
-        ? new(StringComparer.OrdinalIgnoreCase)
-        : arguments.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.ValueKind == JsonValueKind.String ? p.Value.GetString() ?? "" : p.Value.GetRawText(), StringComparer.OrdinalIgnoreCase);
+    private static string Value(JsonElement value) => value.ValueKind == JsonValueKind.String ? value.GetString() ?? "" : value.GetRawText();
+    private static string? Text(JsonElement args, string name) =>
+        args.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+    private static bool Bool(JsonElement args, string name) => args.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.True;
     private static DesktopToolResult Error(string message) => new(true, [new("text", message)]);
 }

@@ -2,6 +2,7 @@ using System.Speech.Synthesis;
 using NAudio.CoreAudioApi;
 using NAudio.CoreAudioApi.Interfaces;
 using OpenClicky.Core;
+using OpenClicky.Core.Browser;
 using OpenClicky.Core.Dictation;
 using OpenClicky.Core.Settings;
 using OpenClicky.Core.Shell;
@@ -23,7 +24,7 @@ internal sealed class SettingsRuntimeProbe : IDisposable
 {
     private readonly ISecretStore _secrets;
     private readonly Func<AppSettings> _settings;
-    private readonly Func<bool> _chromeConnected;
+    private readonly Func<(ChromeState Chrome, BrowserCardView Browser)> _browser;
     private readonly string _defaultAgentFolder;
     private readonly Action _changed;
     private readonly object _gate = new();
@@ -34,12 +35,13 @@ internal sealed class SettingsRuntimeProbe : IDisposable
     private double? _whisperDownload, _multilingualDownload;
     private bool _busy, _dirty, _disposed;
 
+    /// <param name="browser">The browser card's state and view; called on the probe's worker thread.</param>
     /// <param name="changed">Raised on a worker thread after new facts were cached.</param>
-    public SettingsRuntimeProbe(ISecretStore secrets, Func<AppSettings> settings, Func<bool> chromeConnected, string defaultAgentFolder, Action changed)
+    public SettingsRuntimeProbe(ISecretStore secrets, Func<AppSettings> settings, Func<(ChromeState Chrome, BrowserCardView Browser)> browser, string defaultAgentFolder, Action changed)
     {
         _secrets = secrets;
         _settings = settings;
-        _chromeConnected = chromeConnected;
+        _browser = browser;
         _defaultAgentFolder = defaultAgentFolder;
         _changed = changed;
         try
@@ -146,6 +148,7 @@ internal sealed class SettingsRuntimeProbe : IDisposable
             return (IReadOnlyList<InstalledVoice>)list;
         }, []);
         var credential = Guard("chatgpt", () => ChatGptCredentialStore.Load(_secrets), null);
+        var (chrome, browser) = Guard("browser", _browser, (ChromeState.NotInstalled, BrowserCardView.Empty));
         var runtime = new SettingsRuntime
         {
             CaptureDevices = Guard("capture devices", () => Devices(DataFlow.Capture), []),
@@ -154,8 +157,8 @@ internal sealed class SettingsRuntimeProbe : IDisposable
             SignedInAs = credential?.AccessToken is { Length: > 0 } ? credential.Email ?? _settings().ChatGptAccountEmail ?? "your ChatGPT account" : null,
             Whisper = Guard("whisper", () => LocalWhisperModel.IsAvailable(WhisperModels.English), false) ? WhisperState.Ready : WhisperState.Missing,
             Multilingual = Guard("whisper multilingual", () => LocalWhisperModel.IsAvailable(WhisperModels.Multilingual), false) ? WhisperState.Ready : WhisperState.Missing,
-            Chrome = Guard("chrome", () => !File.Exists(ChromeBridgeConfiguration.DefaultPath) ? ChromeState.NotInstalled
-                : _chromeConnected() ? ChromeState.Connected : ChromeState.Waiting, ChromeState.NotInstalled),
+            Chrome = chrome,
+            Browser = browser,
             Reach = Guard("privacy", PrivacyConsent.Read, []),
             DefaultAgentFolder = _defaultAgentFolder,
             OpenAiKeySet = Guard("openai key", () => !string.IsNullOrWhiteSpace(_secrets.Get(SecretNames.OpenAiApiKey)), false),

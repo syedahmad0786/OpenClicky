@@ -16,7 +16,7 @@
   "deviceState": ["active", "unavailable"],
   "whisperState": ["missing", "downloading", "ready"],
   "hotkeyTrigger": ["hold", "doubleTap"],
-  "chromeState": ["notInstalled", "waiting", "connected"],
+  "chromeState": ["notInstalled", "waiting", "connected", "working", "noBrowser"],
   "connectorStatus": ["connected", "checking", "error", "needsSignIn", "configured", "signingIn", "tokenRejected", "reconnect"],
   "connectorKind": ["remote", "local", "vault"],
   "connectorAuth": ["browser", "apiKey", "none"],

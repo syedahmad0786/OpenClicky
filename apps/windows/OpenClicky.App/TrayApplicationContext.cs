@@ -58,8 +58,6 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
     private CompanionAgUiServer? _agUi;
     private CompanionWorkspaceRuntime? _workspaceRuntime;
     private VisualWorkspacePanel? _visualWorkspace;
-    private ChromeBridgePipeTransport? _chromePipe;
-    private ChromeBridgeConfiguration? _chromeConfig;
     private bool _visualRequestActive;
     private string _visualMessageId = Guid.NewGuid().ToString("N");
     private string _lastTurnId = "unsaved";
@@ -130,7 +128,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
                 else { _guideTimer.Stop(); _companionDock?.DismissOffer(); }
             }, SelectScreenAreaAsync, PauseTaskUnlessConfirming, ResumeTaskAsync, ClearTasks, ShowClipboardShelf,
             BeginDictationFromHomeAsync, ToggleDictationRecordingAsync, InsertDictationAsync, CancelDictation,
-            StartWalkthroughFromHomeAsync, ShowChromeSetup, _work, RunJobAsync, _connectors);
+            StartWalkthroughFromHomeAsync, ShowBrowserSettings, _work, RunJobAsync, _connectors);
         _walkthroughForm = new WalkthroughForm(MoveWalkthroughAsync, () => StopWalkthrough());
         _talk.WalkthroughChanged += view =>
         {
@@ -314,7 +312,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         // The notch replaces the startup window; StartShellAsync falls back to the classic window on failure.
         _ = StartShellAsync();
         _ = InitializeWorkspaceAsync();
-        _ = ConnectChromeAsync();
+        StartBrowserBridge();
     }
 
     private static string RuntimePath(string name)
@@ -412,24 +410,6 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         return completion.Task;
     }
 
-    private async Task ConnectChromeAsync()
-    {
-        if (!File.Exists(ChromeBridgeConfiguration.DefaultPath)) return;
-        try
-        {
-            _chromeConfig = ChromeBridgeConfiguration.Load();
-            _chromePipe = new ChromeBridgePipeTransport(ChromeBridgeSecretStore.LoadOrCreate());
-            while (!_lifetime.IsCancellationRequested)
-            {
-                try { await _chromePipe.WaitForNativeHostAsync(_lifetime.Token).ConfigureAwait(false); await _chromePipe.ConnectionEnded.WaitAsync(_lifetime.Token).ConfigureAwait(false); }
-                catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { break; }
-                catch (Exception ex) { Log("chrome_connection_error=" + ex.GetType().Name); await Task.Delay(1000, _lifetime.Token).ConfigureAwait(false); }
-            }
-        }
-        catch (OperationCanceledException) { }
-        catch (Exception ex) { Log("chrome_setup_error=" + ex.GetType().Name); }
-    }
-
     private void OnUi(Action action) => _uiContext.Post(_ =>
     {
         if (!_home.IsDisposed) action();
@@ -517,14 +497,6 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             _clipboardShelf.BringToFront();
             _clipboardShelf.Activate();
         }
-    }
-
-    private void ShowChromeSetup()
-    {
-        PauseTask();
-        using var setup = new ChromeBridgeSetupForm(Application.ExecutablePath, RuntimePath("chrome-extension"));
-        setup.ShowDialog(_home);
-        if (_chromePipe is null && File.Exists(ChromeBridgeConfiguration.DefaultPath)) _ = ConnectChromeAsync();
     }
 
     private Task SubmitFromHomeAsync(string text, bool agent) => SubmitRequestAsync(text, agent, fromShell: false);
@@ -795,11 +767,15 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             }
             if (work is not null)
             {
-                var browser = _chromePipe is { IsConnected: true } pipe && _chromeConfig is { } configuration
-                    ? new ChromeBridgeSession(new TaskChromeHost(new ChromeBridgeHost(pipe), control, t => LeaseScreenAsync(me, t)),
-                        new ChromeApprovalBroker(_confirm, control, t => LeaseScreenAsync(me, t)), access, configuration.AllowedOrigins,
-                        AgentDenyList.ParseExtraFragments(_settings.AgentDenyListExtra)) : null;
                 var connectors = await OpenConnectorsAsync(token).ConfigureAwait(false);
+                // The run's own hooks (E's per-run model): the extension's Stop stops only this run, a pause holds its page commands,
+                // and an approval waits out the pause and then takes the screen as this run, so no other run's input lands on the dialog.
+                // Page commands themselves go over the debugging protocol, not the user's mouse and keyboard, so they take no lease.
+                var browser = CreateBrowserSession(access, work, id, me.Stop, control.WaitAsync, async t =>
+                {
+                    await control.WaitAsync(t).ConfigureAwait(false);
+                    return new AsyncHold(await LeaseScreenAsync(me, t).ConfigureAwait(false));
+                });
                 OpenCodeTaskResult result;
                 try
                 {
@@ -813,7 +789,11 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
                         // No session yet, so the server holds these until the task prompt is sent.
                         serverStarted: server => { foreach (var held in work.AttachServer(server)) _ = server.SendToRunningAsync(held, token); }).ConfigureAwait(false);
                 }
-                finally { foreach (var connector in connectors) connector.Dispose(); }
+                finally
+                {
+                    if (browser is not null) await browser.EndAsync(tidy: !token.IsCancellationRequested, CancellationToken.None).ConfigureAwait(false);
+                    foreach (var connector in connectors) connector.Dispose();
+                }
                 var answer = result.Messages.LastOrDefault(m => m.Role == "assistant" && !string.IsNullOrWhiteSpace(m.Text))?.Text ?? "";
                 // The reply is untrusted: the result block is parsed (files checked inside the job folder) and never shown, spoken or logged.
                 var parsed = JobResult.Parse(answer, _work.JobFolder(work.Job));
@@ -1430,35 +1410,15 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         {
             try { if (_workspaceRuntime is not null) await _workspaceRuntime.DisposeAsync(); } catch { }
             try { if (_agUi is not null) await _agUi.DisposeAsync(); } catch { }
-            try { if (_chromePipe is not null) await _chromePipe.DisposeAsync(); } catch { }
+            try { if (_browserBridge is not null) await _browserBridge.DisposeAsync(); } catch { }
         }).Wait(TimeSpan.FromSeconds(5));
         base.ExitThreadCore();
     }
 
-    /// <summary>A browser action's approval. The dialog takes the screen as the asking run, so no other run's input can land on it.</summary>
-    private sealed class ChromeApprovalBroker(WinFormsAgentConfirm confirm, AgentTaskControl control, Func<CancellationToken, Task<IDisposable>> screen) : IChromeActionBroker
+    /// <summary>A screen lease as the browser approval broker's async hold.</summary>
+    private sealed class AsyncHold(IDisposable hold) : IAsyncDisposable
     {
-        public async Task<bool> ApproveAsync(ActionRequest request, CancellationToken token)
-        {
-            await control.WaitAsync(token).ConfigureAwait(false);
-            using var held = await screen(token).ConfigureAwait(false);
-            return await confirm.ConfirmNonInputAsync(request.ToolName + "\n" + request.Rationale + "\n"
-                + string.Join("\n", request.Arguments.Select(argument => argument.Key + ": " + argument.Value)), token).ConfigureAwait(false);
-        }
-    }
-
-    /// <summary>The run's browser bridge: every call waits out a pause; an action (click, follow link, type text: focus and
-    /// clicks in the user's page) holds the screen too, so it never interleaves with another run's input. Reads stay lease-free.</summary>
-    private sealed class TaskChromeHost(IChromeBridgeHost host, AgentTaskControl control, Func<CancellationToken, Task<IDisposable>> screen) : IChromeBridgeHost
-    {
-        public async Task<BrowserContext> GetCurrentContextAsync(CancellationToken token) { await control.WaitAsync(token).ConfigureAwait(false); return await host.GetCurrentContextAsync(token).ConfigureAwait(false); }
-        public async Task<BrowserObservation> ObserveAsync(CancellationToken token) { await control.WaitAsync(token).ConfigureAwait(false); return await host.ObserveAsync(token).ConfigureAwait(false); }
-        public async Task<BrowserActionResult> ExecuteAsync(BrowserAction action, CancellationToken token)
-        {
-            await control.WaitAsync(token).ConfigureAwait(false);
-            using var held = await screen(token).ConfigureAwait(false);
-            return await host.ExecuteAsync(action, token).ConfigureAwait(false);
-        }
+        public ValueTask DisposeAsync() { hold.Dispose(); return ValueTask.CompletedTask; }
     }
 
     private sealed class SandboxPlanner(OpenClicky.Sandbox.SandboxForm sandbox) : IAgentPlanner

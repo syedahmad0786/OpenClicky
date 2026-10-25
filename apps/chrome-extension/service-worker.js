@@ -1,36 +1,172 @@
-const HOST = "com.openclicky.chrome_bridge";
-let nativePort;
+// Wires the dispatcher to Chrome: the native host port to OpenClicky, chrome.debugger, tab groups, the popup.
+// Production uses chrome.debugger only, never --remote-debugging-port.
+import { createBridge, hostEvent } from "./core.mjs";
+import { TabManager } from "./tabs.mjs";
 
-function connect() {
-  if (nativePort) return nativePort;
-  nativePort = chrome.runtime.connectNative(HOST);
-  nativePort.onDisconnect.addListener(() => { nativePort = undefined; setTimeout(connect, 1000); });
-  nativePort.onMessage.addListener(async message => {
-    if (!message?.requestId) return;
-    try {
-      if (message.command?.name === "contextActive") {
-        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (!Number.isInteger(tab?.id)) throw new Error("No permitted active Chrome tab is available.");
-        const response = await chrome.tabs.sendMessage(tab.id, { name: "context" }, { frameId: 0 });
-        nativePort?.postMessage({ requestId: message.requestId, tabId: tab.id, frameId: 0, response });
-        return;
-      }
-      if (message.command?.name === "observeActive") {
-        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        if (!Number.isInteger(tab?.id)) throw new Error("No active Chrome tab is available.");
-        const response = await chrome.tabs.sendMessage(tab.id, { name: "observe" }, { frameId: 0 });
-        nativePort?.postMessage({ requestId: message.requestId, tabId: tab.id, frameId: 0, response });
-        return;
-      }
-      if (!Number.isInteger(message.tabId) || !Number.isInteger(message.frameId)) throw new Error("An exact observed tab and frame are required.");
-      const response = await chrome.tabs.sendMessage(message.tabId, message.command, { frameId: message.frameId });
-      nativePort?.postMessage({ requestId: message.requestId, tabId: message.tabId, frameId: message.frameId, response });
-    } catch (error) {
-      nativePort?.postMessage({ requestId: message.requestId, error: String(error?.message || error) });
-    }
-  });
-  return nativePort;
+const HOST = "com.openclicky.chrome_bridge";
+const ALARM = "openclicky-connect";
+const STORE_KEY = "openclickyTabs";
+const REFS_KEY = "openclickyRefs";
+
+const tabs = new TabManager(
+  { tabs: chrome.tabs, tabGroups: chrome.tabGroups, windows: chrome.windows },
+  {
+    load: async () => (await chrome.storage.session.get(STORE_KEY))[STORE_KEY],
+    save: (state) => chrome.storage.session.set({ [STORE_KEY]: state }),
+  },
+);
+const restored = tabs.restore().catch(() => {});
+
+const bridge = createBridge({
+  debuggee: {
+    attach: (tabId) => chrome.debugger.attach({ tabId }, "1.3"),
+    detach: (tabId) => chrome.debugger.detach({ tabId }),
+    send: (tabId, method, params) => chrome.debugger.sendCommand({ tabId }, method, params),
+    onEvent: (cb) => chrome.debugger.onEvent.addListener((source, method, params) => {
+      if (source.tabId !== undefined) cb(source.tabId, method, params ?? {});
+    }),
+  },
+  tabs,
+  downloads: chrome.downloads,
+  refStore: {
+    load: async () => (await chrome.storage.session.get(REFS_KEY))[REFS_KEY],
+    save: (counters) => chrome.storage.session.set({ [REFS_KEY]: counters }),
+  },
+});
+
+let port = null;
+let link = "checking"; // checking | setup | offline | profile | connected
+
+const state = () => (link === "connected" && tabs.owners().length ? "working" : link);
+
+function post(message) {
+  try { port?.postMessage(message); } catch { /* the port just closed; onDisconnect follows */ }
 }
 
-chrome.runtime.onInstalled.addListener(connect);
-chrome.runtime.onStartup.addListener(connect);
+function refresh() {
+  const s = state();
+  const on = s === "connected" || s === "working";
+  chrome.action.setBadgeText({ text: s === "working" ? "•" : "" }).catch(() => {});
+  chrome.action.setIcon({ path: on ? "icons/on-32.png" : "icons/off-32.png" }).catch(() => {});
+}
+
+// Memoised: install and the top-level wake-up both connect at once, and must not mint two ids.
+let profileIdPromise = null;
+function profileId() {
+  profileIdPromise ??= (async () => {
+    const { profileId: saved } = await chrome.storage.local.get("profileId");
+    if (saved) return saved;
+    const id = crypto.randomUUID();
+    await chrome.storage.local.set({ profileId: id });
+    return id;
+  })().catch((e) => { profileIdPromise = null; throw e; });
+  return profileIdPromise;
+}
+
+function brand() {
+  const names = (navigator.userAgentData?.brands ?? []).map((b) => b.brand);
+  return names.find((n) => n !== "Chromium" && !/not.?a.?brand/i.test(n)) ?? (names.includes("Chromium") ? "Chromium" : "Chrome");
+}
+
+async function onMessage(message) {
+  const event = hostEvent(message);
+  if (event) {
+    link = event.link;
+    // The app quit or the user disconnected: every job's tabs go back to the user and Chrome's debugging bar goes away.
+    if (event.handOver) bridge.handOverAll();
+    if (event.disconnect) {
+      // Stay in setup: no reconnect until the next alarm, which fails while the host key is gone.
+      const old = port;
+      port = null;
+      try { old?.disconnect(); } catch { /* already closed */ }
+    }
+  } else if (message?.type === "command") {
+    await restored;
+    const r = await bridge.execute(message);
+    post({ type: "result", id: message.id, ...r });
+  }
+  refresh();
+}
+
+// One attempt at a time: callers during an attempt share it.
+let connecting = null;
+function connect() {
+  connecting ??= open().catch(() => {}).finally(() => { connecting = null; });
+  return connecting;
+}
+
+async function open() {
+  if (port) return;
+  const id = await profileId();
+  if (port) return;
+  link = "checking";
+  refresh();
+  port = chrome.runtime.connectNative(HOST);
+  port.onMessage.addListener((m) => { onMessage(m).catch(() => {}); });
+  port.onDisconnect.addListener(() => {
+    const why = chrome.runtime.lastError?.message ?? "";
+    port = null;
+    bridge.handOverAll();
+    link = /not found|forbidden/i.test(why) ? "setup" : "offline";
+    refresh();
+  });
+  post({ type: "hello", protocol: 2, profileId: id, brand: brand() });
+}
+
+chrome.runtime.onInstalled.addListener(() => { connect(); });
+chrome.runtime.onStartup.addListener(() => { connect(); });
+chrome.alarms.create(ALARM, { periodInMinutes: 0.5 });
+chrome.alarms.onAlarm.addListener((a) => { if (a.name === ALARM) connect(); });
+connect(); // also on any other wake-up (popup open), so the popup never waits for the alarm
+
+chrome.debugger.onDetach.addListener((source, reason) => {
+  if (source.tabId === undefined) return;
+  for (const task of bridge.onDetach(source.tabId, reason)) post({ type: "stop", task });
+  refresh();
+});
+
+async function status() {
+  await restored;
+  const jobs = [];
+  for (const o of tabs.owners().slice(0, 3)) {
+    const list = [];
+    for (const id of o.tabs.slice(0, 4)) {
+      try { list.push({ id, title: (await chrome.tabs.get(id)).title || "Untitled tab" }); } catch { /* closed */ }
+    }
+    jobs.push({ title: o.title, say: o.say, tabs: list });
+  }
+  return { state: state(), jobs };
+}
+
+async function onPopup(message) {
+  switch (message?.type) {
+    case "status":
+      return status();
+    case "stop":
+      await bridge.handOverAll();
+      post({ type: "stop" });
+      break;
+    case "select":
+      post({ type: "select" });
+      break;
+    case "openApp":
+      if (!port) await connect();
+      post({ type: "openApp" });
+      break;
+    case "focusTab": {
+      const id = message.tabId;
+      if (!tabs.owners().some((o) => o.tabs.includes(id))) break; // only this extension's job tabs
+      const tab = await chrome.tabs.update(id, { active: true });
+      await chrome.windows.update(tab.windowId, { focused: true });
+      break;
+    }
+  }
+  refresh();
+  return status();
+}
+
+chrome.runtime.onMessage.addListener((message, sender, reply) => {
+  if (sender.id !== chrome.runtime.id || sender.tab) return false; // only our own popup
+  onPopup(message).then(reply, () => reply(null));
+  return true;
+});

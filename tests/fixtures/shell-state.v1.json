@@ -148,7 +148,13 @@
       "catalog": [
         { "id": "linear", "name": "Linear", "description": "Issues, projects and cycles.", "setup": "signIn", "multiAccount": true },
         { "id": "obsidian", "name": "Obsidian", "description": "Notes in a vault on this PC. No account needed.", "setup": "folder", "multiAccount": false }
-      ]
+      ],
+      "browser": {
+        "browserId": null, "profileDir": null,
+        "browsers": [{ "id": "chrome", "name": "Chrome", "profiles": [{ "dir": "Default", "name": "Ahmad" }, { "dir": "Profile 2", "name": "Work" }] }],
+        "instances": [],
+        "extensionFolder": "C:\\Users\\demo\\AppData\\Local\\OpenClicky\\browser-extension"
+      }
     },
     "agents": {
       "folder": "C:\\Users\\demo\\OpenClicky\\Agents", "folderIsDefault": true, "speakAnnouncements": true, "cursorUpdates": true,

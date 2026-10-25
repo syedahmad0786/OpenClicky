@@ -30,22 +30,7 @@ const addForm = () => {
 };
 
 // ---- Integrations
-it("Integrations: browser card follows the Chrome state and posts chrome.setup", () => {
-  const posts = host();
-  const chrome = (c: ShellState["settings"]["integrations"]["chrome"]) => make("integrations", (s) => { s.settings.integrations.chrome = c; });
-  const { rerender } = render(<SettingsPanel state={chrome("notInstalled")} />);
-  expect(screen.getByText("Works with Chrome.")).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Set up Chrome" }));
-  rerender(<SettingsPanel state={chrome("waiting")} />);
-  expect(screen.getByText("Waiting for the extension…")).toBeInTheDocument();
-  rerender(<SettingsPanel state={chrome("connected")} />);
-  expect(screen.getAllByText("Connected", { selector: ".oc-badge" })).toHaveLength(2); // Chrome + the Notion connector
-  fireEvent.click(screen.getByRole("button", { name: "Disconnect Chrome" }));
-  expect(posts("settings.action")).toEqual([
-    { kind: "settings.action", action: "chrome.setup" },
-    { kind: "settings.action", action: "chrome.setup", arg: "disconnect" },
-  ]);
-});
+// The browser card has its own file: browserCard.test.tsx.
 
 it("Integrations: connector rows show status and tools, search filters by name or host, Test posts the key", () => {
   const posts = host();
@@ -186,7 +171,8 @@ it("Integrations: the add form refuses input over 8,000 characters and Cancel cl
   fireEvent.change(f.name, { target: { value: "Long" } });
   fireEvent.change(f.url, { target: { value: `https://example.com/${"a".repeat(8_000)}` } });
   expect(f.add).toBeDisabled();
-  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  // the fixture's browser card (waiting) has its own Cancel button, so look inside the new-connector form
+  fireEvent.click(within(screen.getByRole("heading", { name: "New connector" }).closest("section")!).getByRole("button", { name: "Cancel" }));
   expect(screen.queryByRole("textbox", { name: "Name" })).toBeNull();
   expect(posts("settings.action")).toEqual([]);
 });

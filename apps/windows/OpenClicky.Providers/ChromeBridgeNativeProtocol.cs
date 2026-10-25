@@ -7,23 +7,25 @@ namespace OpenClicky.Providers;
 public static class ChromeBridgeNativeProtocol
 {
     public const int MaxMessageBytes = 1_048_576;
+    /// <summary>Chrome → host/app direction (screenshots); host → Chrome stays at <see cref="MaxMessageBytes"/>.</summary>
+    public const int MaxInboundBytes = 8 * 1024 * 1024;
 
-    public static async Task<JsonDocument?> ReadAsync(Stream input, CancellationToken token)
+    public static async Task<JsonDocument?> ReadAsync(Stream input, CancellationToken token, int maxBytes = MaxMessageBytes)
     {
         var header = new byte[4];
         var read = await ReadExactlyOrEndAsync(input, header, token).ConfigureAwait(false);
         if (!read) return null;
         var length = BinaryPrimitives.ReadInt32LittleEndian(header);
-        if (length is <= 0 or > MaxMessageBytes) throw new InvalidDataException("Invalid Chrome native-message length.");
+        if (length <= 0 || length > maxBytes) throw new InvalidDataException("Invalid Chrome native-message length.");
         var payload = new byte[length];
         await input.ReadExactlyAsync(payload, token).ConfigureAwait(false);
         return JsonDocument.Parse(payload, new JsonDocumentOptions { MaxDepth = 32 });
     }
 
-    public static async Task WriteAsync(Stream output, object message, CancellationToken token)
+    public static async Task WriteAsync(Stream output, object message, CancellationToken token, int maxBytes = MaxMessageBytes)
     {
         var payload = JsonSerializer.SerializeToUtf8Bytes(message);
-        if (payload.Length > MaxMessageBytes) throw new InvalidDataException("Chrome native message exceeds the size limit.");
+        if (payload.Length > maxBytes) throw new InvalidDataException("Chrome native message exceeds the size limit.");
         var header = new byte[4];
         BinaryPrimitives.WriteInt32LittleEndian(header, payload.Length);
         await output.WriteAsync(header, token).ConfigureAwait(false);

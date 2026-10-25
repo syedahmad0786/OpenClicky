@@ -1,6 +1,7 @@
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
+using OpenClicky.Core.Browser;
 
 namespace OpenClicky.Core.Shell;
 
@@ -22,7 +23,7 @@ public enum AccountProvider { Chatgpt, Openrouter }
 public enum DeviceState { Active, Unavailable }
 public enum WhisperState { Missing, Downloading, Ready }
 public enum HotkeyTrigger { Hold, DoubleTap }
-public enum ChromeState { NotInstalled, Waiting, Connected }
+public enum ChromeState { NotInstalled, Waiting, Connected, Working, NoBrowser }
 public enum ConnectorStatus { Connected, Checking, Error, NeedsSignIn, Configured, SigningIn, TokenRejected, Reconnect }
 public enum ReachState { Allowed, Denied, Unknown }
 public enum RoutineStatus { Scheduled, Running, Failed, Paused, Waiting }
@@ -126,7 +127,10 @@ public sealed record SettingsDictation(
 
 public sealed record SettingsShortcuts(Hotkey Talk, Hotkey Text, Hotkey Dictate, Hotkey HandsFree);
 public sealed record SettingsCursor(string Colour, bool Hidden, bool ScreenHighlight, bool ShakeToDetach);
-public sealed partial record SettingsIntegrations(ChromeState Chrome, IReadOnlyList<ConnectorView> Connectors);
+public sealed partial record SettingsIntegrations(ChromeState Chrome, IReadOnlyList<ConnectorView> Connectors)
+{
+    public BrowserCardView Browser { get; init; } = BrowserCardView.Empty;
+}
 
 public sealed record SettingsAgents(
     string Folder, bool FolderIsDefault, bool SpeakAnnouncements, bool CursorUpdates, IReadOnlyList<ReachItem> Reach);

@@ -1,15 +1,12 @@
 {
   "manifest_version": 3,
   "name": "OpenClicky Browser Companion",
-  "version": "0.1.0",
+  "version": "0.2.0",
+  "minimum_chrome_version": "120",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzdzTgxuKx5EMADGfv0LzomyjWSiuIKz/x8KPv67goPkVRjw1+IrDfss+nycbls9xX5d1OnEzLVXBzDa7DIhtbdIqZdz4S1OFQXSQ/OeczJhX4sa0f/evgvCU6CaewUldMmvugT+i8KXNXQfg32CDrqL2z/6g/kEznnV5zUWXLb7aZYpN/0xwIYP/PT6qJl3C1uRieIF3cFWqAmOi+m4aLAUwXEBB8F6W2aoSuulNq57xpqkIvx4HUe4oVFzepNuujWipatCmQr7EAr9zzT0OYd2lYo7x5W7qDjIkA6NA7aAtOU0K3VjNYcMsVu7lPQw5/ACJ3e9/8ub0vFjEX5nfMQIDAQAB",
-  "description": "Optional local bridge for the OpenClicky companion.",
-  "permissions": ["nativeMessaging"],
-  "background": { "service_worker": "service-worker.js" },
-  "content_scripts": [{
-    "matches": ["__ALLOWED_ORIGINS__"],
-    "js": ["content-script.js"],
-    "run_at": "document_idle",
-    "all_frames": true
-  }]
+  "description": "Lets OpenClicky agents work in this browser, inside each job's own tab group.",
+  "permissions": ["debugger", "tabs", "nativeMessaging", "storage", "alarms", "tabGroups", "downloads"],
+  "background": { "service_worker": "service-worker.js", "type": "module" },
+  "action": { "default_popup": "popup.html", "default_icon": "icons/off-32.png" },
+  "incognito": "not_allowed"
 }

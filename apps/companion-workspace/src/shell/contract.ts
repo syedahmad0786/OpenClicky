@@ -125,9 +125,20 @@ const settingsViewSchema = z.object({
   shortcuts: z.object({ talk: hotkey, text: hotkey, dictate: hotkey, handsFree: hotkey }).strict(),
   cursor: z.object({ colour: hex, hidden: z.boolean(), screenHighlight: z.boolean(), shakeToDetach: z.boolean() }).strict(),
   integrations: z.object({
-    chrome: z.enum(["notInstalled", "waiting", "connected"]),
+    chrome: z.enum(["notInstalled", "waiting", "connected", "working", "noBrowser"]),
     connectors: z.array(connectorSchema).max(64),
     catalog: z.array(catalogSchema).max(32),
+    browser: z.object({
+      browserId: text(32).nullable(),
+      profileDir: text(260).nullable(),
+      browsers: z.array(z.object({
+        id: text(32),
+        name: text(80),
+        profiles: z.array(z.object({ dir: text(260), name: text(160) }).strict()).max(32),
+      }).strict()).max(16),
+      instances: z.array(z.object({ id: text(64), label: text(160), selected: z.boolean() }).strict()).max(8),
+      extensionFolder: text(4_096),
+    }).strict(),
   }).strict(),
   agents: z.object({
     folder: text(4_096),
