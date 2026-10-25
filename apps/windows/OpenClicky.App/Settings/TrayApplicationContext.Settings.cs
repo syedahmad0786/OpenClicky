@@ -17,8 +17,6 @@ internal sealed partial class TrayApplicationContext
 {
     private SettingsService? _settingsService;
     private SettingsRuntimeProbe? _settingsProbe;
-    /// <summary>Last connector.test outcome per key; shown until the connector is tested again or removed.</summary>
-    private readonly Dictionary<string, (ConnectorStatus Status, int? Tools)> _connectorChecks = new(StringComparer.Ordinal);
     private NAudioMicrophoneRecorder? _micTest;
     private System.Windows.Forms.Timer? _micTestTimer;
     private bool _accountBusy;
@@ -45,14 +43,13 @@ internal sealed partial class TrayApplicationContext
         SettingsProbe.Current with
         {
             Routines = SettingsActionArgs.RoutineViews(routines, jobs),
-            Connectors = connectors.Select(c => _connectorChecks.TryGetValue(c.Key, out var check)
-                ? new ConnectorView(c.Key, c.DisplayName, c.Host, check.Status, check.Tools)
-                : new ConnectorView(c.Key, c.DisplayName, c.Host, ConnectorStatus.Connected, null)).ToList(),
+            Connectors = ConnectorViews(connectors),
         };
 
     void IShellHost.SettingsSection(string section)
     {
         SettingsProbe.Refresh();
+        if (section == "integrations") OnUi(VerifyUncheckedConnectors);
         if (section == "account" && NativeSettings.CachedModels.Count == 0 && ProviderFactory.IsChatGptSignedIn(_secrets))
             _ = RefreshModelsFromShellAsync(announce: false);
     }
@@ -156,9 +153,7 @@ internal sealed partial class TrayApplicationContext
                 else Log("settings: unknown privacy area");
                 break;
             case "routine.run" or "routine.pause" or "routine.resume" or "routine.delete": RoutineAction(action, arg); break;
-            case "connector.add": AddConnector(arg); break;
-            case "connector.test": _ = TestConnectorAsync(arg); break;
-            case "connector.remove": RemoveConnector(arg); break;
+            case "connector.add" or "connector.signIn" or "connector.label" or "connector.test" or "connector.remove": ConnectorAction(action, arg); break;
             case "chrome.setup":
                 if (arg == "disconnect") _shell?.AddToast("Remove the extension from Chrome to disconnect.");
                 else if (Modal(() => { ShowChromeSetupFromNotch(); return true; }, false)) SettingsProbe.Refresh();
@@ -393,73 +388,6 @@ internal sealed partial class TrayApplicationContext
         RequestShellPush();
     }
 
-    private void AddConnector(string? arg)
-    {
-        if (!ConnectorRequest.TryParse(arg, out var request, out var error)) { _shell?.AddToast(error); return; }
-        // Interim: only a typed address with a key or no auth is wired until the connectors update replaces this method.
-        if (request is not CustomRemote draft) { _shell?.AddToast("Coming in the connectors update."); return; }
-        string? header = null, value = null;
-        switch (draft.Auth)
-        {
-            case ConnectorAuth.Browser: _shell?.AddToast("Browser sign-in arrives with the connectors update."); return;
-            case ConnectorAuth.ApiKey:
-                if (Modal(() => NativeSettings.PromptSecret($"{draft.Name} key", "Paste the connector's API key. It is saved with Windows Credential Manager, never in settings or logs.", "Authorization"), null)
-                    is not { Secret: { Length: > 0 } secret } entered) return;
-                (header, value) = SettingsActionArgs.ApiKeyHeader(entered.Header, secret);
-                break;
-        }
-        try
-        {
-            var info = _connectors.Add(draft.Name, draft.Url, header, value);
-            _shell?.AddToast($"Added {info.DisplayName}. Test it to see its tools.");
-        }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) { _shell?.AddToast(SettingsActionArgs.UserMessage(ex)); }
-        RequestShellPush();
-    }
-
-    /// <summary>Lists the connector's tools (30 s limit) and caches the count or the error for the page.</summary>
-    private async Task TestConnectorAsync(string? key)
-    {
-        if (_connectors.List().FirstOrDefault(c => c.Key == key) is not { } info) { _shell?.AddToast("That connector no longer exists."); return; }
-        _connectorChecks[info.Key] = (ConnectorStatus.Checking, null);
-        RequestShellPush();
-        try
-        {
-            var secret = await Task.Run(() => _connectors.Secret(info.Key));
-            if (secret is null) { SetConnectorCheck(info.Key, ConnectorStatus.NeedsSignIn, null); _shell?.AddToast($"{info.DisplayName} needs its address and key again."); return; }
-            using var connector = new RemoteMcpConnector(info.Key, info.DisplayName, secret);
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
-            cts.CancelAfter(TimeSpan.FromSeconds(30));
-            var tools = await connector.ListToolsAsync(cts.Token);
-            SetConnectorCheck(info.Key, ConnectorStatus.Connected, tools.Count);
-            _shell?.AddToast($"{info.DisplayName}: {tools.Count} tool{(tools.Count == 1 ? "" : "s")} available.");
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            // The message may name the endpoint URL (which can carry account ids): show it, but log only the type.
-            Log("connector_test_error=" + ex.GetType().Name);
-            SetConnectorCheck(info.Key, ConnectorStatus.Error, null);
-            _shell?.AddToast($"{info.DisplayName} could not be reached: " + (ex is OperationCanceledException ? "it did not answer within 30 seconds." : SettingsActionArgs.UserMessage(ex)));
-        }
-        finally { RequestShellPush(); }
-    }
-
-    /// <summary>A test that finishes after its connector was removed must not leave a stale entry behind.</summary>
-    private void SetConnectorCheck(string key, ConnectorStatus status, int? tools)
-    {
-        if (_connectors.List().Any(c => c.Key == key)) _connectorChecks[key] = (status, tools);
-        else _connectorChecks.Remove(key);
-    }
-
-    private void RemoveConnector(string? key)
-    {
-        if (_connectors.List().FirstOrDefault(c => c.Key == key) is not { } info) { RequestShellPush(); return; }
-        _connectors.Remove(info.Key);
-        _connectorChecks.Remove(info.Key);
-        _shell?.AddToast($"Removed {info.DisplayName}.");
-        RequestShellPush();
-    }
-
     /// <summary>
     /// Records the next chord for a shortcut row through the shortcut monitor (7 s; no shortcut fires while it records)
     /// and applies it as a settings.patch, so validation and conflicts toast. A paused monitor listens just for this.
@@ -493,5 +421,6 @@ internal sealed partial class TrayApplicationContext
         StopMicTest();
         _tts.Stop();
         _settingsProbe?.Dispose();
+        DisposeConnectors();
     }
 }

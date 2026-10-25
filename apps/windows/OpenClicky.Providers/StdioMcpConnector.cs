@@ -214,9 +214,10 @@ public sealed class StdioMcpConnector : JsonRpcMcpConnector
     /// Resolves a command: a full path (C:\Tools\server.exe) as is, a bare name through each PATH entry only (never the
     /// current directory), trying each PATHEXT extension (and the bare name when it has one); a relative path with a
     /// folder is refused. .exe/.com run directly with ArgumentList-style quoting; .cmd/.bat run through
-    /// %ComSpec% /d /s /c and may not carry cmd metacharacters.
+    /// %ComSpec% /d /s /c and may not carry cmd metacharacters. Public so the app can refuse a command before saving it;
+    /// returns null with a readable <paramref name="error"/> when the command can't be started.
     /// </summary>
-    internal static (string FileName, string Arguments)? Launch(string command, IReadOnlyList<string> args, string? pathVariable, string? pathExt, out string error)
+    public static (string FileName, string Arguments)? Launch(string command, IReadOnlyList<string> args, string? pathVariable, string? pathExt, out string error)
     {
         error = $"OpenClicky couldn't find {command}. Check the command, or give its full path.";
         command = command.Trim();

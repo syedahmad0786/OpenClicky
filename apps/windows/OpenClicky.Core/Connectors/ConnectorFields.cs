@@ -1,5 +1,7 @@
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using OpenClicky.Core.Settings;
+using OpenClicky.Core.Shell;
 
 namespace OpenClicky.Core;
 
@@ -99,6 +101,54 @@ public static class ConnectorFields
         }
         clean = trimmed.Length == 0 ? null : trimmed;
         return true;
+    }
+
+    /// <summary>
+    /// The header a typed API key goes in (<see cref="SettingsActionArgs.ApiKeyHeader"/>: Authorization by default, with
+    /// "Bearer " added), checked like any header and refused when <paramref name="others"/> already sets it.
+    /// </summary>
+    public static bool TryKeyHeader(string? headerName, string secret, IReadOnlyDictionary<string, string>? others,
+        out string name, out string value, out string error)
+    {
+        (name, value) = SettingsActionArgs.ApiKeyHeader(headerName, secret);
+        if (!TryParseHeaders(name + ": " + value, ConnectorAuth.None, out var parsed, out error) || parsed.Count != 1 || !parsed.ContainsKey(name))
+        {
+            if (error.Length == 0) error = HeaderShape;
+        }
+        else if (others?.ContainsKey(name) == true) error = $"Header {name} is listed twice.";
+        else return true;
+        name = value = "";
+        return false;
+    }
+
+    /// <summary>
+    /// The connector.label arg <c>{"key":…,"label":…}</c>; a missing or null label clears it. A malformed arg fails with an
+    /// empty <paramref name="error"/> (nothing to tell the user); a label that is too long fails with its message.
+    /// </summary>
+    public static bool TryParseLabelArg(string? arg, out string key, out string? label, out string error)
+    {
+        key = "";
+        label = null;
+        error = "";
+        if (string.IsNullOrWhiteSpace(arg)) return false;
+        try
+        {
+            using var document = JsonDocument.Parse(arg, new JsonDocumentOptions { MaxDepth = 2 });
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object
+                || !root.TryGetProperty("key", out var k) || k.ValueKind != JsonValueKind.String
+                || ShellIntentParser.ReadString(k) is not { Length: > 0 } keyText) return false;
+            string? text = null;
+            if (root.TryGetProperty("label", out var l) && l.ValueKind != JsonValueKind.Null)
+            {
+                if (l.ValueKind != JsonValueKind.String || ShellIntentParser.ReadString(l) is not { } read) return false;
+                text = read;
+            }
+            if (!TryValidateLabel(text, out label, out error)) return false;
+            key = keyText;
+            return true;
+        }
+        catch (JsonException) { return false; }
     }
 
     /// <summary>Non-blank, trimmed lines.</summary>

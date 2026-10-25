@@ -62,6 +62,22 @@ public class McpTokenSourceTests
     }
 
     [Fact]
+    public async Task RefreshTimeoutIsConnectorErrorNotCancellation()
+    {
+        var server = new McpOAuthTests.FakeServer();
+        server.Route("POST", "https://as.test/token", _ => throw new TaskCanceledException("timeout"));
+        using var oauth = new McpOAuth(server);
+        var source = new McpTokenSource(McpOAuthTests.Tokens(Now.AddSeconds(10)), oauth, _ => Assert.Fail("saved"), () => Now);
+
+        var error = await Assert.ThrowsAsync<HttpRequestException>(() => source.GetAsync(CancellationToken.None));
+        Assert.Equal("Sign-in refresh timed out.", error.Message);
+
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => source.GetAsync(cancelled.Token));
+    }
+
+    [Fact]
     public async Task RefreshRejectedThrowsReconnect()
     {
         var server = new McpOAuthTests.FakeServer();

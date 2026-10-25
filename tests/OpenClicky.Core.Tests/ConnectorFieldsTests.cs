@@ -144,4 +144,42 @@ public class ConnectorFieldsTests
         Assert.Null(label);
         Assert.False(ConnectorFields.TryValidateLabel("a\nb", out _, out _));
     }
+
+    [Fact]
+    public void KeyHeaderDefaultsToBearerAndIsChecked()
+    {
+        Assert.True(ConnectorFields.TryKeyHeader(null, " k-1 ", null, out var name, out var value, out _));
+        Assert.Equal(("Authorization", "Bearer k-1"), (name, value));
+        Assert.True(ConnectorFields.TryKeyHeader("x-api-key", "k-1", new Dictionary<string, string> { ["X-Team"] = "a" }, out name, out value, out _));
+        Assert.Equal(("x-api-key", "k-1"), (name, value));
+
+        Assert.False(ConnectorFields.TryKeyHeader("Bad Header", "k-1", null, out name, out value, out var error));
+        Assert.Equal("Write each header as Name: value on its own line.", error);
+        Assert.Equal(("", ""), (name, value));
+        Assert.False(ConnectorFields.TryKeyHeader("a:b", "k-1", null, out _, out _, out _));
+        Assert.False(ConnectorFields.TryKeyHeader("Host", "k-1", null, out _, out _, out error));
+        Assert.Equal("Header Host can't be set here.", error);
+        Assert.False(ConnectorFields.TryKeyHeader("x-api-key", "k\n1", null, out _, out _, out _));
+        Assert.False(ConnectorFields.TryKeyHeader("X-API-KEY", "k-1", new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["x-api-key"] = "a" }, out _, out _, out error));
+        Assert.Equal("Header X-API-KEY is listed twice.", error);
+    }
+
+    [Fact]
+    public void ParsesLabelArg()
+    {
+        Assert.True(ConnectorFields.TryParseLabelArg("""{"key":"linear_2","label":" Work "}""", out var key, out var label, out _));
+        Assert.Equal(("linear_2", "Work"), (key, label));
+        Assert.True(ConnectorFields.TryParseLabelArg("""{"key":"linear_2","label":null}""", out key, out label, out _));
+        Assert.Equal(("linear_2", (string?)null), (key, label));
+        Assert.True(ConnectorFields.TryParseLabelArg("""{"key":"linear_2"}""", out _, out label, out _));
+        Assert.Null(label);
+
+        Assert.False(ConnectorFields.TryParseLabelArg($$"""{"key":"linear_2","label":"{{new string('x', 31)}}"}""", out _, out _, out var error));
+        Assert.Equal("Keep the label to 30 characters.", error);
+        foreach (var bad in new[] { null, "", "nope", "[]", """{"label":"Work"}""", """{"key":"","label":"Work"}""", """{"key":1}""", """{"key":"a","label":2}""", """{"key":{"x":{"y":1}}}""" })
+        {
+            Assert.False(ConnectorFields.TryParseLabelArg(bad, out _, out _, out error));
+            Assert.Equal("", error);
+        }
+    }
 }

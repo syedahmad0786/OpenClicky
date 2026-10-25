@@ -814,18 +814,6 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         catch (Exception ex) when (ex is not OutOfMemoryException) { Log("work_index_error=" + ex.GetType().Name); }
     }
 
-    private IReadOnlyList<McpConnector> OpenConnectors()
-    {
-        var list = new List<McpConnector>();
-        try
-        {
-            foreach (var info in _connectors.List())
-                if (_connectors.Secret(info.Key) is { } secret) list.Add(new RemoteMcpConnector(info.Key, info.DisplayName, secret));
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException) { Log("connector_load_error=" + ex.GetType().Name); }
-        return list;
-    }
-
     [System.Runtime.InteropServices.DllImport("kernel32.dll")]
     private static extern uint SetThreadExecutionState(uint flags);
 
@@ -890,7 +878,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
                     ? new ChromeBridgeSession(new TaskChromeHost(new ChromeBridgeHost(pipe), _taskControl),
                         new ChromeApprovalBroker(_confirm, _taskControl), access, configuration.AllowedOrigins,
                         AgentDenyList.ParseExtraFragments(_settings.AgentDenyListExtra)) : null;
-                var connectors = OpenConnectors();
+                var connectors = await OpenConnectorsAsync(token).ConfigureAwait(false);
                 OpenCodeTaskResult result;
                 try
                 {
