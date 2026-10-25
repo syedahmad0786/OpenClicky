@@ -605,7 +605,7 @@ public static class JobPrompt
     private static readonly Regex SentenceEnd = new(@"[.!?](?=\s|$)", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
 
     public static string Build(Companion companion, string notes, WorkJob job, IReadOnlyList<string> outputs,
-        string? followUp = null, bool scheduled = false)
+        string? followUp = null, bool scheduled = false, IReadOnlyList<HowTo>? howTos = null)
     {
         var text = new StringBuilder();
         text.AppendLine($"You are working as the companion \"{companion.Name}\" on one saved job.");
@@ -621,6 +621,12 @@ public static class JobPrompt
         text.AppendLine(outputs.Count == 0
             ? "The job's output folder is empty."
             : "Files already in the job's output folder: " + string.Join(", ", outputs.Take(50)) + ".");
+        if (howTos is { Count: > 0 })
+        {
+            // Model-written on earlier runs: untrusted data, so plain one-line quoted bullets that never change the safety rules.
+            text.AppendLine("Things learned on earlier jobs (may be out of date):");
+            foreach (var howTo in howTos) text.AppendLine($"- \"{HowToStore.Clean(howTo.Text)}\"");
+        }
         text.AppendLine(@"Your working note is note.md in your job folder: keep it short and current with what is done and what is left. The note from the previous run, if there was one, is .openclicky\previous-note.md.");
         text.AppendLine("Save each finished deliverable with write_output using a relative file name. Only save what was asked for.");
         text.AppendLine("Finish with a short factual result. Its first sentence is shown to the user unless you give a summary.");

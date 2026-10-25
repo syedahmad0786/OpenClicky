@@ -16,6 +16,8 @@ namespace OpenClicky.App;
 internal sealed partial class TrayApplicationContext
 {
     private readonly WorkStore _work = new();
+    /// <summary>Lessons from finished runs, fed into later job prompts. ponytail: under %APPDATA%\OpenClicky until E12 moves it under the agent root.</summary>
+    private readonly HowToStore _howTos = new(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "OpenClicky", "howtos.json"));
     private readonly System.Windows.Forms.Timer _routineTimer = new() { Interval = 60_000 };
     /// <summary>Running job runs by job id. Added on admission, removed when the run ends (on the run's thread).</summary>
     private readonly ConcurrentDictionary<string, JobRun> _jobRuns = new(StringComparer.Ordinal);
@@ -195,7 +197,8 @@ internal sealed partial class TrayApplicationContext
             var saved = _work.GetJob(jobId);
             var companion = _work.GetCompanion(saved.CompanionSlug);
             var outputs = _work.Outputs(saved);
-            prompt = JobPrompt.Build(companion, _work.ReadNotes(companion.Slug), saved, outputs, followUp, scheduled: routineId is not null);
+            prompt = JobPrompt.Build(companion, _work.ReadNotes(companion.Slug), saved, outputs, followUp, scheduled: routineId is not null,
+                howTos: HowToChooser.Choose(_howTos.All, string.Join(' ', saved.Title, saved.Prompt, followUp)));
             // The access mode is snapshotted here, once: a settings change never widens a running job.
             run = new JobRun(saved, string.IsNullOrWhiteSpace(followUp) ? saved.Prompt : followUp.Trim(), routineId,
                 _sandboxDemo ? AgentAccessMode.ConfirmEach : _settings.AgentAccess, outputs, fromTalk);
@@ -341,6 +344,7 @@ internal sealed partial class TrayApplicationContext
             _work.SetJobResult(work.Job.Id, result?.ToJson() ?? "");
             _work.SetUserStep(work.Job.Id, step is null ? null : UserStepWatch.ToJson(step));
             if (work.FromTalk && result?.Title is { } title) _work.RenameJob(work.Job.Id, title);
+            SaveHowTos(work.Job.Id, status == AgentProgressStates.Completed ? result?.Learned : null);
             _work.AppendRunLog(work.Job, work.Ask, status, text);
             if (work.RoutineId is { } routineId && _work.Routines(work.Job.Id).FirstOrDefault(r => r.Id == routineId) is { } routine)
                 _work.SaveRoutine(RoutineSchedule.AfterRun(routine, status == AgentProgressStates.Completed, summary[..Math.Min(summary.Length, 200)],
@@ -359,6 +363,19 @@ internal sealed partial class TrayApplicationContext
             AnnounceJob(status == AgentProgressStates.Completed ? JobEvent.Done : status == AgentProgressStates.Failed ? JobEvent.Failed : JobEvent.Stopped,
                 shownTitle, work.Job.Id, replyDelivered: work.FromTalk && replyDelivered);
         });
+    }
+
+    /// <summary>Keeps what a finished run says it learned (model text: stored, never logged). A failed save never blocks the job.</summary>
+    private void SaveHowTos(string jobId, IReadOnlyList<string>? learned)
+    {
+        if (learned is not { Count: > 0 }) return;
+        try
+        {
+            var now = DateTimeOffset.UtcNow;
+            foreach (var lesson in learned) _howTos.Add(lesson, jobId, now);
+            _howTos.Save();
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { Log("howto_save_error=" + ex.GetType().Name); }
     }
 
     /// <summary>Rewrites WORK.md after a job store write; a locked or unwritable file never blocks the job.</summary>

@@ -130,6 +130,19 @@ public class WorkStoreTests
     }
 
     [Fact]
+    public void JobPrompt_ListsHowTosAsQuotedBullets_AndOmitsTheSectionWhenNone()
+    {
+        var companion = new Companion("writer", "Writer", "Writes briefs.", DateTimeOffset.UtcNow);
+        var job = new WorkJob("1", "writer", "Brief", "Write it.", DateTimeOffset.UtcNow, WorkJobStates.Ready, "red", @"C:\jobs\1");
+        var none = JobPrompt.Build(companion, "", job, [], howTos: []);
+        Assert.DoesNotContain("Things learned on earlier jobs", none);
+        Assert.DoesNotContain("Things learned on earlier jobs", JobPrompt.Build(companion, "", job, []));
+        var howTos = new[] { new HowTo("Use CSV\nfor exports", DateTimeOffset.UtcNow, "9"), new HowTo("Say \"hi\" first", DateTimeOffset.UtcNow, "8") };
+        var prompt = JobPrompt.Build(companion, "", job, [], howTos: howTos);
+        Assert.Contains("Things learned on earlier jobs (may be out of date):\n- \"Use CSV for exports\"\n- \"Say 'hi' first\"", prompt.ReplaceLineEndings("\n"));
+    }
+
+    [Fact]
     public void JobPrompt_CarriesRoleNotesFollowUpAndOutputs()
     {
         var companion = new Companion("writer", "Writer", "Writes briefs.", DateTimeOffset.UtcNow);
