@@ -9,6 +9,8 @@
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
+import net from "node:net";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PageSession, PASSWORD_REFUSAL } from "../page.mjs";
@@ -83,10 +85,76 @@ async function stopChrome(entry) {
   }
 }
 
-// Last resort if the process dies before the finally block: still only our own PIDs and folders.
-process.on("exit", () => {
-  for (const e of launched) if (!e.exited && e.pid) spawnSync("taskkill", ["/PID", String(e.pid), "/T", "/F"], { stdio: "ignore" });
-});
+// Synchronous cleanup of only what this run started: our Chrome PIDs (with their trees) and our profile folders.
+function cleanupSync() {
+  for (const e of launched) if (!e.exited && e.pid) { spawnSync("taskkill", ["/PID", String(e.pid), "/T", "/F"], { stdio: "ignore" }); e.exited = true; }
+  for (const e of launched) {
+    if (!e.profile.startsWith(`${BUILD_ROOT}\\openclicky-g-`)) continue;
+    let gone = false;
+    for (let i = 0; i < 10 && !gone; i++) {
+      try { fs.rmSync(e.profile, { recursive: true, force: true }); gone = !fs.existsSync(e.profile); } catch { /* locked: Chrome is still closing */ }
+      if (!gone) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300);
+    }
+    if (!gone) info(`could not remove ${e.profile}; delete it by hand`);
+  }
+  launched.length = 0;
+}
+// A crash, an unhandled rejection, Ctrl+C or a terminate must not leave Chrome or a profile folder behind.
+process.on("exit", cleanupSync);
+for (const [event, why] of [["uncaughtException", "uncaught exception"], ["unhandledRejection", "unhandled rejection"], ["SIGINT", "interrupted"], ["SIGTERM", "terminated"]]) {
+  process.on(event, (e) => {
+    console.log(`FAIL harness: ${why}${e instanceof Error ? `: ${e.stack}` : ""}`);
+    cleanupSync();
+    process.exit(1);
+  });
+}
+
+// ---- Who is listening where ----------------------------------------------------------------------------------
+
+/** The PID plus all its descendants (Chrome's DevTools socket belongs to the browser process, but be safe). */
+function ownedPids(root) {
+  const r = spawnSync("powershell", ["-NoProfile", "-Command", "Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId) $($_.ParentProcessId)\" }"], { encoding: "utf8" });
+  const parent = new Map();
+  for (const line of String(r.stdout).split(/\r?\n/)) { const m = /^(\d+) (\d+)$/.exec(line.trim()); if (m) parent.set(Number(m[1]), Number(m[2])); }
+  const set = new Set([root]);
+  for (let grew = true; grew;) { grew = false; for (const [pid, ppid] of parent) if (set.has(ppid) && !set.has(pid)) { set.add(pid); grew = true; } }
+  return set;
+}
+
+/** LISTENING rows for a port from both `netstat -p tcp` (IPv4) and `-p tcpv6`. */
+function listeningRows(port) {
+  const rows = [];
+  for (const proto of ["tcp", "tcpv6"]) {
+    const out = spawnSync("netstat", ["-ano", "-p", proto], { encoding: "utf8" }).stdout ?? "";
+    for (const line of out.split(/\r?\n/)) {
+      const m = /^\s*TCP\s+(\S+):(\d+)\s+\S+\s+LISTENING\s+(\d+)\s*$/.exec(line);
+      if (m && Number(m[2]) === port) rows.push({ address: m[1], pid: Number(m[3]) });
+    }
+  }
+  return rows;
+}
+
+function tryConnect(host, port) {
+  return new Promise((resolve) => {
+    const socket = net.connect({ host, port });
+    const done = (result) => { socket.destroy(); resolve(result); };
+    socket.setTimeout(2000, () => done("timed out"));
+    socket.once("connect", () => done("connected"));
+    socket.once("error", (e) => done(`refused (${e.code})`));
+  });
+}
+
+/** Passes when the script is blocked by the guard's own message, or returns without the cookie value. */
+async function cookieClosed(js, code, via) {
+  let text;
+  try { text = (await js(code)).text; } catch (e) {
+    assert(/Not available to agents/.test(String(e.message)), `${via} failed for another reason: ${String(e.message).slice(0, 160)}`);
+    info(`${via} guard: ${String(e.message).slice(0, 120)}`);
+    return;
+  }
+  assert(!text.includes(COOKIE), `${via}.document.cookie returned ${text}`);
+  info(`${via} returned without the cookie value: ${text}`);
+}
 
 // ---- Debuggee over a page WebSocket ------------------------------------------------------------------------
 
@@ -195,6 +263,31 @@ async function main() {
       info(`${version.Browser}, pid ${main.pid}, profile ${main.profile}`);
     });
     if (!version) throw new Error("no DevTools endpoint");
+
+    // The URL above only echoes our Host header: prove who is really listening on the port, and where.
+    await check("DevTools port listens only on loopback (netstat, owned by our Chrome)", async () => {
+      const mine = ownedPids(main.pid);
+      const rows = listeningRows(main.port);
+      assert(rows.length > 0, `netstat shows nothing listening on port ${main.port}`);
+      for (const r of rows) {
+        assert(mine.has(r.pid), `port ${main.port} is held by pid ${r.pid}, not our Chrome tree`);
+        assert(r.address === "127.0.0.1" || r.address === "[::1]", `DevTools listens on ${r.address}:${main.port}`);
+      }
+      info(`listening on ${rows.map((r) => `${r.address}:${main.port} (pid ${r.pid})`).join(", ")}`);
+    });
+    await check("DevTools port refuses a non-loopback local address", async () => {
+      const external = Object.values(os.networkInterfaces()).flat().filter((i) => i && i.family === "IPv4" && !i.internal).map((i) => i.address);
+      if (!external.length) { info("no non-loopback IPv4 address on this machine; skipping the non-loopback connect"); return; }
+      const outcomes = [];
+      for (const address of external) {
+        const outcome = await tryConnect(address, main.port);
+        info(`connect to ${address}:${main.port} -> ${outcome}`);
+        assert(outcome !== "connected", `the DevTools port accepted a connection on ${address}`);
+        outcomes.push(outcome);
+      }
+      // Windows Firewall may silently drop instead of refusing; either way nothing accepted. The netstat check above is the proof of the bind.
+      if (!outcomes.some((o) => o.startsWith("refused"))) info("no address answered with an explicit refusal (the firewall drops them); none accepted the connection");
+    });
 
     let targets = [];
     for (let i = 0; i < 50 && !targets.some((t) => t.type === "page"); i++) {
@@ -315,12 +408,10 @@ async function main() {
     });
     await check("javascript cannot read a same-origin child iframe's cookie via frames[0]", async () => {
       assert((await page.eval("frames[0].document.cookie")).includes(COOKIE), "setup: the child frame has no cookie to protect");
-      await rejects(js("return frames[0].document.cookie"), /Not available to agents|failed/);
+      await cookieClosed(js, "return frames[0].document.cookie", "frames[0]");
     });
     await check("javascript cannot read a same-origin child iframe's cookie via window[0]", async () => {
-      let value;
-      try { value = (await js("return window[0].document.cookie")).text; } catch (e) { info(`window[0] guard: ${String(e.message).slice(0, 120)}`); return; }
-      assert(!value.includes(COOKIE), `window[0].document.cookie returned ${value}`);
+      await cookieClosed(js, "return window[0].document.cookie", "window[0]");
     });
     await check("javascript: storage blocked and password value reads blank", async () => {
       await rejects(js("return localStorage.length"), /Not available to agents/);
@@ -387,7 +478,8 @@ async function main() {
 
     // -- the install-help launch: chrome://extensions/ on the command line (plain, then with the product's --profile-directory)
     for (const [tag, extra] of [["-ext", []], ["-ext2", ["--profile-directory=Default"]]]) {
-      await check(`chrome://extensions/ command-line launch is recorded${extra.length ? " (with --profile-directory)" : ""}`, async () => {
+      // A record, not a check: INFO only (a launch problem is reported but is not a failure of the extension).
+      try {
         const ext = await launchChrome(tag, "chrome://extensions/", extra);
         let urls = [];
         for (let i = 0; i < 50; i++) {
@@ -397,7 +489,9 @@ async function main() {
         }
         info(`headless command line ${extra.join(" ")} chrome://extensions/ -> page targets ${JSON.stringify(urls)}; target URL is chrome://extensions/: ${urls.includes("chrome://extensions/")}`);
         await stopChrome(ext);
-      });
+      } catch (e) {
+        info(`could not record the chrome://extensions/ launch ${extra.join(" ")}: ${String(e?.message ?? e).split("\n")[0]}`);
+      }
     }
   } finally {
     for (const entry of launched) await stopChrome(entry);
