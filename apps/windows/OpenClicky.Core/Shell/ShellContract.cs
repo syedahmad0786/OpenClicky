@@ -119,7 +119,13 @@ public sealed record SettingsVoice(
     string Voice, IReadOnlyList<VoiceOption> Voices, double Speed, bool Captions, bool ReadReplies,
     string? OutputDeviceId, IReadOnlyList<Device> OutputDevices);
 
-public sealed record SettingsMicrophone(string? DeviceId, IReadOnlyList<Device> Devices, WhisperState Whisper, double WhisperProgress);
+public sealed record SettingsMicrophone(string? DeviceId, IReadOnlyList<Device> Devices, WhisperState Whisper, double WhisperProgress)
+{
+    /// <summary>The optional more accurate English model (small.en): its download state, progress, and whether the user chose it.</summary>
+    public WhisperState Accurate { get; init; } = WhisperState.Missing;
+    public double AccurateProgress { get; init; }
+    public bool UseAccurate { get; init; }
+}
 
 public sealed record SettingsDictation(
     bool AutoDetect, string Language, IReadOnlyList<DictationLanguage> Languages, IReadOnlyList<string> Dictionary,
@@ -225,7 +231,7 @@ public static class ShellIntentParser
     /// <summary>settings.action allow-list.</summary>
     public static readonly IReadOnlyList<string> SettingsActions =
     [
-        "signIn", "signOut", "refreshModels", "manageUsage", "secret.edit", "testMic", "downloadWhisper", "downloadWhisperMultilingual", "playTestSound",
+        "signIn", "signOut", "refreshModels", "manageUsage", "secret.edit", "testMic", "downloadWhisper", "downloadWhisperMultilingual", "downloadWhisperAccurate", "playTestSound",
         "previewVoice", "clearHistory", "exportMemory", "openNotes", "openClipboard", "openTasks", "chooseAgentFolder",
         "resetAgentFolder", "openPrivacySetting", "routine.run", "routine.pause", "routine.resume", "routine.delete",
         "connector.add", "connector.test", "connector.remove", "connector.signIn", "connector.label", "chrome.setup", "recordHotkey", "resetHotkeys", "openLogs",

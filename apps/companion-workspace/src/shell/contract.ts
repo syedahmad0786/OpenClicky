@@ -25,7 +25,7 @@ export const settingsSections = [
   "proactive",
 ] as const;
 export const settingsActions = [
-  "signIn", "signOut", "refreshModels", "manageUsage", "secret.edit", "testMic", "downloadWhisper", "downloadWhisperMultilingual", "playTestSound",
+  "signIn", "signOut", "refreshModels", "manageUsage", "secret.edit", "testMic", "downloadWhisper", "downloadWhisperMultilingual", "downloadWhisperAccurate", "playTestSound",
   "previewVoice", "clearHistory", "exportMemory", "openNotes", "openClipboard", "openTasks", "chooseAgentFolder",
   "resetAgentFolder", "openPrivacySetting", "routine.run", "routine.pause", "routine.resume", "routine.delete",
   "connector.add", "connector.test", "connector.remove", "connector.signIn", "connector.label", "chrome.setup", "recordHotkey", "resetHotkeys", "openLogs",
@@ -113,6 +113,9 @@ const settingsViewSchema = z.object({
     devices: z.array(device).max(32),
     whisper: z.enum(["missing", "downloading", "ready"]),
     whisperProgress: z.number().min(0).max(1),
+    accurate: z.enum(["missing", "downloading", "ready"]),
+    accurateProgress: z.number().min(0).max(1),
+    useAccurate: z.boolean(),
   }).strict(),
   dictation: z.object({
     autoDetect: z.boolean(),

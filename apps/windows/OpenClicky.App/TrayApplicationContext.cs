@@ -1119,10 +1119,23 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
     private WhisperDecodePlan? DictationWhisperPlan() => WhisperPlan(_settings.DictationAutoDetect, _settings.DictationLanguage);
 
     /// <summary>Talk always decodes English, with no dictionary prompt.</summary>
-    private static WhisperDecodePlan? TalkWhisperPlan() => WhisperPlan(false, "en");
+    private WhisperDecodePlan? TalkWhisperPlan() => WhisperPlan(false, "en");
 
-    private static WhisperDecodePlan? WhisperPlan(bool autoDetect, string language) => WhisperModelChoice.Resolve(autoDetect, language,
-        LocalWhisperModel.IsAvailable(WhisperModels.English), LocalWhisperModel.IsAvailable(WhisperModels.Multilingual));
+    private WhisperDecodePlan? WhisperPlan(bool autoDetect, string language) => WhisperModelChoice.Resolve(autoDetect, language,
+        LocalWhisperModel.IsAvailable(WhisperModels.English), LocalWhisperModel.IsAvailable(WhisperModels.Multilingual),
+        _settings.AccurateSpeech && LocalWhisperModel.IsAvailable(WhisperModels.SmallEnglish));
+
+    /// <summary>Loads the English plan's model off the UI thread (the runtime keeps one model warm), so the next turn does not wait.</summary>
+    private void WarmTalkWhisper()
+    {
+        if (TalkWhisperPlan() is not { } plan) return;
+        _ = Task.Run(async () =>
+        {
+            try { await _whisperRuntime.WarmAsync(plan.Model, _lifetime.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
+            catch (Exception ex) { Log("local_whisper_warm_error=" + ex.GetType().Name); }
+        });
+    }
 
     private async Task ToggleDictationRecordingAsync()
     {

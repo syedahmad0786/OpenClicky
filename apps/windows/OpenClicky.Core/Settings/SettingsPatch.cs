@@ -20,6 +20,7 @@ public static class SettingsPatch
         ["voice.readReplies"] = (s, v) => s.SpeakReplies = v,
         ["dictation.autoDetect"] = (s, v) => s.DictationAutoDetect = v,
         ["dictation.cleanup"] = (s, v) => s.DictationCleanup = v,
+        ["microphone.accurate"] = (s, v) => s.AccurateSpeech = v,
         ["cursor.hidden"] = (s, v) => s.CursorHidden = v,
         ["cursor.screenHighlight"] = (s, v) => s.ScreenHighlight = v,
         ["cursor.shakeToDetach"] = (s, v) => s.ShakeToDetach = v,

@@ -78,7 +78,7 @@ public class SettingsPatchTests
         var cases = new (string Key, string Json)[]
         {
             ("voice.voice", "\"alloy\""), ("voice.speed", "1.25"), ("voice.captions", "false"), ("voice.readReplies", "false"),
-            ("voice.outputDeviceId", "\"spk-1\""), ("microphone.deviceId", "\"mic-1\""),
+            ("voice.outputDeviceId", "\"spk-1\""), ("microphone.deviceId", "\"mic-1\""), ("microphone.accurate", "true"),
             ("dictation.autoDetect", "false"), ("dictation.cleanup", "false"), ("dictation.language", "\"fr\""), ("dictation.dictionary", "[\"Clicky\"]"),
             ("shortcuts.text", "{\"keys\":[\"F9\"],\"trigger\":\"doubleTap\"}"),
             ("shortcuts.dictate", "{\"keys\":[\"Alt\",\"D\"],\"trigger\":\"hold\"}"),
@@ -99,6 +99,7 @@ public class SettingsPatchTests
         Assert.False(s.SpeakReplies);
         Assert.Equal("spk-1", s.OutputDeviceId);
         Assert.Equal("mic-1", s.MicrophoneDeviceId);
+        Assert.True(s.AccurateSpeech);
         Assert.Equal("fr", s.DictationLanguage);
         Assert.Equal(["Clicky"], s.DictionaryWords);
         Assert.Equal(HotkeyTrigger.DoubleTap, s.TextHotkey.Trigger);

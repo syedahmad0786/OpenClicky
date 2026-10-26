@@ -18,6 +18,11 @@ public static class WhisperModels
     public static readonly WhisperModelInfo Multilingual = new("multilingual", "ggml-base.bin", 147951465,
         "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
         "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin", Multilingual: true);
+
+    /// <summary>The optional, more accurate English model (fewer misheard names; slower to decode).</summary>
+    public static readonly WhisperModelInfo SmallEnglish = new("english-small", "ggml-small.en.bin", 487614201,
+        "c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d",
+        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin", Multilingual: false);
 }
 
 public static class WhisperModelChoice
@@ -25,13 +30,15 @@ public static class WhisperModelChoice
     /// <summary>
     /// The model and language for these settings and installed models. English prefers the English model; auto-detect and
     /// other languages need the multilingual one and fall back to English on the English model. Null when neither is installed.
+    /// <paramref name="accurateReady"/> (the user chose the accurate English model and it is installed) makes English decode on it.
     /// </summary>
-    public static WhisperDecodePlan? Resolve(bool autoDetect, string language, bool englishReady, bool multilingualReady)
+    public static WhisperDecodePlan? Resolve(bool autoDetect, string language, bool englishReady, bool multilingualReady, bool accurateReady = false)
     {
+        WhisperDecodePlan? english = accurateReady ? new(WhisperModels.SmallEnglish, "en") : englishReady ? new(WhisperModels.English, "en") : null;
         if (!autoDetect && language == "en")
-            return englishReady ? new(WhisperModels.English, "en") : multilingualReady ? new(WhisperModels.Multilingual, "en") : null;
+            return english ?? (multilingualReady ? new(WhisperModels.Multilingual, "en") : null);
         if (multilingualReady) return new(WhisperModels.Multilingual, autoDetect ? "auto" : language);
-        return englishReady ? new(WhisperModels.English, "en") : null;
+        return english;
     }
 }
 

@@ -32,7 +32,7 @@ internal sealed class SettingsRuntimeProbe : IDisposable
     private readonly DeviceWatcher? _watcher;
     private SettingsRuntime _cached = SettingsRuntime.Empty;
     private IReadOnlyDictionary<string, string> _voiceNames = new Dictionary<string, string>();
-    private double? _whisperDownload, _multilingualDownload;
+    private double? _whisperDownload, _multilingualDownload, _accurateDownload;
     private bool _busy, _dirty, _disposed;
 
     /// <param name="browser">The browser card's state and view; called on the probe's worker thread.</param>
@@ -71,6 +71,8 @@ internal sealed class SettingsRuntimeProbe : IDisposable
                     WhisperProgress = _whisperDownload ?? (_cached.Whisper == WhisperState.Ready ? 1 : 0),
                     Multilingual = _multilingualDownload is null ? _cached.Multilingual : WhisperState.Downloading,
                     MultilingualProgress = _multilingualDownload ?? (_cached.Multilingual == WhisperState.Ready ? 1 : 0),
+                    Accurate = _accurateDownload is null ? _cached.Accurate : WhisperState.Downloading,
+                    AccurateProgress = _accurateDownload ?? (_cached.Accurate == WhisperState.Ready ? 1 : 0),
                 };
             }
         }
@@ -87,7 +89,8 @@ internal sealed class SettingsRuntimeProbe : IDisposable
     {
         lock (_gate)
         {
-            if (model.Multilingual) _multilingualDownload = progress;
+            if (model == WhisperModels.SmallEnglish) _accurateDownload = progress;
+            else if (model.Multilingual) _multilingualDownload = progress;
             else _whisperDownload = progress;
         }
     }
@@ -157,6 +160,7 @@ internal sealed class SettingsRuntimeProbe : IDisposable
             SignedInAs = credential?.AccessToken is { Length: > 0 } ? credential.Email ?? _settings().ChatGptAccountEmail ?? "your ChatGPT account" : null,
             Whisper = Guard("whisper", () => LocalWhisperModel.IsAvailable(WhisperModels.English), false) ? WhisperState.Ready : WhisperState.Missing,
             Multilingual = Guard("whisper multilingual", () => LocalWhisperModel.IsAvailable(WhisperModels.Multilingual), false) ? WhisperState.Ready : WhisperState.Missing,
+            Accurate = Guard("whisper accurate", () => LocalWhisperModel.IsAvailable(WhisperModels.SmallEnglish), false) ? WhisperState.Ready : WhisperState.Missing,
             Chrome = chrome,
             Browser = browser,
             Reach = Guard("privacy", PrivacyConsent.Read, []),

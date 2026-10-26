@@ -27,6 +27,8 @@ public sealed record SettingsRuntime
     public double WhisperProgress { get; init; }
     public WhisperState Multilingual { get; init; } = WhisperState.Missing;
     public double MultilingualProgress { get; init; }
+    public WhisperState Accurate { get; init; } = WhisperState.Missing;
+    public double AccurateProgress { get; init; }
     public ChromeState Chrome { get; init; } = ChromeState.NotInstalled;
     /// <summary>Detected browsers, profiles and connected instances for the browser card.</summary>
     public BrowserCardView Browser { get; init; } = BrowserCardView.Empty;
@@ -64,7 +66,8 @@ public static class ShellSettingsBuilder
         var view = new SettingsView(
             account,
             new SettingsVoice(voice, voices, SettingsCatalog.SnapSpeed(s.SpeechSpeed), s.Captions, s.SpeakReplies, outputId, outputs),
-            new SettingsMicrophone(micId, mics, runtime.Whisper, runtime.WhisperProgress),
+            new SettingsMicrophone(micId, mics, runtime.Whisper, runtime.WhisperProgress)
+            { Accurate = runtime.Accurate, AccurateProgress = runtime.AccurateProgress, UseAccurate = s.AccurateSpeech },
             new SettingsDictation(s.DictationAutoDetect, SettingsCatalog.Languages.Any(l => l.Code == s.DictationLanguage) ? s.DictationLanguage : "en", SettingsCatalog.Languages, s.DictionaryWords ?? [],
                 s.DictationCleanup, runtime.Multilingual, runtime.MultilingualProgress),
             new SettingsShortcuts(
@@ -153,7 +156,11 @@ public static class ShellSettingsBuilder
             new SettingsVoice(Cut(voice.Voice, 80), voices, Math.Clamp(double.IsFinite(voice.Speed) ? voice.Speed : 1, 0.5, 1.5),
                 voice.Captions, voice.ReadReplies, CutOrNull(voice.OutputDeviceId, 160), Devs(voice.OutputDevices, voice.OutputDeviceId)),
             new SettingsMicrophone(CutOrNull(mic.DeviceId, 160), Devs(mic.Devices, mic.DeviceId), mic.Whisper,
-                Math.Clamp(double.IsFinite(mic.WhisperProgress) ? mic.WhisperProgress : 0, 0, 1)),
+                Math.Clamp(double.IsFinite(mic.WhisperProgress) ? mic.WhisperProgress : 0, 0, 1))
+            {
+                Accurate = mic.Accurate, UseAccurate = mic.UseAccurate,
+                AccurateProgress = Math.Clamp(double.IsFinite(mic.AccurateProgress) ? mic.AccurateProgress : 0, 0, 1),
+            },
             new SettingsDictation(dictation.AutoDetect, Cut(dictation.Language, 16), languages,
                 SettingsCatalog.CleanDictionary(dictation.Dictionary), dictation.Cleanup, dictation.Multilingual,
                 Math.Clamp(double.IsFinite(dictation.MultilingualProgress) ? dictation.MultilingualProgress : 0, 0, 1)),

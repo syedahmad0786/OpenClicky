@@ -90,6 +90,8 @@ public sealed class AppSettings
     public bool DictationAutoDetect { get; set; } = true;
     /// <summary>Tidy dictated text (punctuation, filler words) with the model provider.</summary>
     public bool DictationCleanup { get; set; } = true;
+    /// <summary>English talk and dictation decode on the larger small.en model once it is downloaded (fewer misheard words, slower).</summary>
+    public bool AccurateSpeech { get; set; }
     /// <summary>The one-time "Tidy up with AI is on" card has been shown.</summary>
     public bool DictationCleanupNoticeShown { get; set; }
     public string DictationLanguage { get; set; } = "en";

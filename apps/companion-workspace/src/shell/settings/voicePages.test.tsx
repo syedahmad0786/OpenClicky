@@ -130,6 +130,23 @@ it("Microphone: whisper row follows missing, downloading and ready", () => {
   expect(screen.getByText("Ready")).toBeInTheDocument();
 });
 
+it("Microphone: the accurate English voice downloads, shows progress, then switches on and off", () => {
+  const posts = host();
+  const withAccurate = (accurate: "missing" | "downloading" | "ready", progress = 0, use = false) =>
+    make("microphone", (s) => { Object.assign(s.settings.microphone, { accurate, accurateProgress: progress, useAccurate: use }); });
+  const { rerender } = render(<SettingsPanel state={withAccurate("missing")} />);
+  fireEvent.click(screen.getByRole("button", { name: "Download (465 MB)" }));
+  expect(posts("settings.action")).toEqual([{ kind: "settings.action", action: "downloadWhisperAccurate" }]);
+  rerender(<SettingsPanel state={withAccurate("downloading", 0.25)} />);
+  expect(screen.getByText("Downloading… 25%")).toBeInTheDocument();
+  expect(screen.getByRole("meter", { name: "Accurate voice download progress" })).toBeInTheDocument();
+  rerender(<SettingsPanel state={withAccurate("ready", 1, false)} />);
+  const toggle = screen.getByRole("switch", { name: "Use the more accurate English voice" });
+  expect(toggle).toHaveAttribute("aria-checked", "false");
+  fireEvent.click(toggle);
+  expect(posts("settings.patch")).toEqual([{ kind: "settings.patch", key: "microphone.accurate", value: true }]);
+});
+
 // ---- Dictation
 it("Dictation: auto-detect toggle posts, language tiles are disabled while auto and filter by search", () => {
   const posts = host();

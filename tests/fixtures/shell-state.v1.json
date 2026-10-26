@@ -124,7 +124,8 @@
     "microphone": {
       "deviceId": "mic-1",
       "devices": [{ "id": "mic-1", "name": "Headset", "state": "active" }, { "id": "mic-2", "name": "USB mic", "state": "unavailable" }],
-      "whisper": "downloading", "whisperProgress": 0.4
+      "whisper": "downloading", "whisperProgress": 0.4,
+      "accurate": "missing", "accurateProgress": 0, "useAccurate": false
     },
     "dictation": {
       "autoDetect": true, "language": "en",

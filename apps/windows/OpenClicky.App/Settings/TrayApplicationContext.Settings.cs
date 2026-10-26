@@ -105,6 +105,7 @@ internal sealed partial class TrayApplicationContext
                 RefreshConnection();
                 break;
             case "microphone.deviceId": StopMicTest(); RefreshConnection(); break; // the recorders read the device id on each start
+            case "microphone.accurate": WarmTalkWhisper(); break; // the next turn should not wait for the model to load
             case var account when account.StartsWith("account.", StringComparison.Ordinal): RefreshConnection(); break;
             case var shortcut when shortcut.StartsWith("shortcuts.", StringComparison.Ordinal): ApplyShortcutBindings(); break;
             case var cursor when cursor.StartsWith("cursor.", StringComparison.Ordinal): ApplyCompanionStyle(); break;
@@ -131,6 +132,7 @@ internal sealed partial class TrayApplicationContext
             case "testMic": StartMicTest(); break;
             case "downloadWhisper": _ = DownloadWhisperFromShellAsync(WhisperModels.English); break;
             case "downloadWhisperMultilingual": _ = DownloadWhisperFromShellAsync(WhisperModels.Multilingual); break;
+            case "downloadWhisperAccurate": _ = DownloadWhisperFromShellAsync(WhisperModels.SmallEnglish); break;
             case "playTestSound": _ = _tts.PlayTestSoundAsync(); break;
             case "previewVoice": PreviewVoice(arg); break;
             case "clearHistory": ClearHistory(); _shell?.AddToast("Conversation and task history cleared."); break;
@@ -297,8 +299,15 @@ internal sealed partial class TrayApplicationContext
                 SettingsProbe.SetWhisperDownload(model, Math.Clamp(percent / 100.0, 0, 1));
                 RequestShellPush();
             }), _lifetime.Token);
+            if (model == WhisperModels.SmallEnglish)
+            {
+                _settings.AccurateSpeech = true; // downloading it was the choice; Settings → Microphone switches it off
+                SettingsStore.Save(_settings);
+                WarmTalkWhisper();
+            }
             RefreshConnection();
-            _shell?.AddToast(model.Multilingual ? "Multilingual voice is ready · speech stays on this PC." : "Whisper is ready · English speech stays on this PC.");
+            _shell?.AddToast(model == WhisperModels.SmallEnglish ? "The more accurate English voice is on · speech stays on this PC."
+                : model.Multilingual ? "Multilingual voice is ready · speech stays on this PC." : "Whisper is ready · English speech stays on this PC.");
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) when (ex is not OutOfMemoryException) { _shell?.AddToast("Download failed: " + ex.Message); }
