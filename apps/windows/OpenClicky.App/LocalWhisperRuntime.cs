@@ -91,7 +91,9 @@ internal sealed class LocalWhisperRuntime : IDisposable
     {
         public async Task<string> TranscribeAsync(float[] samples, WhisperDecodeOptions options, CancellationToken token)
         {
-            var builder = factory.CreateBuilder().WithThreads(Math.Min(4, Environment.ProcessorCount)).WithNoContext().WithTemperature(0);
+            // One thread per physical core (logical / 2 on SMT CPUs), 4 to 8: small.en is ~3x the work of base.en.
+            var threads = Math.Clamp(Environment.ProcessorCount / 2, Math.Min(4, Environment.ProcessorCount), 8);
+            var builder = factory.CreateBuilder().WithThreads(threads).WithNoContext().WithTemperature(0);
             // Whisper.net's own detection option (an empty language, which whisper.cpp treats like "auto").
             builder = options.Language == "auto" ? builder.WithLanguageDetection() : builder.WithLanguage(options.Language);
             if (options.Prompt is not null) builder = builder.WithPrompt(options.Prompt);

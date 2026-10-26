@@ -113,6 +113,7 @@ if (args.Contains("--installed-apps"))
 
 if (args.Contains("--speech")) return await CheckSpeechAsync();
 if (args.Contains("--whisper")) return await CheckWhisperAsync();
+if (args.Contains("--whisper-compare")) return await CompareWhisperModelsAsync();
 if (args.Contains("--download-voice"))
 {
     var last = -1;
@@ -502,6 +503,34 @@ static async Task<int> CheckSpeechAsync()
         return 0;
     }
     catch (Exception ex) { Console.Error.WriteLine(ex); return 1; }
+}
+
+/// <summary>Speaks fixed phrases with Windows TTS and transcribes each with base.en and small.en (both must be installed); prints text and warm timing.</summary>
+static async Task<int> CompareWhisperModelsAsync()
+{
+    string[] phrases = ["Draw me how a car engine works.", "Ask Ahmad to open OpenClicky and connect Grok.", "Circle the engine oil line in Notepad."];
+    using var runtime = new LocalWhisperRuntime(_ => { });
+    foreach (var model in new[] { WhisperModels.English, WhisperModels.SmallEnglish })
+    {
+        if (!LocalWhisperModel.IsAvailable(model)) { Console.WriteLine($"SKIP {model.Id}: not installed"); continue; }
+        var plan = new WhisperDecodePlan(model, "en");
+        await runtime.WarmAsync(model);
+        foreach (var phrase in phrases)
+        {
+            using var wav = new MemoryStream();
+            using (var voice = new SpeechSynthesizer())
+            {
+                voice.SetOutputToAudioStream(wav, new SpeechAudioFormatInfo(16000, AudioBitsPerSample.Sixteen, AudioChannel.Mono));
+                voice.Speak(phrase);
+            }
+            var bytes = NAudioMicrophoneRecorder.PcmToWav(wav.ToArray(), new WaveFormat(16000, 16, 1));
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            using var turn = new LocalWhisperSttClient(new VoiceFixture(bytes), runtime, plan);
+            var text = await turn.TranscribeAsync(bytes, CancellationToken.None);
+            Console.WriteLine($"{model.Id,-14} {clock.ElapsedMilliseconds,5} ms  {text}");
+        }
+    }
+    return 0;
 }
 
 static async Task<int> CheckWhisperAsync()
