@@ -93,6 +93,21 @@ if (args.Contains("--clipboard-private"))
     Console.WriteLine("PASS private copies (exclude flag, history off) are recognised; a plain copy is not; clipboard text restored");
     return 0;
 }
+if (args.Length == 2 && args[0] == "--agent-type")
+{
+    // The agent's own type_text tool, as a job or task runs it: after 8 s, into whatever is focused; reads the field back.
+    await Task.Delay(8000);
+    var field = AutomationElement.FocusedElement;
+    string? Read() => field.TryGetCurrentPattern(ValuePattern.Pattern, out var v) ? ((ValuePattern)v).Current.Value
+        : field.TryGetCurrentPattern(TextPattern.Pattern, out var t) ? ((TextPattern)t).DocumentRange.GetText(-1) : null;
+    var before = Read();
+    var typed = await new CompositeAgentExecutor().ExecuteAsync(new(AgentToolNames.TypeText,
+        new Dictionary<string, string> { ["text"] = args[1] }, "smoke: agent type_text"), userConfirmed: true);
+    await Task.Delay(200);
+    var exact = DictationInsertionProof.IsExactContiguousChange(before, Read(), args[1]);
+    Console.WriteLine($"{Process.GetProcessById(field.Current.ProcessId).ProcessName}: {typed.Message}; exact={exact}");
+    return typed.Success && exact ? 0 : 1;
+}
 if (args.Length is 1 or 2 && args[0] == "--focused-field")
 {
     // Diagnostic: after 8 s, what UIA exposes for the focused control and whether dictation captures it; with text, insert it.

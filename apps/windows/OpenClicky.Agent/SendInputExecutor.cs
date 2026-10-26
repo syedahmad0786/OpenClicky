@@ -1,4 +1,6 @@
 using System.Runtime.InteropServices;
+using System.Windows.Automation;
+using OpenClicky.Core;
 
 namespace OpenClicky.Agent;
 
@@ -26,7 +28,7 @@ public sealed class SendInputExecutor : IAgentActionExecutor
                 case AgentToolNames.Click:
                     return Task.FromResult(Click(request));
                 case AgentToolNames.TypeText:
-                    return Task.FromResult(TypeText(request, cancellationToken));
+                    return TypeTextAsync(request, cancellationToken);
                 case AgentToolNames.Scroll:
                     return Task.FromResult(Scroll(request));
                 case AgentToolNames.Hotkey:
@@ -66,7 +68,11 @@ public sealed class SendInputExecutor : IAgentActionExecutor
         return new AgentActionResult(true, $"clicked ({x},{y})", false);
     }
 
-    private static AgentActionResult TypeText(AgentActionRequest request, CancellationToken cancellationToken)
+    /// <summary>
+    /// One paste (see <see cref="ClipboardPaste"/>): per-key Unicode input can be read out of order by a busy target. The old
+    /// clipboard goes back once the focused field shows the text. Typed key by key only when the clipboard cannot be taken.
+    /// </summary>
+    private async Task<AgentActionResult> TypeTextAsync(AgentActionRequest request, CancellationToken cancellationToken)
     {
         if (!request.Arguments.TryGetValue("text", out var text) || string.IsNullOrEmpty(text))
         {
@@ -75,6 +81,28 @@ public sealed class SendInputExecutor : IAgentActionExecutor
 
         if (text.Length > 12000) return new AgentActionResult(false, "Text exceeds the 12,000 character limit. Split this into smaller steps.", false);
 
+        var before = FocusedText();
+        var pasted = await ClipboardPaste.PasteAsync(text, this,
+            () => DictationInsertionProof.IsExactContiguousChange(before, FocusedText(), text), cancellationToken).ConfigureAwait(false);
+        if (pasted is null) return TypeKeys(text, cancellationToken);
+        return pasted.Success ? new AgentActionResult(true, $"typed {text.Length} chars", false) : pasted;
+    }
+
+    /// <summary>The focused control's text (value or text range), never a password field's; null when it has none.</summary>
+    private static string? FocusedText()
+    {
+        try
+        {
+            var focused = AutomationElement.FocusedElement;
+            if (focused is null || focused.Current.IsPassword) return null;
+            if (focused.TryGetCurrentPattern(ValuePattern.Pattern, out var value)) return ((ValuePattern)value).Current.Value;
+            return focused.TryGetCurrentPattern(TextPattern.Pattern, out var range) ? ((TextPattern)range).DocumentRange.GetText(-1) : null;
+        }
+        catch (Exception ex) when (ex is ElementNotAvailableException or InvalidOperationException or COMException) { return null; }
+    }
+
+    private static AgentActionResult TypeKeys(string text, CancellationToken cancellationToken)
+    {
         // Unicode typing via KEYEVENTF_UNICODE (batched down+up per char for focus reliability).
         var inputSize = Marshal.SizeOf<NativeMethods.Input>();
         foreach (var ch in WindowsInputText(text))

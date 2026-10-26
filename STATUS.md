@@ -30,7 +30,8 @@
   - (3) Dictation (25ebd86): per-key Unicode typing garbled text in busy targets ("five six" → "vvve xxx" in Notepad), so dictation/TYPE/shelf now paste once (private clipboard copy, old clipboard put back). Capture also accepts rich web editors (contenteditable, Slack/Gmail) whose UIA text isn't read-only. Live via `--focused-field` smoke: Notepad 120 chars verified, Edge contenteditable 50 chars verified, clipboard unchanged.
   - Gate at 25ebd86: Release 0 warnings; Core 2351, Input 48.
   - Privacy note: during the job test an unconfirmed run (bug above) brought the Aside browser (Facebook) forward on screen 1 and looked at the screen before I stopped the app; that stretch was cut from `D:\tmp-build\recordings\openclicky-job-handoff-20261026.mp4`.
-  - Still open: the agent's own `type_text` uses the same per-key typing (may garble in busy apps); voice dictation itself needs Ahmad (injected keys are ignored); audit items (4) and (5).
+  - Agent `type_text` (tasks and jobs) now pastes the same way inside `SendInputExecutor`, the one path every caller uses; per-key typing is only the fallback when the clipboard can't be taken. Live (`--agent-type` smoke): Notepad 97 chars exact, Edge contenteditable 58 chars exact; dictation via the same path still verified in an Edge textarea; clipboard unchanged. Core 2351, Input 48, 0 warnings.
+  - Still open: voice dictation itself needs Ahmad (injected keys are ignored); a target slower than 800 ms to read the clipboard with no readable text could get the restored clipboard instead (ceiling, not seen); audit items (4) and (5).
 - Next: Ahmad's native acceptance pass on the `bin\x64\Release` build; then decide on pushing/PR.
 
 ## 2026-10-24 — phase two: companions, jobs, routines, connectors

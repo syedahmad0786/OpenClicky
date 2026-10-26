@@ -23,7 +23,7 @@ internal static class ClipboardPaste
         try
         {
             var result = await executor.ExecuteAsync(new AgentActionRequest(AgentToolNames.Hotkey,
-                new Dictionary<string, string> { ["keys"] = "ctrl+v" }, "Paste the dictation into the selected field"),
+                new Dictionary<string, string> { ["keys"] = "ctrl+v" }, "Paste the text into the focused field"),
                 userConfirmed: true, cancellationToken).ConfigureAwait(false);
             // The target reads the clipboard while it handles the keys: wait for the text to show (at most 800 ms) before restoring.
             for (var waited = 0; result.Success && waited < 800 && !landed(); waited += 40) await Task.Delay(40, cancellationToken).ConfigureAwait(false);

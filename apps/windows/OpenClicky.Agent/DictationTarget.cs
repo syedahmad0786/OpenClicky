@@ -114,12 +114,7 @@ public sealed class DictationTarget
         var request = new AgentActionRequest(AgentToolNames.TypeText,
             new Dictionary<string, string> { ["text"] = text }, requireCurrentFocus ? "Insert finalized local dictation into the selected field" : "Insert the reviewed dictation draft");
         AgentActionResult action;
-        // A paste, typed only when the clipboard cannot be taken.
-        try
-        {
-            action = await ClipboardPaste.PasteAsync(text, executor, () => DictationInsertionProof.IsExactContiguousChange(beforeText, ReadText(), text), cancellationToken).ConfigureAwait(false)
-                ?? await executor.ExecuteAsync(request, userConfirmed: true, cancellationToken).ConfigureAwait(false);
-        }
+        try { action = await executor.ExecuteAsync(request, userConfirmed: true, cancellationToken).ConfigureAwait(false); }
         catch (Exception ex)
         {
             return new(true, false, "Input was attempted but did not finish. The destination may contain partial text: " + ex.Message, false, null, beforeText);
