@@ -22,6 +22,8 @@
   - Fixed (528383d): neither clipboard collector honoured private-copy flags (password managers); both now skip them (`--clipboard-private` smoke).
   - Gate at 528383d: Release 0 warnings; Core 2319, Input 48, vitest 353; shell build OK; clipboard smokes pass.
 - Not verified by me: voice (injected keys are ignored by design); real Anthropic/xAI calls (no keys); clipboard collection live (switch left off).
+- 26 Oct, 3D (73418a5, 247f5cd): 3D requests always float on screen as figures (no classic window), fitted on screen, announced ("Cylinder is in the centre of screen 2"), with a framed stage, drag to turn, wheel zoom, ×. A simple shape the model only claimed is drawn anyway; notch typing never hands focus to our own windows. Live: cube (screen 1), cylinder and labelled engine parts (screen 2), drag/zoom/close all worked. The ffmpeg recording of this run came out empty; screenshots kept instead.
+- Parity audit (26 Oct) — fix next, in order: (1) Whisper still stalls on base.en (two sessions per press, 37 s gap at 07:27; barge-in shares the runtime); (2) no hand-off from talk/notch to background jobs, so jobs/routines/connectors/browser look missing; (3) dictation insertion needs a writable ValuePattern (Chrome/Slack/VS Code fall to the clipboard card); (4) jobs refuse non-ChatGPT providers silently (classic-window message); (5) voice quality needs an OpenAI key or a local neural voice (owner decision).
 - Next: Ahmad's native acceptance pass on the `bin\x64\Release` build; then decide on pushing/PR.
 
 ## 2026-10-24 — phase two: companions, jobs, routines, connectors
