@@ -70,16 +70,14 @@ public sealed class DictationTarget
                 return false;
             }
 
-            var value = TryValuePattern(element);
-            if (value is { Current.IsReadOnly: true })
+            switch (Writability(element))
             {
-                error = "The selected text field is read-only.";
-                return false;
-            }
-            if (value is null)
-            {
-                error = "The selected control does not expose a writable text value. Choose a standard editable text field.";
-                return false;
+                case TextWritability.ReadOnly:
+                    error = "The selected text field is read-only.";
+                    return false;
+                case TextWritability.None:
+                    error = "The selected control does not expose a writable text value. Choose a standard editable text field.";
+                    return false;
             }
 
             var name = string.IsNullOrWhiteSpace(element.Current.Name) ? element.Current.ControlType.LocalizedControlType : element.Current.Name;
@@ -116,7 +114,12 @@ public sealed class DictationTarget
         var request = new AgentActionRequest(AgentToolNames.TypeText,
             new Dictionary<string, string> { ["text"] = text }, requireCurrentFocus ? "Insert finalized local dictation into the selected field" : "Insert the reviewed dictation draft");
         AgentActionResult action;
-        try { action = await executor.ExecuteAsync(request, userConfirmed: true, cancellationToken).ConfigureAwait(false); }
+        // A paste, typed only when the clipboard cannot be taken.
+        try
+        {
+            action = await ClipboardPaste.PasteAsync(text, executor, () => DictationInsertionProof.IsExactContiguousChange(beforeText, ReadText(), text), cancellationToken).ConfigureAwait(false)
+                ?? await executor.ExecuteAsync(request, userConfirmed: true, cancellationToken).ConfigureAwait(false);
+        }
         catch (Exception ex)
         {
             return new(true, false, "Input was attempted but did not finish. The destination may contain partial text: " + ex.Message, false, null, beforeText);
@@ -145,10 +148,9 @@ public sealed class DictationTarget
         try
         {
             var current = AutomationElement.FocusedElement;
-            var value = current is null ? null : TryValuePattern(current);
             return current is not null && current.GetRuntimeId().SequenceEqual(_runtimeId)
                 && current.Current.IsEnabled && current.Current.IsKeyboardFocusable && !current.Current.IsPassword
-                && value is not null && !value.Current.IsReadOnly;
+                && Writability(current) == TextWritability.Writable;
         }
         catch (ElementNotAvailableException) { return false; }
         catch (InvalidOperationException) { return false; }
@@ -174,7 +176,8 @@ public sealed class DictationTarget
     {
         try
         {
-            return TryValuePattern(_element)?.Current.Value;
+            return TryValuePattern(_element) is { } value ? value.Current.Value
+                : _element.TryGetCurrentPattern(TextPattern.Pattern, out var text) ? ((TextPattern)text).DocumentRange.GetText(-1) : null;
         }
         catch (ElementNotAvailableException) { return null; }
         catch (InvalidOperationException) { return null; }
@@ -188,6 +191,20 @@ public sealed class DictationTarget
 
     private static ValuePattern? TryValuePattern(AutomationElement element) =>
         element.TryGetCurrentPattern(ValuePattern.Pattern, out var pattern) ? pattern as ValuePattern : null;
+
+    private enum TextWritability { None, ReadOnly, Writable }
+
+    /// <summary>
+    /// A value says itself whether it is read-only. Rich web editors (contenteditable in Chromium and Electron: Slack, Gmail)
+    /// have no value, only text: their text range says whether it is read-only. A whole web page is a read-only value.
+    /// </summary>
+    private static TextWritability Writability(AutomationElement element)
+    {
+        if (TryValuePattern(element) is { } value) return value.Current.IsReadOnly ? TextWritability.ReadOnly : TextWritability.Writable;
+        return element.TryGetCurrentPattern(TextPattern.Pattern, out var text)
+            && ((TextPattern)text).DocumentRange.GetAttributeValue(TextPattern.IsReadOnlyAttribute) is false
+            ? TextWritability.Writable : TextWritability.None;
+    }
 
 }
 

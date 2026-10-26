@@ -93,6 +93,26 @@ if (args.Contains("--clipboard-private"))
     Console.WriteLine("PASS private copies (exclude flag, history off) are recognised; a plain copy is not; clipboard text restored");
     return 0;
 }
+if (args.Length is 1 or 2 && args[0] == "--focused-field")
+{
+    // Diagnostic: after 8 s, what UIA exposes for the focused control and whether dictation captures it; with text, insert it.
+    await Task.Delay(8000);
+    var focused = AutomationElement.FocusedElement;
+    var c = focused.Current;
+    var hasValue = focused.TryGetCurrentPattern(ValuePattern.Pattern, out var vp);
+    Console.WriteLine($"process={Process.GetProcessById(c.ProcessId).ProcessName} type={c.ControlType.ProgrammaticName} class={c.ClassName} framework={c.FrameworkId} "
+        + $"password={c.IsPassword} value={hasValue} readOnly={(hasValue ? ((ValuePattern)vp).Current.IsReadOnly : (bool?)null)} "
+        + $"text={focused.TryGetCurrentPattern(TextPattern.Pattern, out _)} editable={(bool)focused.GetCurrentPropertyValue(AutomationElement.IsTextPatternAvailableProperty)}");
+    var inner = focused.FindFirst(TreeScope.Descendants, new PropertyCondition(AutomationElement.HasKeyboardFocusProperty, true));
+    if (inner is not null)
+        Console.WriteLine($"inner focus: type={inner.Current.ControlType.ProgrammaticName} name={inner.Current.Name} patterns="
+            + string.Join(",", inner.GetSupportedPatterns().Select(p => p.ProgrammaticName)));
+    var captured = DictationTarget.TryCapture(out var field, out var failure, out var why);
+    Console.WriteLine($"capture={captured} failure={failure} readable={field?.CanVerifyText} {why}");
+    if (args.Length == 2 && field is not null)
+        Console.WriteLine((await field.InsertAsync(args[1], new CompositeAgentExecutor(), requireCurrentFocus: true)).Message);
+    return captured ? 0 : 1;
+}
 if (args.Contains("--automatic-dictation")) return AutomaticDictationCheck.Run();
 if (args.Contains("--whisper-warm-reuse")) return await WhisperWarmReuseCheck.RunAsync();
 if (args.Length == 3 && args[0] == "--visual-workspace") return VisualWorkspaceCheck.Run(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]));
