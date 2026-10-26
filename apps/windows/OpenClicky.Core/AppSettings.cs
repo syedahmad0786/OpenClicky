@@ -21,6 +21,14 @@ public sealed class AppSettings
 
     public string OpenRouterModel { get; set; } = "openai/gpt-4o-mini";
 
+    public const string DefaultAnthropicModel = "claude-sonnet-5-5", DefaultXaiModel = "grok-4";
+
+    /// <summary>Claude model id (Anthropic Messages API). The key lives only in <see cref="SecretNames.AnthropicApiKey"/>.</summary>
+    public string AnthropicModel { get; set; } = DefaultAnthropicModel;
+
+    /// <summary>Grok model id (xAI API). The key lives only in <see cref="SecretNames.XaiApiKey"/>.</summary>
+    public string XaiModel { get; set; } = DefaultXaiModel;
+
     /// <summary>OpenRouter model id for audio transcription (Whisper-compatible).</summary>
     public string TranscriptionModel { get; set; } = "openai/whisper-1";
 
@@ -113,10 +121,13 @@ public sealed class AppSettings
     public bool SpeakJobAnnouncements { get; set; } = true;
     public bool CursorJobUpdates { get; set; } = true;
 
-    public string ResolveVisionModel() =>
-        AuthProvider == AuthProvider.ChatGPT
-            ? ChatGptModel.Trim()
-            : (string.IsNullOrWhiteSpace(OpenRouterModel) ? "openai/gpt-4o-mini" : OpenRouterModel.Trim());
+    public string ResolveVisionModel() => AuthProvider switch
+    {
+        AuthProvider.ChatGPT => ChatGptModel.Trim(),
+        AuthProvider.Anthropic => string.IsNullOrWhiteSpace(AnthropicModel) ? DefaultAnthropicModel : AnthropicModel.Trim(),
+        AuthProvider.Xai => string.IsNullOrWhiteSpace(XaiModel) ? DefaultXaiModel : XaiModel.Trim(),
+        _ => string.IsNullOrWhiteSpace(OpenRouterModel) ? "openai/gpt-4o-mini" : OpenRouterModel.Trim(),
+    };
 
     public string ResolveTalkModel() => AuthProvider == AuthProvider.ChatGPT && !string.IsNullOrWhiteSpace(ChatGptQuickModel)
         ? ChatGptQuickModel.Trim() : ResolveVisionModel();

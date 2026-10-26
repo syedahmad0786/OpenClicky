@@ -70,7 +70,7 @@ internal sealed class SettingsForm : Form
 
         AddHeading(provider, "Use your ChatGPT plan", "Connect your eligible ChatGPT Plus or Pro account. No API key needed. Screen images and requests go to OpenAI.");
         var providers = new FlowLayoutPanel { AutoSize = true, Width = 560, Margin = new Padding(0, 0, 0, 16) };
-        _providerOpenRouter = new RadioButton { Text = "OpenRouter", Checked = settings.AuthProvider != AuthProvider.ChatGPT, AutoSize = true };
+        _providerOpenRouter = new RadioButton { Text = "OpenRouter", Checked = settings.AuthProvider == AuthProvider.OpenRouter, AutoSize = true };
         _providerChatGpt = new RadioButton { Text = "ChatGPT plan", Checked = settings.AuthProvider == AuthProvider.ChatGPT, AutoSize = true };
         _providerOpenRouter.Margin = new Padding(20,3,3,3);
         providers.Controls.AddRange(new Control[] { _providerChatGpt, _providerOpenRouter });
@@ -442,7 +442,7 @@ internal sealed class SettingsForm : Form
     private void LoadFromSettings()
     {
         _providerChatGpt.Checked = _settings.AuthProvider == AuthProvider.ChatGPT;
-        _providerOpenRouter.Checked = !_providerChatGpt.Checked;
+        _providerOpenRouter.Checked = _settings.AuthProvider == AuthProvider.OpenRouter;
         _apiKeyBox.Text = "";
         var keySaved = !string.IsNullOrWhiteSpace(_settings.OpenRouterApiKey);
         _apiKeyBox.PlaceholderText = keySaved ? "Saved — leave empty to keep" : "Paste your OpenRouter API key";
@@ -485,7 +485,8 @@ internal sealed class SettingsForm : Form
 
     private void ApplyFormToSettings(bool persistSecrets)
     {
-        _settings.AuthProvider = _providerChatGpt.Checked ? AuthProvider.ChatGPT : AuthProvider.OpenRouter;
+        // Claude and Grok are chosen on the notch Account page; neither radio is set then, and the provider stays.
+        _settings.AuthProvider = _providerChatGpt.Checked ? AuthProvider.ChatGPT : _providerOpenRouter.Checked ? AuthProvider.OpenRouter : _settings.AuthProvider;
         // Only a newly typed key is saved; empty keeps the saved key (Remove key deletes it).
         if (SettingsActionArgs.TypedSecret(_apiKeyBox.Text) is { } key && _providerOpenRouter.Checked)
         {

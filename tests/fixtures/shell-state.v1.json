@@ -110,7 +110,8 @@
   "settings": {
     "account": {
       "provider": "chatgpt", "signedInAs": "ahmad@example.com", "model": "gpt-5", "quickModel": "gpt-5-mini",
-      "models": ["gpt-5", "gpt-5-mini"], "openRouterKeySet": false, "openRouterModel": "anthropic/claude-sonnet-4.5"
+      "models": ["gpt-5", "gpt-5-mini"], "openRouterKeySet": false, "openRouterModel": "anthropic/claude-sonnet-4.5",
+      "anthropicKeySet": true, "anthropicModel": "claude-sonnet-5-5", "xaiKeySet": false, "xaiModel": "grok-4"
     },
     "voice": {
       "voice": "windows-default",

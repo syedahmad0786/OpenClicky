@@ -21,6 +21,20 @@ public static class ProviderFactory
         return "https://openrouter.ai/api/v1";
     }
 
+    public const string XaiBaseUrl = "https://api.x.ai/v1";
+
+    /// <summary>The saved Anthropic or xAI key for the selected provider; null for other providers or when none is saved.</summary>
+    public static string? ApiKeyFor(AuthProvider provider, ISecretStore? secrets)
+    {
+        var name = provider switch
+        {
+            AuthProvider.Anthropic => SecretNames.AnthropicApiKey,
+            AuthProvider.Xai => SecretNames.XaiApiKey,
+            _ => null,
+        };
+        return name is null || secrets?.Get(name) is not { } key || string.IsNullOrWhiteSpace(key) ? null : key.Trim();
+    }
+
     public static bool IsChatGptSignedIn(ISecretStore secrets)
     {
         var cred = ChatGptCredentialStore.Load(secrets);
@@ -44,6 +58,13 @@ public static class ProviderFactory
 
             var oauth = new ChatGptOAuthService();
             return new ChatGptTalkClient(ct => oauth.GetAccessTokenAsync(settings, secrets, ct), log: log);
+        }
+
+        if (settings.AuthProvider is AuthProvider.Anthropic or AuthProvider.Xai)
+        {
+            return ApiKeyFor(settings.AuthProvider, secrets) is not { } key ? null
+                : settings.AuthProvider == AuthProvider.Anthropic ? new AnthropicTalkClient(key)
+                : new OpenRouterTalkClient(key, XaiBaseUrl, provider: "xAI");
         }
 
         if (string.IsNullOrWhiteSpace(settings.OpenRouterApiKey))
@@ -88,6 +109,13 @@ public static class ProviderFactory
 
             var oauth = new ChatGptOAuthService();
             return new ChatGptAgentPlanner(ct => oauth.GetAccessTokenAsync(settings, secrets, ct), log: log);
+        }
+
+        if (settings.AuthProvider is AuthProvider.Anthropic or AuthProvider.Xai)
+        {
+            return ApiKeyFor(settings.AuthProvider, secrets) is not { } key ? null
+                : settings.AuthProvider == AuthProvider.Anthropic ? new AnthropicAgentPlanner(key)
+                : new OpenRouterAgentPlanner(key, XaiBaseUrl, provider: "xAI");
         }
 
         if (string.IsNullOrWhiteSpace(settings.OpenRouterApiKey))

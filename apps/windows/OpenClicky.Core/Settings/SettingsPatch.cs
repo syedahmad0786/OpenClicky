@@ -144,8 +144,16 @@ public static class SettingsPatch
 
             case "account.provider":
                 var provider = value.ValueKind == JsonValueKind.String ? ShellIntentParser.ReadString(value) : null;
-                if (provider is not ("chatgpt" or "openrouter")) return Reject("Provider must be chatgpt or openrouter.", out error);
-                s.AuthProvider = provider == "chatgpt" ? AuthProvider.ChatGPT : AuthProvider.OpenRouter;
+                AuthProvider? chosen = provider switch
+                {
+                    "chatgpt" => AuthProvider.ChatGPT,
+                    "openrouter" => AuthProvider.OpenRouter,
+                    "anthropic" => AuthProvider.Anthropic,
+                    "xai" => AuthProvider.Xai,
+                    _ => null,
+                };
+                if (chosen is not { } picked) return Reject("Provider must be chatgpt, openrouter, anthropic or xai.", out error);
+                s.AuthProvider = picked;
                 return PatchResult.Applied;
 
             case "account.model":
@@ -161,6 +169,16 @@ public static class SettingsPatch
             case "account.openRouterModel":
                 if (Model(value, 120, allowEmpty: false, out var routed, out error) != PatchResult.Applied) return PatchResult.Rejected;
                 s.OpenRouterModel = routed!;
+                return PatchResult.Applied;
+
+            case "account.anthropicModel":
+                if (Model(value, 120, allowEmpty: false, out var claude, out error) != PatchResult.Applied) return PatchResult.Rejected;
+                s.AnthropicModel = claude!;
+                return PatchResult.Applied;
+
+            case "account.xaiModel":
+                if (Model(value, 120, allowEmpty: false, out var grok, out error) != PatchResult.Applied) return PatchResult.Rejected;
+                s.XaiModel = grok!;
                 return PatchResult.Applied;
 
             case "proactive.calendarConnector":

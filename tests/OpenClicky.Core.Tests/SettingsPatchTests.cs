@@ -111,6 +111,33 @@ public class SettingsPatchTests
         Assert.Equal("", s.ChatGptQuickModel);
     }
 
+    [Theory]
+    [InlineData("anthropic", AuthProvider.Anthropic, AccountProvider.Anthropic)]
+    [InlineData("xai", AuthProvider.Xai, AccountProvider.Xai)]
+    [InlineData("chatgpt", AuthProvider.ChatGPT, AccountProvider.Chatgpt)]
+    public void ProviderPatchAcceptsClaudeAndGrok(string wire, AuthProvider provider, AccountProvider view)
+    {
+        var s = new AppSettings { AuthProvider = AuthProvider.OpenRouter };
+        Assert.Equal(PatchResult.Applied, Apply(s, "account.provider", $"\"{wire}\"", out _));
+        Assert.Equal(provider, s.AuthProvider);
+        Assert.Equal(view, ShellSettingsBuilder.Build(s, SettingsRuntime.Empty).Account.Provider);
+    }
+
+    [Fact]
+    public void ClaudeAndGrokModelsPatchAndShowWithKeyState()
+    {
+        var s = new AppSettings();
+        Assert.Equal(PatchResult.Applied, Apply(s, "account.anthropicModel", "\" claude-opus-5-5 \"", out _));
+        Assert.Equal(PatchResult.Applied, Apply(s, "account.xaiModel", "\"grok-4-fast\"", out _));
+        Assert.Equal(PatchResult.Rejected, Apply(s, "account.xaiModel", "\"\"", out _));
+        Assert.Equal(PatchResult.Rejected, Apply(s, "account.anthropicModel", "\"bad model\"", out _));
+        Assert.Equal(PatchResult.Rejected, Apply(s, "account.provider", "\"claude\"", out _));
+        Assert.Equal(("claude-opus-5-5", "grok-4-fast"), (s.AnthropicModel, s.XaiModel));
+        var account = ShellSettingsBuilder.Build(s, SettingsRuntime.Empty with { AnthropicKeySet = true }).Account;
+        Assert.Equal((true, "claude-opus-5-5", false, "grok-4-fast"), (account.AnthropicKeySet, account.AnthropicModel, account.XaiKeySet, account.XaiModel));
+        Assert.Equal(("claude-sonnet-5-5", "grok-4"), (new AppSettings().AnthropicModel, new AppSettings().XaiModel));
+    }
+
     [Fact]
     public void RejectsConflictingHotkeys()
     {

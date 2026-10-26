@@ -97,11 +97,13 @@ public static class SettingsActionArgs
         _ => ReachState.Unknown,
     };
 
-    /// <summary>The secret a secret.edit arg names, with the prompt title; null for anything else.</summary>
+    /// <summary>The secret a secret.edit or secret.remove arg names, with the prompt title; null for anything else.</summary>
     public static (string Name, string Title)? SecretFor(string? arg) => arg switch
     {
         "openrouter" => (SecretNames.OpenRouterApiKey, "OpenRouter API key"),
         "openai" => (SecretNames.OpenAiApiKey, "OpenAI API key"),
+        "anthropic" => (SecretNames.AnthropicApiKey, "Anthropic API key"),
+        "xai" => (SecretNames.XaiApiKey, "xAI API key"),
         _ => null,
     };
 

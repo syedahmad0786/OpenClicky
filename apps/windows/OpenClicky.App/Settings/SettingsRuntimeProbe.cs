@@ -166,6 +166,8 @@ internal sealed class SettingsRuntimeProbe : IDisposable
             Reach = Guard("privacy", PrivacyConsent.Read, []),
             DefaultAgentFolder = _defaultAgentFolder,
             OpenAiKeySet = Guard("openai key", () => !string.IsNullOrWhiteSpace(_secrets.Get(SecretNames.OpenAiApiKey)), false),
+            AnthropicKeySet = Guard("anthropic key", () => !string.IsNullOrWhiteSpace(_secrets.Get(SecretNames.AnthropicApiKey)), false),
+            XaiKeySet = Guard("xai key", () => !string.IsNullOrWhiteSpace(_secrets.Get(SecretNames.XaiApiKey)), false),
         };
         return (runtime, voices);
     }

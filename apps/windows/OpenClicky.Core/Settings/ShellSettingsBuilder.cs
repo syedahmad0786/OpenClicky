@@ -23,6 +23,8 @@ public sealed record SettingsRuntime
     public IReadOnlyList<string> Models { get; init; } = [];
     public bool OpenRouterKeySet { get; init; }
     public bool OpenAiKeySet { get; init; }
+    public bool AnthropicKeySet { get; init; }
+    public bool XaiKeySet { get; init; }
     public WhisperState Whisper { get; init; } = WhisperState.Missing;
     public double WhisperProgress { get; init; }
     public WhisperState Multilingual { get; init; } = WhisperState.Missing;
@@ -53,9 +55,21 @@ public static class ShellSettingsBuilder
     public static SettingsView Build(AppSettings s, SettingsRuntime runtime)
     {
         var account = new SettingsAccount(
-            s.AuthProvider == AuthProvider.ChatGPT ? AccountProvider.Chatgpt : AccountProvider.Openrouter,
+            s.AuthProvider switch
+            {
+                AuthProvider.ChatGPT => AccountProvider.Chatgpt,
+                AuthProvider.Anthropic => AccountProvider.Anthropic,
+                AuthProvider.Xai => AccountProvider.Xai,
+                _ => AccountProvider.Openrouter,
+            },
             runtime.SignedInAs, s.ChatGptModel ?? "", s.ChatGptQuickModel ?? "", runtime.Models,
-            runtime.OpenRouterKeySet, s.OpenRouterModel ?? "");
+            runtime.OpenRouterKeySet, s.OpenRouterModel ?? "")
+        {
+            AnthropicKeySet = runtime.AnthropicKeySet,
+            AnthropicModel = s.AnthropicModel ?? "",
+            XaiKeySet = runtime.XaiKeySet,
+            XaiModel = s.XaiModel ?? "",
+        };
 
         var proactive = s.Proactive ?? new Proactive.ProactiveSettings();
         var voices = Voices(runtime, s.VoiceId);
@@ -152,7 +166,11 @@ public static class ShellSettingsBuilder
 
         return new SettingsView(
             new SettingsAccount(account.Provider, CutOrNull(account.SignedInAs, 160), Cut(account.Model, 80), Cut(account.QuickModel, 80),
-                Take(account.Models, MaxModels).Select(m => Cut(m, 80)).ToList(), account.OpenRouterKeySet, Cut(account.OpenRouterModel, 120)),
+                Take(account.Models, MaxModels).Select(m => Cut(m, 80)).ToList(), account.OpenRouterKeySet, Cut(account.OpenRouterModel, 120))
+            {
+                AnthropicKeySet = account.AnthropicKeySet, AnthropicModel = Cut(account.AnthropicModel, 120),
+                XaiKeySet = account.XaiKeySet, XaiModel = Cut(account.XaiModel, 120),
+            },
             new SettingsVoice(Cut(voice.Voice, 80), voices, Math.Clamp(double.IsFinite(voice.Speed) ? voice.Speed : 1, 0.5, 1.5),
                 voice.Captions, voice.ReadReplies, CutOrNull(voice.OutputDeviceId, 160), Devs(voice.OutputDevices, voice.OutputDeviceId)),
             new SettingsMicrophone(CutOrNull(mic.DeviceId, 160), Devs(mic.Devices, mic.DeviceId), mic.Whisper,

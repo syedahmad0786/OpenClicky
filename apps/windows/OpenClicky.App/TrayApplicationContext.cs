@@ -98,7 +98,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
                 ? DictationWhisperPlan() is { } dictation
                     ? new LocalWhisperSttClient(NewSttMic(), _whisperRuntime, dictation, WhisperPrompt.FromDictionary(_settings.DictionaryWords ?? []), Log)
                     : _settings.UseWindowsSpeech ? new LocalSpeechSttClient() : null
-                : _settings.UseWindowsSpeech || _settings.AuthProvider == AuthProvider.ChatGPT
+                : _settings.UseWindowsSpeech || _settings.AuthProvider != AuthProvider.OpenRouter
                 ? TalkWhisperPlan() is { } talk
                     ? new LocalWhisperSttClient(NewSttMic(), _whisperRuntime, talk, log: Log)
                     : new LocalSpeechSttClient()
@@ -430,12 +430,16 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             _settings.DebugTranscriptOverride = null;
     }
 
+    private string ProviderLabel() => _settings.AuthProvider == AuthProvider.Anthropic ? "Claude" : "Grok";
+
     private void RefreshConnection()
     {
         var status = OfflineTalkClient.IsEnvEnabled() || OfflineAgentPlanner.IsEnvEnabled()
             ? "Offline fixture launch · canned responses"
             : _settings.AuthProvider == AuthProvider.ChatGPT
                 ? (ProviderFactory.IsChatGptSignedIn(_secrets) ? "ChatGPT plan · screen replies: " + (string.IsNullOrWhiteSpace(_settings.ResolveTalkModel()) ? "choose a model in Settings" : _settings.ResolveTalkModel()) : "ChatGPT · Continue with ChatGPT in Settings")
+                : _settings.AuthProvider is AuthProvider.Anthropic or AuthProvider.Xai
+                    ? (ProviderFactory.ApiKeyFor(_settings.AuthProvider, _secrets) is null ? $"{ProviderLabel()} · add your API key in Settings" : $"{ProviderLabel()} key saved · " + _settings.ResolveVisionModel())
                 : string.IsNullOrWhiteSpace(_settings.OpenRouterApiKey) ? "Connect a provider in Settings · demos work without a key" : "OpenRouter key saved · " + _settings.ResolveVisionModel();
         _home.SetConnection(status);
         _home.SetMicrophone((string.IsNullOrWhiteSpace(_settings.MicrophoneDeviceId) ? "Windows default · " : "") + NAudioMicrophoneRecorder.DeviceName(_settings.MicrophoneDeviceId), TalkWhisperPlan() is not null);
@@ -669,9 +673,12 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             : ProviderFactory.CreateAgentPlanner(_settings, _secrets, Log);
         if (planner is null)
         {
-            var msg = _settings.AuthProvider == AuthProvider.ChatGPT
-                ? "Continue with ChatGPT in Settings to run Agent tasks."
-                : "Add your OpenRouter API key in Settings, or select ChatGPT plan.";
+            var msg = _settings.AuthProvider switch
+            {
+                AuthProvider.ChatGPT => "Continue with ChatGPT in Settings to run Agent tasks.",
+                AuthProvider.Anthropic or AuthProvider.Xai => $"Add your {ProviderLabel()} API key in Settings → Account to run Agent tasks.",
+                _ => "Add your OpenRouter API key in Settings, or select ChatGPT plan.",
+            };
             _overlay.ShowResponding(msg);
             _talk.ReportAssistantMessage(msg);
             return Task.CompletedTask;

@@ -19,7 +19,7 @@ public enum NotchCardKind { Activity, TextResponse, JobUpdate, NeedsYou, MutedSp
 public enum CardActionStyle { Primary, Secondary, Danger }
 public enum DocumentKind { Markdown, Text, Csv, Pdf }
 public enum UpdateState { Idle, Checking, Available, Downloading, Ready, UpToDate, Error }
-public enum AccountProvider { Chatgpt, Openrouter }
+public enum AccountProvider { Chatgpt, Openrouter, Anthropic, Xai }
 public enum DeviceState { Active, Unavailable }
 public enum WhisperState { Missing, Downloading, Ready }
 public enum HotkeyTrigger { Hold, DoubleTap }
@@ -113,7 +113,14 @@ public sealed record RoutineView(string Id, string Title, string Schedule, strin
 
 public sealed record SettingsAccount(
     AccountProvider Provider, string? SignedInAs, string Model, string QuickModel, IReadOnlyList<string> Models,
-    bool OpenRouterKeySet, string OpenRouterModel);
+    bool OpenRouterKeySet, string OpenRouterModel)
+{
+    /// <summary>Claude (Anthropic) and Grok (xAI): whether a key is saved (never the key) and the model id.</summary>
+    public bool AnthropicKeySet { get; init; }
+    public string AnthropicModel { get; init; } = "";
+    public bool XaiKeySet { get; init; }
+    public string XaiModel { get; init; } = "";
+}
 
 public sealed record SettingsVoice(
     string Voice, IReadOnlyList<VoiceOption> Voices, double Speed, bool Captions, bool ReadReplies,
@@ -231,7 +238,7 @@ public static class ShellIntentParser
     /// <summary>settings.action allow-list.</summary>
     public static readonly IReadOnlyList<string> SettingsActions =
     [
-        "signIn", "signOut", "refreshModels", "manageUsage", "secret.edit", "testMic", "downloadWhisper", "downloadWhisperMultilingual", "downloadWhisperAccurate", "playTestSound",
+        "signIn", "signOut", "refreshModels", "manageUsage", "secret.edit", "secret.remove", "testMic", "downloadWhisper", "downloadWhisperMultilingual", "downloadWhisperAccurate", "playTestSound",
         "previewVoice", "clearHistory", "exportMemory", "openNotes", "openClipboard", "openTasks", "chooseAgentFolder",
         "resetAgentFolder", "openPrivacySetting", "routine.run", "routine.pause", "routine.resume", "routine.delete",
         "connector.add", "connector.test", "connector.remove", "connector.signIn", "connector.label", "chrome.setup", "recordHotkey", "resetHotkeys", "openLogs",
