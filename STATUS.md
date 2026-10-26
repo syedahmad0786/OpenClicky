@@ -18,7 +18,10 @@
   - Model self-switch (9b33f80): `[MODEL:id]` switches the ChatGPT quick model to one the account lists; live: Luna → Sol → Luna (Ahmad's setting restored).
   - Claude/Grok API-key providers (cae078f, merged 03ac559): native Anthropic Messages client, xAI via the OpenAI-compatible client; keys only in Credential Manager. Account page checked live; no real Anthropic/xAI calls made (no keys).
   - Gate at 03ac559: Release 0 warnings; Core 2298, Input 48, vitest 346; shell build OK.
-- Pending: notes/tasks/clipboard screens into the shell (background agent); voice still untested by me (injected keys are ignored by design).
+  - Notes, Clipboard shelf, Tasks and Memory are real shell settings pages (screens-into-shell, merged 43492dd); openNotes/openTasks/openClipboard open them. Live: all four render Ahmad's data; a test note was added and deleted. Still classic: shelf "paste into another app", the artifact workspace.
+  - Fixed (528383d): neither clipboard collector honoured private-copy flags (password managers); both now skip them (`--clipboard-private` smoke).
+  - Gate at 528383d: Release 0 warnings; Core 2319, Input 48, vitest 353; shell build OK; clipboard smokes pass.
+- Not verified by me: voice (injected keys are ignored by design); real Anthropic/xAI calls (no keys); clipboard collection live (switch left off).
 - Next: Ahmad's native acceptance pass on the `bin\x64\Release` build; then decide on pushing/PR.
 
 ## 2026-10-24 — phase two: companions, jobs, routines, connectors
