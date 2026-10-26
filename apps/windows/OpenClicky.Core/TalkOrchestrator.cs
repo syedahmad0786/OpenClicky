@@ -12,6 +12,15 @@ public sealed class TalkOrchestrator : IDisposable
     private static readonly TimeSpan FinalCueLine = TimeSpan.FromSeconds(0.8);
     /// <summary>Said when a reply was only drawing (or only a point): the generic "couldn't display" line would be wrong.</summary>
     public const string DrawnOnlyReply = "There, I've marked it on your screen.", PointedOnlyReply = "It's right here.";
+
+    /// <summary>Why no model can answer, for the provider actually chosen (a Claude or Grok choice without a key must not say "ChatGPT").</summary>
+    public static string NoClientMessage(AuthProvider provider) => provider switch
+    {
+        AuthProvider.Anthropic => "Claude is selected but no Anthropic API key is saved. Add one in Settings → Account, or switch the provider back to ChatGPT plan.",
+        AuthProvider.Xai => "Grok is selected but no xAI API key is saved. Add one in Settings → Account, or switch the provider back to ChatGPT plan.",
+        AuthProvider.OpenRouter => "OpenRouter is selected but no OpenRouter key is saved. Add one in Settings → Account, or switch the provider back to ChatGPT plan.",
+        _ => "Continue with ChatGPT in Settings to ask about your screen. The pointing demo works before sign-in.",
+    };
     /// <summary>A highlight gesture older than this belongs to an earlier question.</summary>
     private static readonly TimeSpan HighlightMaxAge = TimeSpan.FromSeconds(10);
     /// <summary>Guards <see cref="Drawing"/>: speech cues, the end of a turn, Esc and the stale-screen watch all change it.</summary>
@@ -848,7 +857,7 @@ public sealed class TalkOrchestrator : IDisposable
             var talk = _talkFactory();
             if (talk is null)
             {
-                ReportAssistantMessage("Continue with ChatGPT in Settings to ask about your screen. The pointing demo works before sign-in.");
+                ReportAssistantMessage(NoClientMessage(settings.AuthProvider));
                 return;
             }
             _overlay.Hide();

@@ -46,7 +46,7 @@ export function MicrophonePage({ state }: { state: ShellState }) {
           {m.whisper === "ready" ? <Badge>Ready</Badge> : null}
         </Row>
         {m.whisper === "downloading" ? <div className="settings-meter settings-meter--progress"><Meter value={m.whisperProgress} max={1} label="Download progress" /></div> : null}
-        <Row title="More accurate English voice" description="Hears names and unusual words better when you talk or dictate in English. A 465 MB download that runs on this PC; replies can take a moment longer.">
+        <Row title="More accurate English voice" description="Hears names and unusual words better when you talk or dictate in English. A 465 MB download that runs on this PC. It is slower: words are recognised after you stop speaking (no live captions), and you can't interrupt a spoken reply.">
           {m.accurate === "missing" ? <PillButton onClick={() => act("downloadWhisperAccurate")}>Download (465 MB)</PillButton> : null}
           {m.accurate === "downloading" ? <Badge tone="muted">{`Downloading… ${Math.round(m.accurateProgress * 100)}%`}</Badge> : null}
           {m.accurate === "ready"

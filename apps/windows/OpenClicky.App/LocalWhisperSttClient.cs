@@ -98,7 +98,9 @@ internal sealed class LocalWhisperSttClient : ILiveSttClient
             catch (OperationCanceledException) { }
             catch (Exception ex) { if (!session.IsCancellationRequested) ListeningFailed?.Invoke(ex); }
         });
-        _previews = Task.Run(async () =>
+        // Each preview re-reads the whole recording; on small.en (about 1 s of decoding per second of audio on an 8-core laptop)
+        // they queue behind each other and the final pass, and turns stall for tens of seconds. That model decodes once, at the end.
+        if (plan.Model != WhisperModels.SmallEnglish) _previews = Task.Run(async () =>
         {
             try
             {

@@ -1531,6 +1531,23 @@ public class CompanionWorkflowTests
     }
 
     [Theory]
+    [InlineData(AuthProvider.Xai, "Grok is selected but no xAI API key is saved")]
+    [InlineData(AuthProvider.Anthropic, "Claude is selected but no Anthropic API key is saved")]
+    [InlineData(AuthProvider.ChatGPT, "Continue with ChatGPT in Settings")]
+    public async Task NoModelClientSaysWhatIsMissingForTheChosenProvider(AuthProvider provider, string expected)
+    {
+        var messages = new List<string>();
+        using var talk = new TalkOrchestrator(new Hotkey(), new Overlay(), new Capture(), new Mic(), () => null,
+            () => null, new Tts(), () => new AppSettings { PersistConversationHistory = false, AuthProvider = provider }, log: _ => { },
+            windowBounds: () => (0, 0, 200, 100));
+        talk.MessageReceived += (role, text) => { if (role == "OpenClicky") messages.Add(text); };
+
+        await talk.SubmitTextAsync("what is this", false);
+
+        Assert.Contains(messages, m => m.StartsWith(expected, StringComparison.Ordinal));
+    }
+
+    [Theory]
     [InlineData("[DRAW:circle id=oil x=40 y=40 r=12]", TalkOrchestrator.DrawnOnlyReply)]
     [InlineData("[POINT:40,40:engine oil]", TalkOrchestrator.PointedOnlyReply)]
     public async Task TagOnlyReplySaysWhatItDidNotThatItFailed(string reply, string expected)

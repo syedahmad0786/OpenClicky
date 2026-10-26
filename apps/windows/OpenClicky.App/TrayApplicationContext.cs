@@ -110,7 +110,8 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             Log,
             ForegroundWindowInfo.GetCompanionTitle, ForegroundWindowInfo.GetBounds,
             userContext: () => MemoryContext() + ModelContext(), requestInterceptor: HandleTaskVoiceAsync, windowHandle: ForegroundWindowInfo.GetHandle,
-            canInterruptSpeech: () => TalkWhisperPlan() is not null && !_dictationActive,
+            // Barge-in transcribes continuously while a reply plays: too slow on small.en, so it is off with the accurate voice.
+            canInterruptSpeech: () => TalkWhisperPlan() is { } plan && plan.Model != WhisperModels.SmallEnglish && !_dictationActive,
             interruptionSttFactory: () => new LocalWhisperSttClient(
                 new EchoCancelledMicrophoneRecorder(() => _settings.MicrophoneDeviceId, Log), _whisperRuntime,
                 TalkWhisperPlan() ?? new(WhisperModels.English, "en"), log: Log),

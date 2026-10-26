@@ -50,6 +50,17 @@ if (args.Contains("--dictation-ui-state")) return DictationPanelCheck.Run();
 if (args.Contains("--connectors")) return await ConnectorsCheck.RunAsync();
 if (args.Contains("--clipboard-shelf")) return ClipboardShelfFormCheck.Run();
 if (args.Contains("--clipboard-sequence")) return ClipboardSequenceCheck.Run();
+if (args.Contains("--chatgpt-session-state"))
+{
+    // Diagnostic: which HasUsableSession condition fails. Prints flags only, never a token.
+    var c = ChatGptCredentialStore.Load(new WindowsCredentialSecretStore());
+    if (c is null) { Console.WriteLine("no saved ChatGPT credential"); return 1; }
+    Console.WriteLine($"usable={c.HasUsableSession} access={!string.IsNullOrWhiteSpace(c.AccessToken)} refresh={!string.IsNullOrWhiteSpace(c.RefreshToken)} "
+        + $"clientId={!string.IsNullOrWhiteSpace(c.ClientId)} dynamicClient={c.ClientId == "dynamic_agent_client"} subject={!string.IsNullOrWhiteSpace(c.Subject)} "
+        + $"issuerOk={c.Issuer == "https://auth.openai.com"} planScope={c.Scopes?.Contains("chatgpt.tokens.use.direct") == true} scopes={c.Scopes?.Count ?? 0} "
+        + $"expiresAt={c.AccessTokenExpiresAt:u} savedAt={c.SavedAt:u}");
+    return 0;
+}
 if (args.Contains("--clipboard-private"))
 {
     // Writes three test copies to the clipboard and puts the user's text back afterwards.
