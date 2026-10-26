@@ -109,6 +109,23 @@ public class CompanionWorkflowTests
     }
 
     [Fact]
+    public async Task AskedForA3dCylinderButNoBlockCameBackStillDrawsTheCylinder()
+    {
+        var placements = new List<FigurePlacement>();
+        using var talk = new TalkOrchestrator(new Hotkey(), new Overlay(), new Capture(), new Mic(), () => null,
+            () => new Talk((_, _) => Task.FromResult("i'll place a three-dimensional cylinder on your screen.")),
+            new Tts(), () => new AppSettings { PersistConversationHistory = false }, log: _ => { },
+            windowBounds: () => (0, 0, 200, 100));
+        talk.FigureShown += p => { lock (placements) placements.Add(p); };
+
+        await talk.SubmitTextAsync("show a 3d cylinder", false);
+
+        var figure = Assert.Single(talk.Drawing.Parts).Op.Figure!;
+        Assert.Equal(FigureKind.Cylinder, Assert.Single(figure.Parts).Kind);
+        lock (placements) Assert.Equal("Cylinder", Assert.Single(placements).Title);
+    }
+
+    [Fact]
     public async Task LabelledCircleIsFittedToTheTextTheScreenReaderFound()
     {
         var log = new List<string>();

@@ -223,18 +223,50 @@ internal sealed class ShellSurfaceWindow : Form
     public void ActivateForInput()
     {
         var foreground = GetForegroundWindow();
-        if (foreground != Handle) _previousForeground = foreground;
+        // Never remember one of our own windows (the taskbar-button owner, the classic window): handing focus back to it
+        // would leave OpenClicky in front, and a typed request would then refuse to look at the screen.
+        if (foreground != Handle && !OpenClicky.Agent.ForegroundWindowInfo.IsCurrentProcessWindow(foreground)) _previousForeground = foreground;
         SetForegroundWindow(Handle);
         _controller?.MoveFocus(CoreWebView2MoveFocusReason.Programmatic);
     }
 
-    /// <summary>Gives the foreground back to the window that had it before <see cref="ActivateForInput"/>.</summary>
+    /// <summary>
+    /// Gives the foreground back to the window that had it before <see cref="ActivateForInput"/>, or, when none of another app
+    /// was remembered, to the topmost visible window of another app. Only while the surface itself holds the foreground.
+    /// </summary>
     public void ReleaseInput()
     {
-        if (GetForegroundWindow() == Handle && _previousForeground != IntPtr.Zero && IsWindow(_previousForeground))
-            SetForegroundWindow(_previousForeground);
+        if (GetForegroundWindow() == Handle)
+        {
+            var target = _previousForeground != IntPtr.Zero && IsWindow(_previousForeground) ? _previousForeground : TopOtherAppWindow();
+            if (target != IntPtr.Zero) SetForegroundWindow(target);
+        }
         _previousForeground = IntPtr.Zero;
     }
+
+    /// <summary>The first window in z-order that a user would call an app: visible, titled, not minimised, not a tool window, not ours.</summary>
+    private static IntPtr TopOtherAppWindow()
+    {
+        var found = IntPtr.Zero;
+        EnumWindows((hwnd, _) =>
+        {
+            if (!IsWindowVisible(hwnd) || IsIconic(hwnd) || GetWindowTextLength(hwnd) == 0
+                || ((long)GetWindowLongPtr(hwnd, GwlExStyle) & WsExToolWindow) != 0
+                || OpenClicky.Agent.ForegroundWindowInfo.IsCurrentProcessWindow(hwnd)) return true;
+            found = hwnd;
+            return false;
+        }, IntPtr.Zero);
+        return found;
+    }
+
+    private const int GwlExStyle = -20;
+    private const long WsExToolWindow = 0x00000080;
+    private delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hwnd);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] private static extern bool IsIconic(IntPtr hwnd);
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] private static extern int GetWindowTextLength(IntPtr hwnd);
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
 
     /// <summary>Moves the surface to cover another monitor.</summary>
     public void MoveToScreen(Screen screen)

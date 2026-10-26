@@ -47,6 +47,24 @@ public class FigureStageTests
         Assert.Null(FigureStage.FromScene3d(chart.RootElement, 1, Shot));
     }
 
+    [Theory]
+    [InlineData("show a 3d cylinder", FigureKind.Cylinder, "Cylinder")]
+    [InlineData("Can you show me a three-dimensional gear?", FigureKind.Gear, "Gear")]
+    [InlineData("make a 3D pyramid", FigureKind.Cone, "Pyramid")]
+    public void ARequestForOneSimpleShapeBuildsThatShape(string request, FigureKind kind, string title)
+    {
+        var figure = FigureStage.FromRequest(request, 1, Shot)!;
+        Assert.Equal(kind, Assert.Single(figure.Parts).Kind);
+        Assert.Equal(title, figure.Title);
+        Assert.True(figure.Spin);
+    }
+
+    [Theory]
+    [InlineData("show a cylinder")]                       // not asked in 3d
+    [InlineData("draw a 3d engine with pistons")]          // not one simple shape: the model's figure, or nothing
+    [InlineData("")]
+    public void OtherRequestsBuildNothing(string request) => Assert.Null(FigureStage.FromRequest(request, 1, Shot));
+
     [Fact]
     public void SentenceNamesTheScreenOnlyWhenThereAreSeveral()
     {

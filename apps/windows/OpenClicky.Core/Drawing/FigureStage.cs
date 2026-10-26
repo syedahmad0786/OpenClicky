@@ -76,6 +76,45 @@ public static class FigureStage
         return new FigureSpec(null, box, screen, Spin: true, title ?? (shape == "pyramid" ? "Pyramid" : "Cube"), [part]);
     }
 
+    private static readonly (string Pattern, FigureKind Kind, string Title, Vector3 Size)[] Primitives =
+    [
+        (@"\b(cube|box)\b", FigureKind.Box, "Cube", Vector3.One),
+        (@"\b(sphere|ball)\b", FigureKind.Sphere, "Sphere", Vector3.One),
+        (@"\bcylinder\b", FigureKind.Cylinder, "Cylinder", new(1, 1.6f, 1)),
+        (@"\bpyramid\b", FigureKind.Cone, "Pyramid", new(1.4f, 1.2f, 1.4f)),
+        (@"\bcone\b", FigureKind.Cone, "Cone", new(1, 1.4f, 1)),
+        (@"\b(torus|donut|doughnut)\b", FigureKind.Torus, "Torus", new(1.6f, 0.5f, 1.6f)),
+        (@"\b(capsule|pill)\b", FigureKind.Capsule, "Capsule", new(0.8f, 1.8f, 0.8f)),
+        (@"\b(gear|cog)\b", FigureKind.Gear, "Gear", new(1.6f, 0.4f, 1.6f)),
+        (@"\b(spring|coil)\b", FigureKind.Spring, "Spring", new(0.9f, 1.8f, 0.9f)),
+    ];
+
+    /// <summary>
+    /// A request for one simple 3D shape ("show a 3d cylinder") as a spinning figure, for when the reply carried no figure
+    /// block: the model sometimes says it placed one without writing it. Null unless the request says 3d and names a primitive.
+    /// </summary>
+    public static FigureSpec? FromRequest(string request, int screen, ScreenCaptureResult shot)
+    {
+        const System.Text.RegularExpressions.RegexOptions options = System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.CultureInvariant;
+        if (string.IsNullOrWhiteSpace(request) || request.Length > 500
+            || !System.Text.RegularExpressions.Regex.IsMatch(request, @"\b(3d|3-d|three[\s-]?dimensional)\b", options, TimeSpan.FromMilliseconds(50))) return null;
+        foreach (var (pattern, kind, title, size) in Primitives)
+        {
+            if (!System.Text.RegularExpressions.Regex.IsMatch(request, pattern, options, TimeSpan.FromMilliseconds(50))) continue;
+            var parameters = kind switch
+            {
+                FigureKind.Gear => new Dictionary<string, double> { ["teeth"] = 14 },
+                FigureKind.Spring => new Dictionary<string, double> { ["coils"] = 6 },
+                _ => new Dictionary<string, double>(),
+            };
+            var part = new FigurePart(kind, size, Vector3.Zero, new Vector3(kind == FigureKind.Box ? 20 : 15, 24, 0), "", null, parameters, null);
+            var side = 0.45f * Math.Min(shot.PixelWidth, shot.PixelHeight);
+            var box = new Box(shot.PixelWidth * 0.72f - side / 2, shot.PixelHeight * 0.5f - side / 2, side, side);
+            return new FigureSpec(null, box, screen, Spin: true, title, [part]);
+        }
+        return null;
+    }
+
     internal static int CursorScreen(IReadOnlyList<ScreenCaptureResult> screens)
     {
         for (var i = 0; i < screens.Count; i++) if (screens[i].IsCursorMonitor) return i + 1;

@@ -1095,6 +1095,13 @@ public sealed class TalkOrchestrator : IDisposable
             // A 3D artifact in a screen turn floats on screen like any figure; it never opens the classic window.
             var stagedFigure = !selfContainedVisual && visual.Artifact is { } scene && screens.Count > 0
                 ? FigureStage.FromScene3d(scene, CursorScreenNumber(screens), screens[CursorScreenNumber(screens) - 1]) : null;
+            // Asked for a simple 3D shape but no figure came back: draw that shape rather than leave the claim empty.
+            if (!selfContainedVisual && stagedFigure is null && figured.Figures.Count == 0 && screens.Count > 0
+                && FigureStage.FromRequest(transcript, CursorScreenNumber(screens), screens[CursorScreenNumber(screens) - 1]) is { } asked)
+            {
+                stagedFigure = asked;
+                _log("figure_fallback=" + asked.Parts[0].Kind.ToString().ToLowerInvariant());
+            }
             var annotated = ScreenAnnotations.Parse(visual.PlainText);
             var parsed = PointParser.Parse(annotated.Text);
             var spoken = string.IsNullOrWhiteSpace(parsed.SpokenText)
@@ -1132,7 +1139,9 @@ public sealed class TalkOrchestrator : IDisposable
             IReadOnlyList<DrawOp> finalOps = selfContainedVisual ? []
                 : [.. DrawCommandParser.FromMarks(annotated.Marks), .. figured.Figures.Select(FigureBlockParser.ToOp),
                     .. (stagedFigure is null ? [] : new[] { FigureBlockParser.ToOp(stagedFigure) })];
-            _log($"annotations={annotated.Marks.Count} figures={figured.Figures.Count}");
+            // figure_blocks > figures means the model wrote a block the parser refused (bad JSON or values): it is not a claim without a block.
+            var figureBlocks = System.Text.RegularExpressions.Regex.Count(withoutRoutine, "```figure", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            _log($"annotations={annotated.Marks.Count} figures={figured.Figures.Count} figure_blocks={figureBlocks}");
             cues.Update(raw); // a reply that was not streamed is cued here
             if (walkthrough is not null) ApplyDrawing([], screens, FinalCueLine, clearFirst: true); // each step starts clean
             var remainder = speech.TakeRemainder(spoken);
