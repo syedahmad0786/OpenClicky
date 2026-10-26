@@ -496,8 +496,9 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
     {
         if (_clipboardShelf is null || _clipboardShelf.IsDisposed)
         {
+            ReleaseShelf(); // the classic window opens its own copy of the shelf; the notch page reopens it after
             _clipboardShelf = new ClipboardShelfForm();
-            _clipboardShelf.FormClosed += (_, _) => _clipboardShelf = null;
+            _clipboardShelf.FormClosed += (_, _) => { _clipboardShelf = null; RequestShellPush(); };
             _clipboardShelf.Show(_home);
         }
         else
@@ -963,6 +964,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         if (runs.Count == 0) return;
         _home.MinimizeForRequest();
         _settingsForm.Hide();
+        _shellSurface?.Window.ReleaseInput(); // from the notch's Tasks page: the window it had focus from comes back first
         var revisions = runs.Select(run => run.Control.PauseRevision).ToList();
         var destination = ForegroundWindowInfo.GetHandle();
         try { await Task.Delay(3000, _lifetime.Token); }
@@ -995,12 +997,14 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             var content = command.Text;
             if (content.Length == 0) { Reply("Use note: followed by the text to save."); return true; }
             LocalNotesStore.Add(content[..Math.Min(60, content.Length)], content);
+            OnUi(ForgetNotesAndMemory);
             Reply("Saved in local Notes. No screenshot or note content was sent to an AI provider.");
             return true;
         }
         if (command.Kind == TaskVoiceCommandKind.Remember)
         {
             CompanionMemoryStore.AddFact(command.Text);
+            OnUi(ForgetNotesAndMemory);
             Reply("Saved as an explicit local memory for future requests. You can edit or delete it in Memory.");
             return true;
         }

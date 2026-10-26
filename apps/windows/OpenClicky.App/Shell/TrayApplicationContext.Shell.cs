@@ -81,7 +81,7 @@ internal sealed partial class TrayApplicationContext : IShellHost
         GeneralBehaviour.WarmAccountDisplayName(() => OnUi(RequestShellPush));
         _talk.StateChanged += _ => OnUi(RequestShellPush);
         _home.AccessChanged += RequestShellPush;
-        _talk.TurnCommitted += turn => OnUi(() => { _shellTurns = null; _shell?.EndTurn(turn.Assistant); });
+        _talk.TurnCommitted += turn => OnUi(() => { _shellTurns = null; _memoryView = null; _shell?.EndTurn(turn.Assistant); }); // a turn may have learned a memory
         _talk.MessageReceived += (role, text) => OnUi(() =>
         {
             // Startup history replay happens before the shell is active; history reaches it through state.
