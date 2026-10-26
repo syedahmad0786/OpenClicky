@@ -115,7 +115,7 @@ describe("shell contract", () => {
 
   it("knows every sidebar section and settings action", () => {
     expect(settingsSections).toHaveLength(17);
-    expect(settingsActions).toHaveLength(32);
+    expect(settingsActions).toHaveLength(33);
     expect(settingsSections).not.toContain("billing");
     expect(settingsActions).not.toContain("formatDisk");
   });

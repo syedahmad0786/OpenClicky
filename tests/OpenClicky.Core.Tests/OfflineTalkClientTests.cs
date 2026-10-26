@@ -3,6 +3,7 @@ using OpenClicky.Providers;
 
 namespace OpenClicky.Core.Tests;
 
+[Collection("OfflineEnv")]
 public class OfflineTalkClientTests
 {
     [Fact]

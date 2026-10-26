@@ -129,6 +129,7 @@ internal sealed partial class TrayApplicationContext
             case "refreshModels": _ = RefreshModelsFromShellAsync(announce: true); break;
             case "manageUsage": OpenUrl(NativeSettings.UsageUrl); break;
             case "secret.edit": EditSecret(arg); break;
+            case "secret.remove": RemoveSecret(arg); break;
             case "testMic": StartMicTest(); break;
             case "downloadWhisper": _ = DownloadWhisperFromShellAsync(WhisperModels.English); break;
             case "downloadWhisperMultilingual": _ = DownloadWhisperFromShellAsync(WhisperModels.Multilingual); break;
@@ -231,24 +232,39 @@ internal sealed partial class TrayApplicationContext
         RequestShellPush();
     }
 
-    /// <summary>secret.edit for "openrouter" or "openai": masked native prompt, stored only in Credential Manager. Empty clears it.</summary>
+    /// <summary>secret.edit for "openrouter", "openai", "anthropic" or "xai": masked native prompt, stored only in Credential Manager. Empty clears it.</summary>
     private void EditSecret(string? arg)
     {
         if (SettingsActionArgs.SecretFor(arg) is not { } secret) { Log("settings: unknown secret"); return; }
         var (name, title) = secret;
-        var openAi = name == SecretNames.OpenAiApiKey;
-        var use = openAi ? " It is used only for OpenAI voices: with one selected, the text of each reply sentence is sent to api.openai.com to be spoken." : "";
+        var use = name switch
+        {
+            SecretNames.OpenAiApiKey => " It is used only for OpenAI voices: with one selected, the text of each reply sentence is sent to api.openai.com to be spoken.",
+            SecretNames.AnthropicApiKey => " Create one at console.anthropic.com. With Claude selected, your screenshots and what you say or type are sent to api.anthropic.com.",
+            SecretNames.XaiApiKey => " Create one at console.x.ai. With Grok selected, your screenshots and what you say or type are sent to api.x.ai.",
+            _ => "",
+        };
         if (Modal(() => NativeSettings.PromptSecret(title, $"Paste your {title}.{use} It is saved with Windows Credential Manager, never in settings or logs. Leave it empty to remove the key."), null)
             is not { Secret: var key }) return;
+        SaveSecret(name, title, key);
+    }
+
+    /// <summary>secret.remove: deletes the named key from Credential Manager (the page's Remove button).</summary>
+    private void RemoveSecret(string? arg)
+    {
+        if (SettingsActionArgs.SecretFor(arg) is not { } secret) { Log("settings: unknown secret"); return; }
+        SaveSecret(secret.Name, secret.Title, "");
+    }
+
+    /// <summary>Stores the key, or deletes it when empty; the OpenRouter key is also mirrored in memory for its clients.</summary>
+    private void SaveSecret(string name, string title, string key)
+    {
         if (key.Length == 0) _secrets.Delete(name);
         else _secrets.Set(name, key);
-        var label = openAi ? "OpenAI key" : "OpenRouter key";
-        if (!openAi)
-        {
-            _settings.OpenRouterApiKey = key.Length == 0 ? null : key;
-            RefreshConnection();
-        }
+        if (name == SecretNames.OpenRouterApiKey) _settings.OpenRouterApiKey = key.Length == 0 ? null : key;
+        if (name != SecretNames.OpenAiApiKey) RefreshConnection();
         SettingsProbe.Refresh();
+        var label = title.Replace(" API key", " key", StringComparison.Ordinal);
         _shell?.AddToast(key.Length == 0 ? $"{label} removed." : $"{label} saved.");
         RequestShellPush();
     }

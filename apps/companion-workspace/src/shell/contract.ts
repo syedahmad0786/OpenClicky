@@ -25,7 +25,7 @@ export const settingsSections = [
   "proactive",
 ] as const;
 export const settingsActions = [
-  "signIn", "signOut", "refreshModels", "manageUsage", "secret.edit", "testMic", "downloadWhisper", "downloadWhisperMultilingual", "downloadWhisperAccurate", "playTestSound",
+  "signIn", "signOut", "refreshModels", "manageUsage", "secret.edit", "secret.remove", "testMic", "downloadWhisper", "downloadWhisperMultilingual", "downloadWhisperAccurate", "playTestSound",
   "previewVoice", "clearHistory", "exportMemory", "openNotes", "openClipboard", "openTasks", "chooseAgentFolder",
   "resetAgentFolder", "openPrivacySetting", "routine.run", "routine.pause", "routine.resume", "routine.delete",
   "connector.add", "connector.test", "connector.remove", "connector.signIn", "connector.label", "chrome.setup", "recordHotkey", "resetHotkeys", "openLogs",
@@ -91,13 +91,17 @@ const hex = z.string().regex(/^#[0-9a-fA-F]{6}$/);
 
 const settingsViewSchema = z.object({
   account: z.object({
-    provider: z.enum(["chatgpt", "openrouter"]),
+    provider: z.enum(["chatgpt", "openrouter", "anthropic", "xai"]),
     signedInAs: text(160).nullable(),
     model: text(80),
     quickModel: text(80),
     models: z.array(text(80)).max(64),
     openRouterKeySet: z.boolean(),
     openRouterModel: text(120),
+    anthropicKeySet: z.boolean(),
+    anthropicModel: text(120),
+    xaiKeySet: z.boolean(),
+    xaiModel: text(120),
   }).strict(),
   voice: z.object({
     voice: text(80),

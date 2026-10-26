@@ -1,6 +1,6 @@
 {
   "sections": ["account", "general", "voice", "microphone", "dictation", "shortcuts", "cursor", "integrations", "agents", "routines", "access", "memory", "notes", "clipboard", "tasks", "advanced", "proactive"],
-  "actions": ["signIn", "signOut", "refreshModels", "manageUsage", "secret.edit", "testMic", "downloadWhisper", "downloadWhisperMultilingual", "downloadWhisperAccurate", "playTestSound", "previewVoice", "clearHistory", "exportMemory", "openNotes", "openClipboard", "openTasks", "chooseAgentFolder", "resetAgentFolder", "openPrivacySetting", "routine.run", "routine.pause", "routine.resume", "routine.delete", "connector.add", "connector.test", "connector.remove", "connector.signIn", "connector.label", "chrome.setup", "recordHotkey", "resetHotkeys", "openLogs"],
+  "actions": ["signIn", "signOut", "refreshModels", "manageUsage", "secret.edit", "secret.remove", "testMic", "downloadWhisper", "downloadWhisperMultilingual", "downloadWhisperAccurate", "playTestSound", "previewVoice", "clearHistory", "exportMemory", "openNotes", "openClipboard", "openTasks", "chooseAgentFolder", "resetAgentFolder", "openPrivacySetting", "routine.run", "routine.pause", "routine.resume", "routine.delete", "connector.add", "connector.test", "connector.remove", "connector.signIn", "connector.label", "chrome.setup", "recordHotkey", "resetHotkeys", "openLogs"],
   "theme": ["dark", "light"],
   "phase": ["idle", "listening", "thinking", "speaking", "working", "paused"],
   "tab": ["home", "chat", "settings", "document"],
@@ -12,7 +12,7 @@
   "cardActionStyle": ["primary", "secondary", "danger"],
   "documentKind": ["markdown", "text", "csv", "pdf"],
   "updateState": ["idle", "checking", "available", "downloading", "ready", "upToDate", "error"],
-  "accountProvider": ["chatgpt", "openrouter"],
+  "accountProvider": ["chatgpt", "openrouter", "anthropic", "xai"],
   "deviceState": ["active", "unavailable"],
   "whisperState": ["missing", "downloading", "ready"],
   "hotkeyTrigger": ["hold", "doubleTap"],

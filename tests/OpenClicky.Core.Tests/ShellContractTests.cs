@@ -223,6 +223,7 @@ public class ShellContractTests
         Assert.Equal("general", state.Notch.Section);
         Assert.Equal(AccountProvider.Chatgpt, s.Account.Provider);
         Assert.Equal("ahmad@example.com", s.Account.SignedInAs);
+        Assert.Equal((true, "claude-sonnet-5-5", false, "grok-4"), (s.Account.AnthropicKeySet, s.Account.AnthropicModel, s.Account.XaiKeySet, s.Account.XaiModel));
         Assert.Null(s.Voice.OutputDeviceId);
         Assert.False(s.Voice.Voices[1].Available);
         Assert.Equal(DeviceState.Unavailable, s.Microphone.Devices[1].State);
@@ -251,7 +252,7 @@ public class ShellContractTests
     public void EverySidebarSectionAndActionIsAccepted()
     {
         Assert.Equal(17, ShellContract.Sections.Count);
-        Assert.Equal(32, ShellIntentParser.SettingsActions.Count);
+        Assert.Equal(33, ShellIntentParser.SettingsActions.Count);
         foreach (var section in ShellContract.Sections)
             Assert.True(ShellIntentParser.TryParse($$"""{"kind":"settings.section","section":"{{section}}"}""", out _), section);
         foreach (var action in ShellIntentParser.SettingsActions)

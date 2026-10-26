@@ -140,6 +140,40 @@ it("Account (OpenRouter): key status, Change opens the native prompt, model post
   expect(posts("settings.patch")).toEqual([{ kind: "settings.patch", key: "account.openRouterModel", value: "openai/gpt-5" }]);
 });
 
+it("Account (Claude, Grok): providers offered; key rows post secret.edit / secret.remove; model posts on blur; says what leaves the PC", () => {
+  const posts = host();
+  const { rerender } = render(<SettingsPanel state={make("account")} />);
+  fireEvent.click(screen.getByRole("radio", { name: "Claude" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Grok" }));
+  expect(posts("settings.patch")).toEqual([
+    { kind: "settings.patch", key: "account.provider", value: "anthropic" },
+    { kind: "settings.patch", key: "account.provider", value: "xai" },
+  ]);
+
+  rerender(<SettingsPanel state={make("account", (s) => { s.settings.account.provider = "anthropic"; })} />);
+  expect(screen.getByText("Key saved")).toBeInTheDocument();
+  expect(screen.getByText(/sent to Anthropic \(api\.anthropic\.com\)/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Replace" }));
+  fireEvent.click(screen.getByRole("button", { name: "Remove Claude key" }));
+  const model = screen.getByRole("textbox", { name: "Claude model" });
+  expect(model).toHaveValue("claude-sonnet-5-5");
+  fireEvent.change(model, { target: { value: "claude-opus-5-5" } });
+  fireEvent.blur(model);
+
+  rerender(<SettingsPanel state={make("account", (s) => { s.settings.account.provider = "xai"; })} />);
+  expect(screen.queryByText("Key saved")).not.toBeInTheDocument();
+  expect(screen.getByText(/sent to xAI \(api\.x\.ai\)/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Add key" }));
+  expect(screen.getByRole("textbox", { name: "Grok model" })).toHaveValue("grok-4");
+
+  expect(posts("settings.action")).toEqual([
+    { kind: "settings.action", action: "secret.edit", arg: "anthropic" },
+    { kind: "settings.action", action: "secret.remove", arg: "anthropic" },
+    { kind: "settings.action", action: "secret.edit", arg: "xai" },
+  ]);
+  expect(posts("settings.patch").at(-1)).toEqual({ kind: "settings.patch", key: "account.anthropicModel", value: "claude-opus-5-5" });
+});
+
 it("Access: radio posts a patch but the selection stays at the state value; shows the one-line consequences", () => {
   const posts = host();
   render(<SettingsPanel state={make("access")} />);

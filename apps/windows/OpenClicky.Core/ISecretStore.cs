@@ -21,6 +21,12 @@ public static class SecretNames
     /// <summary>The user's OpenAI API key, used only for OpenAI voices (text to speech).</summary>
     public const string OpenAiApiKey = "openai-api-key";
 
+    /// <summary>The user's Anthropic API key, for Claude as the model provider.</summary>
+    public const string AnthropicApiKey = "anthropic-api-key";
+
+    /// <summary>The user's xAI API key, for Grok as the model provider.</summary>
+    public const string XaiApiKey = "xai-api-key";
+
     /// <summary>JSON <see cref="ChatGptCredential"/> blob (access/refresh/id tokens).</summary>
     public const string ChatGptOAuth = "chatgpt-oauth";
 }
