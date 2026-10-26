@@ -50,6 +50,38 @@ if (args.Contains("--dictation-ui-state")) return DictationPanelCheck.Run();
 if (args.Contains("--connectors")) return await ConnectorsCheck.RunAsync();
 if (args.Contains("--clipboard-shelf")) return ClipboardShelfFormCheck.Run();
 if (args.Contains("--clipboard-sequence")) return ClipboardSequenceCheck.Run();
+if (args.Contains("--clipboard-private"))
+{
+    // Writes three test copies to the clipboard and puts the user's text back afterwards.
+    string? failure = null;
+    var ui = new Thread(() =>
+    {
+        var saved = Clipboard.ContainsText() ? Clipboard.GetText() : null;
+        try
+        {
+            var secret = new DataObject();
+            secret.SetText("smoke-secret", TextDataFormat.UnicodeText);
+            secret.SetData("ExcludeClipboardContentFromMonitorProcessing", new MemoryStream(new byte[4]));
+            Clipboard.SetDataObject(secret, copy: true);
+            if (!OpenClicky.App.ClipboardCollector.IsMarkedPrivate()) failure = "a password-manager style copy was not seen as private";
+            var noHistory = new DataObject();
+            noHistory.SetText("smoke-no-history", TextDataFormat.UnicodeText);
+            noHistory.SetData("CanIncludeInClipboardHistory", new MemoryStream(BitConverter.GetBytes(0u)));
+            Clipboard.SetDataObject(noHistory, copy: true);
+            if (failure is null && !OpenClicky.App.ClipboardCollector.IsMarkedPrivate()) failure = "CanIncludeInClipboardHistory=0 was not seen as private";
+            Clipboard.SetText("smoke-plain", TextDataFormat.UnicodeText);
+            if (failure is null && OpenClicky.App.ClipboardCollector.IsMarkedPrivate()) failure = "a plain copy was seen as private";
+        }
+        finally
+        {
+            if (saved is null) Clipboard.Clear(); else Clipboard.SetText(saved);
+        }
+    });
+    ui.SetApartmentState(ApartmentState.STA); ui.Start(); ui.Join();
+    if (failure is not null) { Console.Error.WriteLine("FAIL " + failure); return 1; }
+    Console.WriteLine("PASS private copies (exclude flag, history off) are recognised; a plain copy is not; clipboard text restored");
+    return 0;
+}
 if (args.Contains("--automatic-dictation")) return AutomaticDictationCheck.Run();
 if (args.Contains("--whisper-warm-reuse")) return await WhisperWarmReuseCheck.RunAsync();
 if (args.Length == 3 && args[0] == "--visual-workspace") return VisualWorkspaceCheck.Run(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]));

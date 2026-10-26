@@ -122,6 +122,7 @@ internal sealed class ClipboardShelfForm : Form
     {
         if (ConsumeAppClipboardWriteSuppression(DateTimeOffset.UtcNow)) return;
         if (ForegroundWindowInfo.IsCurrentProcessForeground()) return;
+        if (ClipboardCollector.IsMarkedPrivate()) { _status.Text = "A copy marked private (for example from a password manager) was not collected."; return; }
         var source = ForegroundWindowInfo.GetTitle();
         if (AgentDenyList.IsDenied(source, _excluded)) { _status.Text = "Copy ignored from a protected window."; return; }
         try { if (Clipboard.ContainsText(TextDataFormat.UnicodeText)) Add(Clipboard.GetText(TextDataFormat.UnicodeText), source); }

@@ -217,7 +217,7 @@ internal sealed partial class TrayApplicationContext
     private void CollectClipboard()
     {
         if (_collector?.On != true || _shelf is not { } shelf || _clipboardShelf is { IsDisposed: false }) return;
-        if (ClipboardCollector.OwnedByThisProcess() || ForegroundWindowInfo.IsCurrentProcessForeground()) return;
+        if (ClipboardCollector.OwnedByThisProcess() || ForegroundWindowInfo.IsCurrentProcessForeground() || ClipboardCollector.IsMarkedPrivate()) return;
         var source = ForegroundWindowInfo.GetTitle();
         if (AgentDenyList.IsDenied(source, AgentDenyList.ParseExtraFragments(_settings.AgentDenyListExtra))) return;
         string text;
@@ -317,6 +317,27 @@ internal sealed class ClipboardCollector(Action changed) : NativeWindow, IDispos
 
     public void Dispose() => Stop();
 
+    private static readonly uint ExcludeFromMonitors = RegisterClipboardFormat("ExcludeClipboardContentFromMonitorProcessing");
+    private static readonly uint ViewerIgnore = RegisterClipboardFormat("Clipboard Viewer Ignore");
+    private static readonly uint IncludeInHistory = RegisterClipboardFormat("CanIncludeInClipboardHistory");
+
+    /// <summary>
+    /// The copy is marked private by the app that made it, the way password managers and Windows' own clipboard history agree on:
+    /// "ExcludeClipboardContentFromMonitorProcessing" or "Clipboard Viewer Ignore" present, or "CanIncludeInClipboardHistory" set to 0.
+    /// Such a copy is never collected.
+    /// </summary>
+    public static bool IsMarkedPrivate()
+    {
+        if (IsClipboardFormatAvailable(ExcludeFromMonitors) || IsClipboardFormatAvailable(ViewerIgnore)) return true;
+        if (!IsClipboardFormatAvailable(IncludeInHistory)) return false;
+        try
+        {
+            return Clipboard.GetData("CanIncludeInClipboardHistory") is not MemoryStream stream
+                || stream.Length < 4 || BitConverter.ToUInt32(stream.ToArray(), 0) == 0;
+        }
+        catch (ExternalException) { return true; } // unreadable flag: treat as private
+    }
+
     /// <summary>The clipboard was last written by a window of this process (a Copy button, dictation, Talk's copy).</summary>
     public static bool OwnedByThisProcess()
     {
@@ -333,5 +354,7 @@ internal sealed class ClipboardCollector(Action changed) : NativeWindow, IDispos
     [DllImport("user32.dll", SetLastError = true)][return: MarshalAs(UnmanagedType.Bool)] private static extern bool AddClipboardFormatListener(IntPtr window);
     [DllImport("user32.dll", SetLastError = true)][return: MarshalAs(UnmanagedType.Bool)] private static extern bool RemoveClipboardFormatListener(IntPtr window);
     [DllImport("user32.dll")] private static extern IntPtr GetClipboardOwner();
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern uint RegisterClipboardFormat(string format);
+    [DllImport("user32.dll")][return: MarshalAs(UnmanagedType.Bool)] private static extern bool IsClipboardFormatAvailable(uint format);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
 }
