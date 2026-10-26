@@ -54,6 +54,7 @@ internal sealed partial class TrayApplicationContext
     {
         SettingsProbe.Refresh();
         if (section is "notes" or "memory") ForgetNotesAndMemory(); // edited elsewhere (classic window, voice) since they were read
+        if (section == "clipboard" && _shelf is null) _shelfError = null; // a shelf that failed to open is tried again
         if (section == "integrations") OnUi(VerifyUncheckedConnectors);
         if (section == "account" && NativeSettings.CachedModels.Count == 0 && ProviderFactory.IsChatGptSignedIn(_secrets))
             _ = RefreshModelsFromShellAsync(announce: false);
