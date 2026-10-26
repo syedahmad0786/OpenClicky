@@ -44,11 +44,17 @@ internal sealed partial class TrayApplicationContext
         {
             Routines = SettingsActionArgs.RoutineViews(routines, jobs, _routinesWaiting),
             Connectors = ConnectorViews(connectors),
+            Notes = NotesView,
+            Memory = MemoryView,
+            Clipboard = ClipboardView(),
+            Tasks = TasksView(),
         };
 
     void IShellHost.SettingsSection(string section)
     {
         SettingsProbe.Refresh();
+        if (section is "notes" or "memory") ForgetNotesAndMemory(); // edited elsewhere (classic window, voice) since they were read
+        if (section == "clipboard" && _shelf is null) _shelfError = null; // a shelf that failed to open is tried again
         if (section == "integrations") OnUi(VerifyUncheckedConnectors);
         if (section == "account" && NativeSettings.CachedModels.Count == 0 && ProviderFactory.IsChatGptSignedIn(_secrets))
             _ = RefreshModelsFromShellAsync(announce: false);
@@ -112,14 +118,6 @@ internal sealed partial class TrayApplicationContext
         }
     }
 
-    /// <summary>The classic window pauses a running task when it comes forward (input must not reach the wrong window); say so, since the notch gave no hint.</summary>
-    private void ShowClassicFromNotch()
-    {
-        var wasRunning = ForegroundRuns().Any(run => !run.Control.IsPaused);
-        ShowClassic();
-        if (wasRunning) _shell?.AddToast("Your task is paused while the classic window is open. Resume it from Tasks.");
-    }
-
     private void RunSettingsAction(string action, string? arg)
     {
         switch (action)
@@ -138,9 +136,13 @@ internal sealed partial class TrayApplicationContext
             case "previewVoice": PreviewVoice(arg); break;
             case "clearHistory": ClearHistory(); _shell?.AddToast("Conversation and task history cleared."); break;
             case "exportMemory": ExportMemory(); break;
-            case "openNotes": ShowClassicFromNotch(); _home.ShowNotes(); break;
-            case "openTasks": ShowClassicFromNotch(); _home.ShowTasks(); break;
-            case "openClipboard": ShowClipboardShelf(); break;
+            case "openNotes": OpenExtrasPage("notes"); break;
+            case "openTasks": OpenExtrasPage("tasks"); break;
+            case "openClipboard": OpenExtrasPage("clipboard"); break;
+            case var extras when extras.StartsWith("note.", StringComparison.Ordinal) || extras.StartsWith("memory.", StringComparison.Ordinal)
+                || extras.StartsWith("clipboard.", StringComparison.Ordinal) || extras.StartsWith("task.", StringComparison.Ordinal):
+                ExtrasAction(action, arg);
+                break;
             case "chooseAgentFolder": ChooseAgentFolder(); break;
             case "resetAgentFolder":
                 if (NotchSettings.Change(s => s.AgentFolder = null)) { ApplyAgentFolder(); IndexWork(); _shell?.AddToast("Agents use the default folder again."); }
@@ -358,13 +360,8 @@ internal sealed partial class TrayApplicationContext
 
     private void ExportMemory()
     {
-        using var dialog = new SaveFileDialog
-        {
-            Title = "Export companion memory", Filter = "JSON files (*.json)|*.json|All files (*.*)|*.*", DefaultExt = "json",
-            AddExtension = true, FileName = "openclicky-companion-memory.json", OverwritePrompt = true,
-        };
-        if (!Modal(() => { using var owner = NativeSettings.TopMostOwner(); return dialog.ShowDialog(owner) == DialogResult.OK; }, false)) return;
-        try { _shell?.AddToast(CompanionMemoryStore.ExportTo(dialog.FileName) ? "Companion memory exported." : "There is no companion memory to export yet."); }
+        if (SaveAs("Export companion memory", "JSON files (*.json)|*.json|All files (*.*)|*.*", "json", "openclicky-companion-memory.json") is not { } path) return;
+        try { _shell?.AddToast(CompanionMemoryStore.ExportTo(path) ? "Companion memory exported." : "There is no companion memory to export yet."); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { _shell?.AddToast("Memory could not be exported: " + ex.Message); }
     }
 
@@ -438,5 +435,6 @@ internal sealed partial class TrayApplicationContext
         _tts.Stop();
         _settingsProbe?.Dispose();
         DisposeConnectors();
+        DisposeExtras();
     }
 }

@@ -252,7 +252,7 @@ public class ShellContractTests
     public void EverySidebarSectionAndActionIsAccepted()
     {
         Assert.Equal(17, ShellContract.Sections.Count);
-        Assert.Equal(33, ShellIntentParser.SettingsActions.Count);
+        Assert.Equal(58, ShellIntentParser.SettingsActions.Count);
         foreach (var section in ShellContract.Sections)
             Assert.True(ShellIntentParser.TryParse($$"""{"kind":"settings.section","section":"{{section}}"}""", out _), section);
         foreach (var action in ShellIntentParser.SettingsActions)

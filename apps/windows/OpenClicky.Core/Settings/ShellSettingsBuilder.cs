@@ -42,6 +42,11 @@ public sealed record SettingsRuntime
     public IReadOnlyList<ReachItem> Reach { get; init; } = [];
     /// <summary>Where agents work when <see cref="AppSettings.AgentFolder"/> is empty.</summary>
     public string DefaultAgentFolder { get; init; } = "";
+    /// <summary>The Extras pages, built by <see cref="ExtrasViews"/> from the stores the host owns.</summary>
+    public SettingsNotes Notes { get; init; } = SettingsNotes.Empty;
+    public SettingsClipboard Clipboard { get; init; } = SettingsClipboard.Empty;
+    public SettingsTasks Tasks { get; init; } = SettingsTasks.Empty;
+    public SettingsMemory Memory { get; init; } = SettingsMemory.Empty;
 }
 
 /// <summary>Maps AppSettings plus <see cref="SettingsRuntime"/> to the contract's <see cref="SettingsView"/>, and clamps any view to the contract caps.</summary>
@@ -102,7 +107,10 @@ public static class ShellSettingsBuilder
             runtime.Routines,
             new SettingsAccess(AccessMode(s.AgentAccess), s.AgentDenyListExtra ?? "", s.PersistConversationHistory),
             new SettingsAdvanced(s.UseLocalProxy, s.LocalProxyBaseUrl, s.ForceGdiCapture),
-            new SettingsProactive(proactive.MorningBrief, proactive.Suggestions, proactive.IntegrationNudges, proactive.MeetingCountdown, proactive.CalendarConnector));
+            new SettingsProactive(proactive.MorningBrief, proactive.Suggestions, proactive.IntegrationNudges, proactive.MeetingCountdown, proactive.CalendarConnector))
+        {
+            Notes = runtime.Notes, Clipboard = runtime.Clipboard, Tasks = runtime.Tasks, Memory = runtime.Memory,
+        };
         return Clamp(view);
     }
 
@@ -206,7 +214,10 @@ public static class ShellSettingsBuilder
             new SettingsAdvanced(advanced.UseLocalProxy, SettingsCatalog.LoopbackUrl(advanced.ProxyUrl, stripUserInfo: true) ?? SettingsCatalog.DefaultProxyUrl,
                 advanced.ForceGdiCapture),
             new SettingsProactive(proactive.MorningBrief, proactive.Suggestions, proactive.IntegrationNudges, proactive.MeetingCountdown,
-                CutOrNull(proactive.CalendarConnector, 80)));
+                CutOrNull(proactive.CalendarConnector, 80)))
+        {
+            Notes = ClampNotes(v.Notes), Clipboard = ClampClipboard(v.Clipboard), Tasks = ClampTasks(v.Tasks), Memory = ClampMemory(v.Memory),
+        };
 
         static List<Device> Devs(IReadOnlyList<Device>? devices, string? selected) =>
             WithId(devices, x => x.Id, MaxDevices, selected).Select(x => new Device(Cut(x.Id, 160), Cut(x.Name, 160), x.State)).ToList();
@@ -217,6 +228,45 @@ public static class ShellSettingsBuilder
             return keys.Count == 0 ? fallback.ToView() : new Hotkey(keys, hotkey!.Trigger);
         }
     }
+
+    // Extras caps: ids must be non-empty (the page schema requires one) and every time ISO-8601; a bad entry is dropped, never the page.
+    private static SettingsNotes ClampNotes(SettingsNotes? n)
+    {
+        n ??= SettingsNotes.Empty;
+        return new(n.Editable, CutOrNull(n.Error, ExtrasViews.ErrorText),
+            [.. WithIso(WithId(n.Items, x => x.Id, LocalNotesStore.MaxNotes), x => x.UpdatedAt)
+                .Select(x => new NoteView(Cut(x.Id, 64), Cut(x.Title, LocalNotesStore.MaxTitleLength), Cut(x.Text, LocalNotesStore.MaxTextLength), Iso(x.UpdatedAt)!))],
+            LocalNotesStore.MaxNotes);
+    }
+
+    private static SettingsClipboard ClampClipboard(SettingsClipboard? c)
+    {
+        c ??= SettingsClipboard.Empty;
+        var items = WithIso(WithId(c.Items, x => x.Id, ClipboardShelf.MaxItems), x => x.AddedAt)
+            .Select(x => new ClipView(Cut(x.Id, 24), Cut(x.Text, ExtrasViews.ClipPreview), x.Truncated || x.Text?.Length > ExtrasViews.ClipPreview,
+                CutOrNull(x.Source, ExtrasViews.SourceText), Iso(x.AddedAt)!, x.Pinned)).ToList();
+        var next = items.Any(x => x.Id == c.NextId) ? c.NextId : null;
+        return new(c.Available, c.Collecting, CutOrNull(c.Error, ExtrasViews.ErrorText), items, next, ClipboardShelf.MaxItems);
+    }
+
+    private static SettingsTasks ClampTasks(SettingsTasks? t)
+    {
+        t ??= SettingsTasks.Empty;
+        return new(t.Active, t.Paused, [.. WithIso(WithId(t.Runs, x => x.Id, TaskHistoryStore.MaxRuns), x => x.StartedAt).Select(r => new TaskRunView(
+            Cut(r.Id, 64), Cut(r.Task, ExtrasViews.TaskText), Cut(r.Status, ExtrasViews.StatusText), Cut(r.Access, ExtrasViews.StatusText), Iso(r.StartedAt)!,
+            [.. (r.Events ?? []).TakeLast(ExtrasViews.TaskEvents).Select(e => new TaskEventView(Math.Max(0, e.Step), Cut(e.Status, ExtrasViews.StatusText), Cut(e.Message, ExtrasViews.TaskEventText)))]))]);
+    }
+
+    private static SettingsMemory ClampMemory(SettingsMemory? m)
+    {
+        m ??= SettingsMemory.Empty;
+        return new(m.Editable, m.Saved, CutOrNull(m.Error, ExtrasViews.ErrorText), Cut(m.Name, CompanionMemoryStore.MaxNameLength),
+            Cut(m.Personality, CompanionMemoryStore.MaxPersonalityLength), Cut(m.Instructions, CompanionMemoryStore.MaxInstructionsLength),
+            [.. WithId(m.Facts, x => x.Id, CompanionMemoryStore.MaxFacts).Select(f => new MemoryFactView(Cut(f.Id, 64), Cut(f.Text, CompanionMemoryStore.MaxFactLength), f.Learned))],
+            CompanionMemoryStore.MaxFacts);
+    }
+
+    private static IEnumerable<T> WithIso<T>(IEnumerable<T> items, Func<T, string?> at) => items.Where(x => Iso(at(x)) is not null);
 
     /// <summary>Browser card caps: 16 browsers, 32 profiles each, 8 instances (the selected one never dropped); ids must be non-empty.</summary>
     private static BrowserCardView ClampBrowser(BrowserCardView? card)

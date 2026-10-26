@@ -168,6 +168,41 @@
     ],
     "access": { "mode": "confirmEach", "denyList": "C:\\Windows\\System32", "rememberHistory": true },
     "advanced": { "useLocalProxy": false, "proxyUrl": "", "forceGdiCapture": false },
-    "proactive": { "morningBrief": false, "suggestions": true, "integrationNudges": false, "meetingCountdown": true, "calendarConnector": null }
+    "proactive": { "morningBrief": false, "suggestions": true, "integrationNudges": false, "meetingCountdown": true, "calendarConnector": null },
+    "notes": {
+      "editable": true, "error": null, "limit": 20,
+      "items": [
+        { "id": "5f0c2a9e7b1d4c3e8a6f9b2d1c0e7a4b", "title": "Dentist", "text": "Thursday 3pm, bring the insurance card.", "updatedAt": "2026-10-24T09:30:00.000Z" },
+        { "id": "a1b2c3d4e5f60718293a4b5c6d7e8f90", "title": "Gift ideas", "text": "Book for Sam, headphones for Ali", "updatedAt": "2026-10-20T18:05:00.000Z" }
+      ]
+    },
+    "clipboard": {
+      "available": true, "collecting": false, "error": null, "nextId": "12", "limit": 100,
+      "items": [
+        { "id": "12", "text": "Order #4471 ships Monday", "truncated": false, "source": "Outlook", "addedAt": "2026-10-24T10:00:00.000Z", "pinned": true },
+        { "id": "13", "text": "https://example.com/report", "truncated": false, "source": null, "addedAt": "2026-10-24T10:02:00.000Z", "pinned": false }
+      ]
+    },
+    "tasks": {
+      "active": false, "paused": false,
+      "runs": [
+        {
+          "id": "run-2", "task": "Rename the screenshots on the desktop", "status": "completed", "access": "ConfirmEach", "startedAt": "2026-10-24T11:00:00.000Z",
+          "events": [
+            { "step": 1, "status": "planning", "message": "Looking at the desktop." },
+            { "step": 2, "status": "completed", "message": "Renamed 4 files." }
+          ]
+        },
+        { "id": "run-1", "task": "Fill in the timesheet", "status": "failed", "access": "Preview", "startedAt": "2026-10-23T16:00:00.000Z", "events": [] }
+      ]
+    },
+    "memory": {
+      "editable": true, "saved": true, "error": null, "limit": 100,
+      "name": "Clicky", "personality": "Warm and brief.", "instructions": "Use British spelling.",
+      "facts": [
+        { "id": "f1", "text": "Prefers mornings for meetings.", "learned": false },
+        { "id": "f2", "text": "Works on the OpenClicky project.", "learned": true }
+      ]
+    }
   }
 }

@@ -285,29 +285,6 @@ it("Routines: a routine waiting for the network shows the Waiting badge and its 
   expect(screen.getByText("Routines run while your PC is awake and OpenClicky is open.")).toBeInTheDocument();
 });
 
-// ---- Memory / Notes / Clipboard / Tasks
-it("Memory exports; Notes, Clipboard shelf and Tasks open their native panels", () => {
-  const posts = host();
-  const { rerender } = render(<SettingsPanel state={make("memory")} />);
-  expect(screen.getByText("What OpenClicky has learned about you.")).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Export memories" }));
-  rerender(<SettingsPanel state={make("notes")} />);
-  expect(screen.getByRole("heading", { name: "Notes" })).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Open" }));
-  rerender(<SettingsPanel state={make("clipboard")} />);
-  expect(screen.getByRole("heading", { name: "Clipboard shelf" })).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Open" }));
-  rerender(<SettingsPanel state={make("tasks")} />);
-  expect(screen.getByRole("heading", { name: "Tasks" })).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Open" }));
-  expect(posts("settings.action")).toEqual([
-    { kind: "settings.action", action: "exportMemory" },
-    { kind: "settings.action", action: "openNotes" },
-    { kind: "settings.action", action: "openClipboard" },
-    { kind: "settings.action", action: "openTasks" },
-  ]);
-});
-
 // ---- Fix round: strict connector URLs
 it.each([
   "https://user@evil.com/mcp", "https://user:pass@host/mcp", "https://@/x", "https://:443/x", "https://good.com\@evil.com/x",
