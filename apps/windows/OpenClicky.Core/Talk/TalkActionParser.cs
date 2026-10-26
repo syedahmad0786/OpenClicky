@@ -2,14 +2,14 @@ using System.Text;
 
 namespace OpenClicky.Core;
 
-public enum TalkActionKind { Open, Copy, Type }
+public enum TalkActionKind { Open, Copy, Type, Model }
 
 public sealed record TalkAction(TalkActionKind Kind, string Value);
 
 public sealed record TalkActionParseResult(string Text, IReadOnlyList<TalkAction> Actions);
 
 /// <summary>
-/// Extracts [OPEN:url], [COPY:text] and [TYPE:text] tags from a talk reply. Tags are always removed from the
+/// Extracts [OPEN:url], [COPY:text], [TYPE:text] and [MODEL:id] tags from a talk reply. Tags are always removed from the
 /// returned text; only valid ones (first three, in order) become actions. Fenced code blocks are left untouched
 /// because the ag-ui visual block lives there. Run this before the POINT/MARK/ag-ui parsers.
 /// </summary>
@@ -21,7 +21,11 @@ public static class TalkActionParser
     public const int MaxUrlLength = 1700;
 
     private static readonly (string Prefix, TalkActionKind Kind)[] Tags =
-        [("[OPEN:", TalkActionKind.Open), ("[COPY:", TalkActionKind.Copy), ("[TYPE:", TalkActionKind.Type)];
+        [("[OPEN:", TalkActionKind.Open), ("[COPY:", TalkActionKind.Copy), ("[TYPE:", TalkActionKind.Type), ("[MODEL:", TalkActionKind.Model)];
+
+    /// <summary>A model id as providers list them: lowercase letters, digits, '.', '-', '_' or '/', at most 80 characters.</summary>
+    public static bool IsModelId(string value) =>
+        value.Length is > 0 and <= 80 && value.All(c => c is >= 'a' and <= 'z' or >= '0' and <= '9' or '.' or '-' or '_' or '/');
 
     /// <param name="partial">Streaming text: an unclosed tag is cut off (so it is never spoken) instead of kept as text.</param>
     public static TalkActionParseResult Parse(string reply, bool partial = false)
@@ -83,6 +87,7 @@ public static class TalkActionParser
     private static TalkAction? Validate(TalkActionKind kind, string value)
     {
         if (value.Length == 0) return null;
+        if (kind == TalkActionKind.Model) return IsModelId(value) ? new(kind, value) : null;
         // A TYPE of only control characters would type nothing but spaces.
         if (kind == TalkActionKind.Type && string.IsNullOrWhiteSpace(TalkActionText.SanitizeForTyping(value))) return null;
         if (kind != TalkActionKind.Open) return value.Length <= MaxTextLength ? new(kind, value) : null;

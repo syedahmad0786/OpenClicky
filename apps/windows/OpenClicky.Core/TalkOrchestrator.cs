@@ -45,6 +45,8 @@ public sealed class TalkOrchestrator : IDisposable
     private readonly Func<HighlightGesture?>? _takeHighlight;
     private readonly Func<IReadOnlyList<ScreenCaptureResult>, HighlightGesture, IReadOnlyList<ScreenCaptureResult>>? _compositeHighlight;
     private readonly Func<int, int, Box?>? _snapTarget;
+    /// <summary>OCR of the screenshots the model sees (their pixels), used to fit labelled marks; null reads nothing.</summary>
+    private readonly Func<IReadOnlyList<ScreenCaptureResult>, CancellationToken, Task<IReadOnlyList<ScreenText>>>? _readScreenText;
     private string? _previousApp;
     private readonly Func<string>? _userContext;
     private readonly Func<string, CancellationToken, Task<bool>>? _requestInterceptor;
@@ -87,8 +89,10 @@ public sealed class TalkOrchestrator : IDisposable
         Func<bool>? foregroundCaptureEligible = null, Func<IReadOnlyList<VisibleWindow>>? visibleWindows = null,
         Func<HighlightGesture?>? takeHighlight = null,
         Func<IReadOnlyList<ScreenCaptureResult>, HighlightGesture, IReadOnlyList<ScreenCaptureResult>>? compositeHighlight = null,
-        Func<int, int, Box?>? snapTarget = null)
+        Func<int, int, Box?>? snapTarget = null,
+        Func<IReadOnlyList<ScreenCaptureResult>, CancellationToken, Task<IReadOnlyList<ScreenText>>>? readScreenText = null)
     {
+        _readScreenText = readScreenText;
         _hotkey = hotkey;
         _overlay = overlay;
         _capture = capture;
@@ -585,6 +589,31 @@ public sealed class TalkOrchestrator : IDisposable
         if (Walkthrough.SetStatus(status)) WalkthroughChanged?.Invoke(Walkthrough.View);
     }
 
+    /// <summary>Text read from <paramref name="screens"/> off the turn's thread. Never throws: no text just means nothing is fitted.</summary>
+    private Task<IReadOnlyList<ScreenText>> ReadScreenText(IReadOnlyList<ScreenCaptureResult> screens, CancellationToken token)
+    {
+        if (_readScreenText is null || screens.Count == 0) return Task.FromResult<IReadOnlyList<ScreenText>>([]);
+        var read = _readScreenText;
+        return Task.Run(async () =>
+        {
+            try
+            {
+                var clock = System.Diagnostics.Stopwatch.StartNew();
+                var text = await read(screens, token).ConfigureAwait(false);
+                _log($"screen_text_ms={clock.ElapsedMilliseconds} lines={text.Count}");
+                return text;
+            }
+            catch (OperationCanceledException) { return (IReadOnlyList<ScreenText>)[]; }
+            catch (Exception ex) when (ex is not OutOfMemoryException) { _log($"screen_text_error={ex.GetType().Name}"); return []; }
+        });
+    }
+
+    private static int CursorScreenNumber(IReadOnlyList<ScreenCaptureResult> screens)
+    {
+        for (var i = 0; i < screens.Count; i++) if (screens[i].IsCursorMonitor) return i + 1;
+        return 1;
+    }
+
     /// <summary>The control frame under a mapped point, or null. Never throws: a failed snap just draws the plain ring.</summary>
     private Box? SnapTarget(int x, int y)
     {
@@ -884,6 +913,8 @@ public sealed class TalkOrchestrator : IDisposable
             { ReportAssistantMessage("The app changed during capture. Ask again for a fresh view."); return; }
             context += AppKnowledge.WindowContext(bounds, screens);
             if (!selfContainedVisual) context += DrawingContext();
+            // Read while the model thinks: labelled marks and points are fitted to this text before they show.
+            var screenText = selfContainedVisual ? Task.FromResult<IReadOnlyList<ScreenText>>([]) : ReadScreenText(screens, token);
             if (!selfContainedVisual && Walkthrough.TakeEndReason() is { } endReason)
                 context += $"\nThe last walkthrough ended because {endReason}. Mention it only if it helps.\n";
             _log($"screen_capture_ms={captureClock.ElapsedMilliseconds} walkthrough={walkthrough is not null}");
@@ -977,6 +1008,7 @@ public sealed class TalkOrchestrator : IDisposable
                     if (!ObservationStillCurrent()) return;
                     IReadOnlyList<DrawOp> ops = cues.TakeThrough(throughSentence);
                     if (final is { Count: > 0 }) ops = [.. ops, .. final];
+                    if (ops.Count > 0) ops = DrawingSnap.Apply(ops, await screenText.ConfigureAwait(false), screens);
                     var shown = !selfContainedVisual && ops.Count > 0 ? ApplyDrawing(ops, screens, line) : [];
                     if (recorder is not null) lock (_drawingGate) recorder.AddLine(text, line, shown);
                     started.TrySetResult();
@@ -1005,6 +1037,7 @@ public sealed class TalkOrchestrator : IDisposable
                 if (ct.IsCancellationRequested || !ObservationStillCurrent()) return;
                 IReadOnlyList<DrawOp> ops = [.. cues.TakeAll(), .. final];
                 if (ops.Count == 0) return;
+                ops = DrawingSnap.Apply(ops, await screenText.ConfigureAwait(false), screens);
                 var shown = ApplyDrawing(ops, screens, line);
                 if (recorder is not null) lock (_drawingGate) recorder.AppendToLast(line, shown);
             }
@@ -1053,6 +1086,10 @@ public sealed class TalkOrchestrator : IDisposable
             token.ThrowIfCancellationRequested();
             if (remember) { CommitHistory(transcript, spoken); turnCommitted = true; }
             if (visual.Artifact is { } artifact) VisualArtifactChanged?.Invoke(artifact);
+            if (!selfContainedVisual && parsed is { X: { } px, Y: { } py, IsNone: false } && screens.Count > 0
+                && (parsed.ScreenNumber ?? CursorScreenNumber(screens)) is var pointScreen && pointScreen >= 1 && pointScreen <= screens.Count
+                && DrawingSnap.PointAt(parsed.ElementLabel, (float)px, (float)py, pointScreen, await screenText.ConfigureAwait(false), screens[pointScreen - 1]) is { } onText)
+                parsed = parsed with { X = onText.X, Y = onText.Y };
             var mapped = selfContainedVisual ? null : CoordinateMapper.ToVirtualScreen(parsed, screens);
             if (mapped is { } point)
             {

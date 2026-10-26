@@ -10,6 +10,8 @@ public class CompanionPromptsTests
         Assert.Contains("[DRAW:", prompt);
         Assert.Contains("start of, or inside, the sentence it illustrates", prompt);
         Assert.Contains("draw round it with a DRAW tag", prompt); // "look at this part" draws, not only talks
+        Assert.Contains("set its label (and the point's label) to exactly those words", prompt); // DrawingSnap matches on it
+        Assert.Contains("add [MODEL:id] with one of those ids", prompt);
         Assert.Contains("never say you drew, circled, marked, placed or showed anything unless this same reply carries", prompt);
         Assert.DoesNotContain("[MARK:", prompt); // still accepted, no longer taught
         Assert.DoesNotContain("green", prompt);

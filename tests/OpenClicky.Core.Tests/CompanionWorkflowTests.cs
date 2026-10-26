@@ -90,6 +90,23 @@ public class CompanionWorkflowTests
     }
 
     [Fact]
+    public async Task LabelledCircleIsFittedToTheTextTheScreenReaderFound()
+    {
+        var log = new List<string>();
+        using var talk = new TalkOrchestrator(new Hotkey(), new Overlay(), new Capture(), new Mic(), () => null,
+            () => new Talk((_, _) => Task.FromResult("[DRAW:circle id=oil x=30 y=35 r=4 label=\"engine oil\"] There it is. [POINT:30,35:engine oil]")),
+            new Tts(), () => new AppSettings { PersistConversationHistory = false }, log: line => { lock (log) log.Add(line); },
+            windowBounds: () => (0, 0, 200, 100),
+            readScreenText: (_, _) => Task.FromResult<IReadOnlyList<ScreenText>>([new(1, "ENGINE OIL", new(40, 20, 30, 6))]));
+        await talk.SubmitTextAsync("circle the engine oil", false);
+
+        var circle = Assert.Single(talk.Drawing.Parts).Op;
+        Assert.InRange(circle.Points[0].X, 109, 111); // the text's centre (55, 23) in virtual pixels (2x), not the guess (60, 70)
+        Assert.InRange(circle.Points[0].Y, 45, 47);
+        lock (log) Assert.Contains(log, line => line.StartsWith("point=(110,46)", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task SpeechOffPacesDrawingOnLineTimers()
     {
         var clock = new System.Diagnostics.Stopwatch();

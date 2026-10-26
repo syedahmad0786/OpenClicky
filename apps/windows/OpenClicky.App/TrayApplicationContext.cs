@@ -109,7 +109,7 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             RunAgentAsync,
             Log,
             ForegroundWindowInfo.GetCompanionTitle, ForegroundWindowInfo.GetBounds,
-            userContext: MemoryContext, requestInterceptor: HandleTaskVoiceAsync, windowHandle: ForegroundWindowInfo.GetHandle,
+            userContext: () => MemoryContext() + ModelContext(), requestInterceptor: HandleTaskVoiceAsync, windowHandle: ForegroundWindowInfo.GetHandle,
             canInterruptSpeech: () => TalkWhisperPlan() is not null && !_dictationActive,
             interruptionSttFactory: () => new LocalWhisperSttClient(
                 new EchoCancelledMicrophoneRecorder(() => _settings.MicrophoneDeviceId, Log), _whisperRuntime,
@@ -117,7 +117,8 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             foregroundCaptureEligible: ForegroundWindowInfo.IsCompanionCaptureEligible, visibleWindows: OtherVisibleWindows,
             takeHighlight: TakeHighlight,
             snapTarget: SnapControl,
-            compositeHighlight: (screens, gesture) => HighlightCompositor.Composite(screens, gesture, _settings.AccentColor));
+            compositeHighlight: (screens, gesture) => HighlightCompositor.Composite(screens, gesture, _settings.AccentColor),
+            readScreenText: ScreenTextReader.ReadAsync);
 
         _connectors = new ConnectorRegistry(_secrets);
         _home = new HomeForm(_settings, SubmitFromHomeAsync, Stop, ShowSettings, TryPointingDemoAsync, TrySandboxDemoAsync,

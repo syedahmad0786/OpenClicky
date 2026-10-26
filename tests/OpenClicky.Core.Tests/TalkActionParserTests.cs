@@ -5,6 +5,17 @@ namespace OpenClicky.Core.Tests;
 public class TalkActionParserTests
 {
     [Fact]
+    public void ModelTagIsStrippedAndOnlyAPlainModelIdBecomesAnAction()
+    {
+        var r = TalkActionParser.Parse("switching to sol for this. [MODEL:gpt-6.1-sol]");
+        Assert.Equal("switching to sol for this.", r.Text);
+        Assert.Equal(new TalkAction(TalkActionKind.Model, "gpt-6.1-sol"), Assert.Single(r.Actions));
+        foreach (var bad in new[] { "GPT 6", "https://x.example/m", "a\"b", new string('a', 81) })
+            Assert.Empty(TalkActionParser.Parse($"ok [MODEL:{bad}]").Actions);
+        Assert.Equal("ok", TalkActionParser.Parse("ok [MODEL:gpt-6", partial: true).Text); // never spoken while streaming
+    }
+
+    [Fact]
     public void ParsesEachTagAndStripsThemInOrder()
     {
         var r = TalkActionParser.Parse("opening it. [OPEN:https://example.com/a?b=1] copied. [COPY:hello world] typing. [TYPE:  hi there ]");

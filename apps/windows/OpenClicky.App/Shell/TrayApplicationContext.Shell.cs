@@ -1,3 +1,4 @@
+using OpenClicky.App.Settings;
 using System.Diagnostics;
 using System.Reflection;
 using OpenClicky.App.Shell;
@@ -128,6 +129,8 @@ internal sealed partial class TrayApplicationContext : IShellHost
             if (_agentFolderNotice) { _agentFolderNotice = false; _shell.AddToast(AgentFolderUnusable); }
             MaybeStartOnboarding();
         }
+        // The talk prompt lists these models so a reply can switch between them ([MODEL:id]).
+        if (_settings.AuthProvider == AuthProvider.ChatGPT && NativeSettings.CachedModels.Count == 0) _ = RefreshModelsFromShellAsync(announce: false);
         // Updates are checked in classic fallback mode too; there they announce through the tray.
         _updateTimer.Start();
         await CheckUpdatesAsync(announce: false);

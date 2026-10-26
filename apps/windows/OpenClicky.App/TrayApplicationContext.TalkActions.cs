@@ -1,3 +1,4 @@
+using OpenClicky.App.Settings;
 using System.Diagnostics;
 using OpenClicky.Agent;
 using OpenClicky.Core;
@@ -47,6 +48,7 @@ internal sealed partial class TrayApplicationContext
         {
             try
             {
+                if (action.Kind == TalkActionKind.Model) { SwitchTalkModel(action.Value); continue; }
                 // Checked per action, on the UI thread: a foreground run that is not paused may be typing too.
                 var taskRunning = ForegroundMayAct;
                 var decision = TalkActionPolicy.Decide(action, mode, taskRunning);
@@ -81,6 +83,32 @@ internal sealed partial class TrayApplicationContext
                 } + ex.Message);
             }
         }
+    }
+
+    /// <summary>
+    /// The reply asked to answer with another model: only one the signed-in ChatGPT account lists, saved as the screen-replies
+    /// model (from the next reply on) and shown in a notice, so the user always sees which model answers.
+    /// </summary>
+    private void SwitchTalkModel(string id)
+    {
+        if (_settings.AuthProvider != AuthProvider.ChatGPT) { TalkActionNotice("Model switching works with ChatGPT sign-in. Choose a model in Settings → Account."); return; }
+        var model = NativeSettings.CachedModels.FirstOrDefault(m => string.Equals(m.Slug, id, StringComparison.Ordinal));
+        if (model is null) { Log("talk_model_switch_refused"); TalkActionNotice($"I can't switch to {id}: your ChatGPT account doesn't list it."); return; }
+        if (_settings.ChatGptQuickModel == model.Slug) return;
+        _settings.ChatGptQuickModel = model.Slug;
+        SettingsStore.Save(_settings);
+        Log("talk_model_switch=" + model.Slug);
+        RefreshConnection();
+        RequestShellPush();
+        _shell?.AddToast($"Now answering with {model.Slug}. Change it in Settings → Account.");
+    }
+
+    /// <summary>For the talk prompt: which model answers now and which ones the reply may switch to.</summary>
+    private string ModelContext()
+    {
+        if (_settings.AuthProvider != AuthProvider.ChatGPT || NativeSettings.CachedModels is not { Count: > 0 } models) return "";
+        return $"\nYou are answering with {_settings.ResolveTalkModel()}. Models you may switch to with [MODEL:id]: "
+            + string.Join(", ", models.Take(12).Select(m => m.Slug)) + ".\n";
     }
 
     private void RunTalkAction(TalkAction action, bool asked, ReplyClipboard clipboard)

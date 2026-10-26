@@ -5,6 +5,8 @@ namespace OpenClicky.Core.Tests;
 public class TalkActionPolicyTests
 {
     [Theory]
+    [InlineData(AgentAccessMode.Preview, TalkActionKind.Model, TalkActionDecision.Execute)]
+    [InlineData(AgentAccessMode.ConfirmEach, TalkActionKind.Model, TalkActionDecision.Execute)]
     [InlineData(AgentAccessMode.Preview, TalkActionKind.Open, TalkActionDecision.PreviewOnly)]
     [InlineData(AgentAccessMode.Preview, TalkActionKind.Copy, TalkActionDecision.PreviewOnly)]
     [InlineData(AgentAccessMode.Preview, TalkActionKind.Type, TalkActionDecision.PreviewOnly)]
