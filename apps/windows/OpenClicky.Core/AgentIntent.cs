@@ -60,7 +60,7 @@ public static class AgentIntent
             System.Text.RegularExpressions.RegexOptions.IgnoreCase,
             TimeSpan.FromMilliseconds(100));
         if (launch.Success && !System.Text.RegularExpressions.Regex.IsMatch(launch.Groups[1].Value,
-            @"\b(and|then|how|why|what|when|if)\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase,
+            @"\b(and|then|how|why|what|when|if|job|task|routine)\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase,
             TimeSpan.FromMilliseconds(100))) return true;
         return false;
     }

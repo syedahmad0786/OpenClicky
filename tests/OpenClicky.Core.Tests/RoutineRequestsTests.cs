@@ -19,6 +19,65 @@ public sealed class RoutineRequestsTests
     }
 
     [Fact]
+    public void JobBlockBecomesAJobRequestAndIsNeverSpoken()
+    {
+        var (text, routine, job) = RoutineRequests.ExtractAll("i can start that as a background job. "
+            + Block("{\"title\":\"Best note apps\",\"task\":\"Research the three best note apps for Windows and save a comparison.\"}", "openclicky-job"));
+        Assert.Equal("i can start that as a background job.", text);
+        Assert.Null(routine);
+        Assert.Equal(new JobRequest("Best note apps", "Research the three best note apps for Windows and save a comparison."), job);
+    }
+
+    [Fact]
+    public void RoutineAndJobInOneReplyAreBothRead()
+    {
+        var (text, routine, job) = RoutineRequests.ExtractAll("both. " + Block(Daily) + " and " + Block("{\"title\":\"T\",\"task\":\"Do it once.\"}", "openclicky-job"));
+        Assert.Equal("both. and", text);
+        Assert.NotNull(routine);
+        Assert.Equal("Do it once.", job!.Task);
+    }
+
+    [Theory]
+    [InlineData("{\"title\":\"\",\"task\":\"x\"}")]
+    [InlineData("{\"title\":\"t\"}")]
+    [InlineData("{\"title\":\"t\",\"task\":3}")]
+    [InlineData("not json")]
+    public void InvalidJobBlockIsStrippedButIgnored(string json)
+    {
+        var (text, _, job) = RoutineRequests.ExtractAll("ok. " + Block(json, "openclicky-job"));
+        Assert.Equal("ok.", text);
+        Assert.Null(job);
+    }
+
+    [Fact]
+    public void AJobBlockStillBeingWrittenIsNeverSpoken()
+    {
+        Assert.Equal("starting it.", RoutineRequests.Strip("starting it. ```openclicky-job\n{\"title\":\"T\",\"ta"));
+        Assert.Equal("starting it.", RoutineRequests.Strip("starting it. ```openclicky-j"));
+    }
+
+    [Fact]
+    public void AJobClaimWithoutABlockStillOffersTheJob()
+    {
+        var job = RoutineRequests.FromClaim(" start that job ", "i've queued a background job to research three note apps and save a report.");
+        Assert.Equal("start that job", job!.Title);
+        Assert.Equal("The user asked: start that job\nWhat was agreed: i've queued a background job to research three note apps and save a report.", job.Task);
+        Assert.Null(RoutineRequests.FromClaim("research", "here are three note apps."));
+        Assert.Null(RoutineRequests.FromClaim("research", "i can't start a background job right now."));
+        Assert.Null(RoutineRequests.FromClaim("research", "the background-job runtime is missing."));
+    }
+
+    [Fact]
+    public void JobCardAsksBeforeAnythingStarts()
+    {
+        var card = RoutineRequests.JobConfirmCard("abc", new JobRequest("Best note apps", new string('x', 300)));
+        Assert.Equal("job-confirm:abc", card.Id);
+        Assert.Equal("abc", RoutineRequests.JobRequestIdOf(card.Id));
+        Assert.Equal([RoutineRequests.StartAction, RoutineRequests.DismissAction], card.Actions.Select(a => a.Id));
+        Assert.EndsWith("…", card.Body);
+    }
+
+    [Fact]
     public void InvalidBlockIsStrippedButIgnored()
     {
         foreach (var json in new[] { "not json", "[1]", "{\"title\":\"t\"}", "{\"title\":\"t\",\"task\":\"x\",\"every_minutes\":2}", "{\"title\":\"t\",\"task\":\"x\",\"at\":\"25:00\"}" })

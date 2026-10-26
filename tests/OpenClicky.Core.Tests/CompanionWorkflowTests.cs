@@ -126,6 +126,25 @@ public class CompanionWorkflowTests
     }
 
     [Fact]
+    public async Task JobBlockInAReplyAsksForAJobAndIsNotSpoken()
+    {
+        var jobs = new List<OpenClicky.Core.Work.JobRequest>();
+        var messages = new List<string>();
+        using var talk = new TalkOrchestrator(new Hotkey(), new Overlay(), new Capture(), new Mic(), () => null,
+            () => new Talk((_, _) => Task.FromResult("i can start that as a background job.\n```openclicky-job\n{\"title\":\"Note apps\",\"task\":\"Compare three note apps.\"}\n```")),
+            new Tts(), () => new AppSettings { PersistConversationHistory = false }, log: _ => { },
+            windowBounds: () => (0, 0, 200, 100));
+        talk.JobRequested += r => { lock (jobs) jobs.Add(r); };
+        talk.MessageReceived += (role, text) => { if (role == "OpenClicky") messages.Add(text); };
+
+        await talk.SubmitTextAsync("research the best note apps and save a comparison", false);
+
+        lock (jobs) Assert.Equal("Compare three note apps.", Assert.Single(jobs).Task);
+        Assert.Contains("i can start that as a background job.", messages);
+        Assert.DoesNotContain(messages, m => m.Contains("openclicky-job", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task LabelledCircleIsFittedToTheTextTheScreenReaderFound()
     {
         var log = new List<string>();

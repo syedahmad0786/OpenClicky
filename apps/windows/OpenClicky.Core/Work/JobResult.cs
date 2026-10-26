@@ -9,6 +9,9 @@ namespace OpenClicky.Core.Work;
 /// Either <see cref="EveryMinutes"/> or <see cref="AtMinuteOfDay"/> is set; the weekday mask uses bit (int)DayOfWeek (0 for intervals).</summary>
 public sealed record RoutineRequest(string Title, string Task, int? EveryMinutes, int? AtMinuteOfDay, int WeekdayMask);
 
+/// <summary>A one-off background job a Talk reply asked for: its title and full task (untrusted model text, capped when read).</summary>
+public sealed record JobRequest(string Title, string Task);
+
 /// <summary>One step the user must do themselves. <see cref="Page"/> is http(s) only and opens only when the user asks (E8).</summary>
 public sealed record UserStep(string Step, string? Page, string? DoneWhenUrlContains, DateTimeOffset AskedAt);
 

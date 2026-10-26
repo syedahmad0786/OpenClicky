@@ -192,6 +192,8 @@ public sealed class TalkOrchestrator : IDisposable
     public event Action<IReadOnlyList<TalkAction>, AgentAccessMode>? ActionsRequested;
     /// <summary>The reply asked for a schedule (E11). Only a request: nothing is scheduled until the user confirms.</summary>
     public event Action<RoutineRequest>? RoutineRequested;
+    /// <summary>A reply asked to start a one-off background job (an openclicky-job block); the host asks the user first. Any thread.</summary>
+    public event Action<JobRequest>? JobRequested;
 
     public void Start()
     {
@@ -947,7 +949,7 @@ public sealed class TalkOrchestrator : IDisposable
             var prompt = (selfContainedVisual ? VisualArtifactReply.CreatorSystemInstructions(userContext, history)
                     : CompanionPrompts.TalkSystemPrompt + context + userContext)
                 + (Walkthrough.View.Active ? "\nThis is an advisory walkthrough. Explain only; do not claim to click, type, save notes, or change anything.\n" : "")
-                + (selfContainedVisual ? "" : walkthrough is null ? "\n" + VisualArtifactReply.Instructions + "\n" + RoutineRequests.TalkInstructions : "\n\n" + GuidedWalkthrough.ResponseInstructions);
+                + (selfContainedVisual ? "" : walkthrough is null ? "\n" + VisualArtifactReply.Instructions + "\n" + RoutineRequests.TalkInstructions + "\n" + RoutineRequests.JobTalkInstructions : "\n\n" + GuidedWalkthrough.ResponseInstructions);
             if (selfContainedVisual) history = [];
             // What this turn says and draws, for the save offer. A walkthrough step starts clean and is not offered.
             LastDrawingTurn = null;
@@ -1083,7 +1085,7 @@ public sealed class TalkOrchestrator : IDisposable
             }
             // Figure blocks first, as in StreamingReplySpeech.Clean: their JSON never reaches a tag parser.
             // A routine request comes out first: it is never spoken, shown or read as a visual (E11). A walkthrough step only strips it.
-            var (withoutRoutine, routine) = walkthrough is null ? RoutineRequests.Extract(raw) : (RoutineRequests.Strip(raw), (RoutineRequest?)null);
+            var (withoutRoutine, routine, jobRequest) = walkthrough is null ? RoutineRequests.ExtractAll(raw) : (RoutineRequests.Strip(raw), (RoutineRequest?)null, (JobRequest?)null);
             var figured = FigureBlockParser.Parse(withoutRoutine);
             var requested = TalkActionParser.Parse(figured.Text);
             var replyAccess = _settings().AgentAccess;
@@ -1111,6 +1113,12 @@ public sealed class TalkOrchestrator : IDisposable
                     : IntelligentUiParser.SafeFallbackText
                 : parsed.SpokenText;
             AssistantResponseChanged?.Invoke(spoken, true);
+            // Spoke of a background job but sent no block: offer the job it described; the card is still the consent.
+            if (jobRequest is null && walkthrough is null && !selfContainedVisual && RoutineRequests.FromClaim(transcript, spoken) is { } claimed)
+            {
+                jobRequest = claimed;
+                _log("job_fallback=1");
+            }
             MessageReceived?.Invoke("OpenClicky", spoken);
             token.ThrowIfCancellationRequested();
             if (remember) { CommitHistory(transcript, spoken); turnCommitted = true; }
@@ -1141,7 +1149,8 @@ public sealed class TalkOrchestrator : IDisposable
                     .. (stagedFigure is null ? [] : new[] { FigureBlockParser.ToOp(stagedFigure) })];
             // figure_blocks > figures means the model wrote a block the parser refused (bad JSON or values): it is not a claim without a block.
             var figureBlocks = System.Text.RegularExpressions.Regex.Count(withoutRoutine, "```figure", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            _log($"annotations={annotated.Marks.Count} figures={figured.Figures.Count} figure_blocks={figureBlocks}");
+            _log($"annotations={annotated.Marks.Count} figures={figured.Figures.Count} figure_blocks={figureBlocks}"
+                + $" job_blocks={System.Text.RegularExpressions.Regex.Count(raw, "```" + RoutineRequests.JobFenceTag)} job={(jobRequest is not null ? 1 : 0)}");
             cues.Update(raw); // a reply that was not streamed is cued here
             if (walkthrough is not null) ApplyDrawing([], screens, FinalCueLine, clearFirst: true); // each step starts clean
             var remainder = speech.TakeRemainder(spoken);
@@ -1160,6 +1169,7 @@ public sealed class TalkOrchestrator : IDisposable
             if (recorder is not null) PublishDrawingTurn(recorder);
             if (walkthrough is null && !selfContainedVisual && requested.Actions.Count > 0) ActionsRequested?.Invoke(requested.Actions, replyAccess);
             if (walkthrough is null && !selfContainedVisual && routine is not null) RoutineRequested?.Invoke(routine);
+            if (walkthrough is null && !selfContainedVisual && jobRequest is not null) JobRequested?.Invoke(jobRequest);
         }
         catch (OperationCanceledException) { _log("turn_cancelled"); }
         catch (Exception ex)

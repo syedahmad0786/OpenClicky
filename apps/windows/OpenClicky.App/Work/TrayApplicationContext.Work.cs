@@ -367,6 +367,49 @@ internal sealed partial class TrayApplicationContext
         _shell.AddCard(RoutineRequests.ConfirmCard(id, request));
     }
 
+    /// <summary>Background jobs a Talk reply asked for, waiting on their "Start this as a background job?" card.</summary>
+    private readonly List<(string Id, JobRequest Request)> _jobRequests = [];
+
+    private void OfferJob(JobRequest request)
+    {
+        if (_shell is null) return; // the card is the consent; without the notch there is nowhere to ask
+        while (_jobRequests.Count >= MaxRoutineRequests) DiscardJobRequest(_jobRequests[0].Id);
+        var id = Guid.NewGuid().ToString("N");
+        _jobRequests.Add((id, request));
+        _shell.AddCard(RoutineRequests.JobConfirmCard(id, request));
+    }
+
+    private void DiscardJobRequest(string? requestId)
+    {
+        if (requestId is null || _jobRequests.RemoveAll(r => r.Id == requestId) == 0) return;
+        _shell?.RemoveCard(RoutineRequests.JobCardId(requestId));
+    }
+
+    /// <summary>UI thread, the job card's actions. Start makes the job under the built-in companion and starts (or queues) it;
+    /// Not now drops it. Returns false: the card goes either way. The task text is untrusted and never logged.</summary>
+    private bool JobConfirmAction(string requestId, string actionId)
+    {
+        var index = _jobRequests.FindIndex(r => r.Id == requestId);
+        if (index < 0) { _shell?.AddToast("That job request is gone."); return false; }
+        var request = _jobRequests[index].Request;
+        _jobRequests.RemoveAt(index);
+        if (actionId != RoutineRequests.StartAction) return false;
+        WorkJob job;
+        try { job = _work.CreateJob(WorkStore.DefaultCompanionSlug, request.Title, request.Task); }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            Log("talk_job_request_error=" + ex.GetType().Name);
+            _shell?.AddToast("I couldn't create that job. Try again.");
+            return false;
+        }
+        IndexWork();
+        _home.RefreshWork();
+        Log("talk_job_request_started");
+        if (StartJob(job.Id, null, routineId: null, fromTalk: true)) _shell?.AddToast($"Started “{request.Title}” in the background. Its card is on Home.");
+        RequestShellPush();
+        return false;
+    }
+
     private void DiscardRoutineRequest(string? requestId)
     {
         if (requestId is null || _routineRequests.RemoveAll(r => r.Id == requestId) == 0) return;
@@ -406,6 +449,7 @@ internal sealed partial class TrayApplicationContext
     private void StartRoutines()
     {
         _talk.RoutineRequested += request => OnUi(() => OfferRoutine(request, null));
+        _talk.JobRequested += request => OnUi(() => OfferJob(request));
         _routineTimer.Tick += (_, _) => { RunDueRoutines(); RequestShellPush(); };
         _routineTimer.Start();
         Microsoft.Win32.SystemEvents.PowerModeChanged += OnPowerModeChanged;

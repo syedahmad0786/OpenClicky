@@ -27,6 +27,8 @@ public class AgentIntentTests
     [InlineData("how do I open Slack?")]
     [InlineData("How do I find that chat?")]
     [InlineData("open Slack and send a message")]
+    [InlineData("start the note apps report job")] // a job goes to Talk, which asks before it starts
+    [InlineData("start that task")]
     [InlineData("open https://example.com")]
     [InlineData("Don't open Calculator. Then search local memory.")]
     [InlineData("Tell me how to open Calculator. Then explain local memory search.")]
