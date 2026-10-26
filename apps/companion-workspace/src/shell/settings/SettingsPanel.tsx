@@ -35,10 +35,10 @@ function renderPage(section: SettingsSection, state: ShellState) {
     case "integrations": return <IntegrationsPage state={state} />;
     case "agents": return <AgentsPage state={state} />;
     case "routines": return <RoutinesPage state={state} />;
-    case "memory": return <MemoryPage />;
-    case "notes": return <NotesPage />;
-    case "clipboard": return <ClipboardPage />;
-    case "tasks": return <TasksPage />;
+    case "memory": return <MemoryPage state={state} />;
+    case "notes": return <NotesPage state={state} />;
+    case "clipboard": return <ClipboardPage state={state} />;
+    case "tasks": return <TasksPage state={state} />;
     case "proactive": return <ProactivePage state={state} />;
     default: return unknownSection(section);
   }

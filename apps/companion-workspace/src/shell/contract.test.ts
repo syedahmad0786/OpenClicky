@@ -57,7 +57,8 @@ describe("shell contract", () => {
     const state = parseShellState(fixture)!;
     expect(state.notch.section).toBe("general");
     expect(Object.keys(state.settings).sort()).toEqual(
-      ["account", "advanced", "access", "agents", "cursor", "dictation", "integrations", "microphone", "proactive", "routines", "shortcuts", "voice"].sort(),
+      ["account", "advanced", "access", "agents", "cursor", "dictation", "integrations", "microphone", "proactive", "routines", "shortcuts", "voice",
+        "notes", "clipboard", "tasks", "memory"].sort(),
     );
     expect(state.settings.microphone.devices.map((d) => d.state)).toEqual(["active", "unavailable"]);
     expect(state.settings.integrations.connectors.map((c) => c.toolCount)).toEqual([12, null]);
