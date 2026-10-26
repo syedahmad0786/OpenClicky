@@ -208,6 +208,7 @@ public sealed class DrawingReplayWindow : IDisposable
             if (_form is not null) new WindowInteropHelper(window) { Owner = _form.Handle };
             if (_options.ExcludeFromCapture) Exclude(window.Handle); // before it is first shown
             _figures[part.Id] = (part, window);
+            window.Dismissed += (_, _) => window.Hide(); // still tracked, so the replay does not reopen it; closed with the replay
             window.ShowAt();
         }
     }

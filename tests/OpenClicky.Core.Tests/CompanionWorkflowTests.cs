@@ -90,6 +90,25 @@ public class CompanionWorkflowTests
     }
 
     [Fact]
+    public async Task CubeArtifactInAScreenTurnFloatsOnScreenAndSaysWhere()
+    {
+        var placements = new List<FigurePlacement>();
+        var classicVisuals = 0;
+        using var talk = new TalkOrchestrator(new Hotkey(), new Overlay(), new Capture(), new Mic(), () => null,
+            () => new Talk((_, _) => Task.FromResult("here is a cube.\n```artifact\n{\"kind\":\"scene3d\",\"id\":\"cube\",\"title\":\"Cube\",\"shape\":\"cube\",\"color\":\"#25664c\",\"rotation\":24}\n```")),
+            new Tts(), () => new AppSettings { PersistConversationHistory = false }, log: _ => { },
+            windowBounds: () => (0, 0, 200, 100));
+        talk.FigureShown += p => { lock (placements) placements.Add(p); };
+        talk.VisualArtifactChanged += _ => classicVisuals++;
+
+        await talk.SubmitTextAsync("show me a three-dimensional cube", false);
+
+        Assert.Equal(0, classicVisuals); // never the classic window
+        Assert.Equal(DrawOpKind.Figure, Assert.Single(talk.Drawing.Parts).Op.Kind);
+        lock (placements) Assert.Equal("Cube is on the right side of your screen.", Assert.Single(placements).Sentence);
+    }
+
+    [Fact]
     public async Task LabelledCircleIsFittedToTheTextTheScreenReaderFound()
     {
         var log = new List<string>();
@@ -1522,7 +1541,7 @@ public class CompanionWorkflowTests
         talk.ReportLocalReply("older request", "I cannot create visuals here.");
         talk.MessageReceived += (role, text) => { if (role == "OpenClicky") messages.Add(text); };
 
-        await talk.SubmitTextAsync("Create a rotatable 3D cube named Demo", false);
+        await talk.SubmitTextAsync("Create a simple chart named Demo", false);
 
         Assert.Empty(providerHistory!);
         Assert.Contains("I cannot create visuals here.", providerSystem, StringComparison.Ordinal);
@@ -1645,7 +1664,7 @@ public class CompanionWorkflowTests
             windowTitle: () => "", windowBounds: () => { boundsReads++; return (0, 0, 100, 50); },
             windowHandle: () => 42, foregroundCaptureEligible: () => { eligibilityReads++; return false; });
 
-        await talk.SubmitTextAsync("Create a rotatable 3D cube", false);
+        await talk.SubmitTextAsync("Create a simple chart named Plan", false);
 
         Assert.Equal(0, eligibilityReads);
         Assert.Equal(0, boundsReads);

@@ -102,6 +102,8 @@ public sealed class BuddyOverlayController : IOverlayController
     private readonly System.Windows.Forms.Timer _buttonTimer = new() { Interval = ButtonPollMilliseconds };
     /// <summary>One window per figure part, by part id. A changed part (an edit, an undo) gets a new window; a gone one closes.</summary>
     private readonly Dictionary<string, (DrawPart Part, FigureWindow Window)> _figures = [];
+    /// <summary>Figure parts the user closed with ×, by id and version, so the next sync does not reopen them.</summary>
+    private readonly HashSet<(string Id, int Seq)> _dismissedFigures = [];
     private nint[] _figureHandles = [];
     /// <summary>"Show in screen recordings" off: every overlay window, a figure window from when it opens, is excluded from capture.</summary>
     private bool _excludeFromCapture;
@@ -681,7 +683,7 @@ public sealed class BuddyOverlayController : IOverlayController
     /// </summary>
     private void SyncFigures(IReadOnlyList<DrawPart> parts, IReadOnlyList<PartAnimation> animations)
     {
-        var wanted = parts.Where(p => p.Op is { Kind: DrawOpKind.Figure, Figure: not null })
+        var wanted = parts.Where(p => p.Op is { Kind: DrawOpKind.Figure, Figure: not null } && !_dismissedFigures.Contains((p.Id, p.Seq)))
             .OrderByDescending(p => p.Seq).Take(MaxFigures).ToDictionary(p => p.Id);
         foreach (var (id, (part, window)) in _figures.ToArray())
         {
@@ -695,6 +697,13 @@ public sealed class BuddyOverlayController : IOverlayController
             var reveal = animations.FirstOrDefault(a => !a.Erase && a.Part.Id == part.Id && a.Part.Seq == part.Seq);
             var window = new FigureWindow(part.Op.Figure!, bounds, _accent, _style.ReducedMotion, reveal?.Start);
             _figures[part.Id] = (part, window);
+            // × closes this version of the part for good (a redraw of the same id with a new seq shows again).
+            window.Dismissed += (_, _) =>
+            {
+                _dismissedFigures.Add((part.Id, part.Seq));
+                if (_figures.Remove(part.Id)) window.Close();
+                _figureHandles = _figures.Values.Select(f => f.Window.Handle).ToArray();
+            };
             if (_excludeFromCapture) ApplyCaptureExclusion(window.Handle); // before it is first shown
             if (!_hidden) window.ShowAt();
         }

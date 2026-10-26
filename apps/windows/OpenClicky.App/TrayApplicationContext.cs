@@ -175,6 +175,8 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
         };
         _talk.TurnCommitted += turn => OnUi(() => _lastTurnId = turn.Id.ToString(System.Globalization.CultureInfo.InvariantCulture));
         _talk.VisualArtifactChanged += artifact => OnUi(() => SaveVisualArtifact(artifact, generated: true));
+        // Says where a 3D figure went and how to hold it, so it is never "somewhere on screen".
+        _talk.FigureShown += placement => OnUi(() => _shell?.AddToast(placement.Sentence + " Drag to turn it, scroll to zoom, × to close."));
         _talk.StateChanged += state => OnUi(() =>
         {
             if (state == CompanionVoiceState.Processing && _talk.Walkthrough.View.Busy) _walkthroughForm.Hide();

@@ -16,10 +16,11 @@ public static class DrawingSnap
     public const float MaxReach = 0.35f;
     private const double MinSimilarity = 0.72;
 
+    /// <summary>Labelled marks fitted to <paramref name="text"/>; 3D figures fitted onto their screen (<see cref="FigureStage.Fit"/>).</summary>
     public static IReadOnlyList<DrawOp> Apply(IReadOnlyList<DrawOp> ops, IReadOnlyList<ScreenText> text, IReadOnlyList<ScreenCaptureResult> screens)
     {
-        if (text.Count == 0 || screens.Count == 0) return ops;
-        return ops.Select(op => Snap(op, text, screens)).ToArray();
+        if (screens.Count == 0) return ops;
+        return ops.Select(op => op.Kind == DrawOpKind.Figure ? FigureStage.Fit(op, screens) : text.Count == 0 ? op : Snap(op, text, screens)).ToArray();
     }
 
     /// <summary>The centre of the text a POINT label names near (<paramref name="x"/>, <paramref name="y"/>), or null.</summary>

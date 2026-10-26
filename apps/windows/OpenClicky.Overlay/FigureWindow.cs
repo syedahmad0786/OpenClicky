@@ -20,18 +20,24 @@ namespace OpenClicky.Overlay;
 /// One 3D figure in its own WPF window over the part's box: a Viewport3D lit by a grey ambient and a white directional light,
 /// each solid in its colour (or the accent) with a white highlight, and an accent label pill over each labelled part. It
 /// scales in over 0.5 s (ease-out back) and, when asked, spins about Y at 20°/s; reduced motion fades it in over 120 ms
-/// with no scale-in and no spin. Topmost, click-through and never activated. UI thread only.
+/// with no scale-in and no spin. It sits on a faint framed stage with its title, a hint and a close button: dragging turns
+/// it (and stops the spin), the wheel zooms, × raises <see cref="Dismissed"/>. Topmost and never activated. UI thread only.
 /// </summary>
 internal sealed class FigureWindow : Window
 {
     private const double RevealSeconds = 0.5, ReducedFadeSeconds = 0.12, SpinDegreesPerSecond = 20, LabelDip = 11, MinSidePx = 8;
+    private const double DragDegreesPerDip = 0.6, MinZoom = 0.4, MaxZoom = 2.5;
     private const int GwlExStyle = -20;
-    private const long WsExLayered = 0x00080000, WsExTransparent = 0x00000020, WsExToolWindow = 0x00000080, WsExNoActivate = 0x08000000;
+    private const long WsExLayered = 0x00080000, WsExToolWindow = 0x00000080, WsExNoActivate = 0x08000000;
     private const uint SwpNoActivate = 0x0010, SwpNoOwnerZOrder = 0x0200;
     private static readonly nint HwndTopMost = -1;
 
     private readonly Rectangle _bounds;
-    private readonly bool _reducedMotion, _spin;
+    private readonly bool _reducedMotion;
+    private bool _spin;
+    private readonly AxisAngleRotation3D _tilt = new(new Vector3D(1, 0, 0), 0);
+    private System.Windows.Point? _dragFrom;
+    private double _zoom = 1;
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private double _start;
     private readonly CameraSpec _camera;
@@ -61,7 +67,6 @@ internal sealed class FigureWindow : Window
         ShowInTaskbar = false;
         ResizeMode = ResizeMode.NoResize;
         Focusable = false;
-        IsHitTestVisible = false;
         Left = Top = 0;
         Width = Height = 1; // the real size is set in physical pixels once the handle exists
 
@@ -101,6 +106,7 @@ internal sealed class FigureWindow : Window
         var motion = new Transform3DGroup();
         motion.Children.Add(_scale);
         motion.Children.Add(new RotateTransform3D(_turn, c.X, c.Y, c.Z));
+        motion.Children.Add(new RotateTransform3D(_tilt, c.X, c.Y, c.Z));
         _motion = motion;
         solids.Transform = motion;
 
@@ -116,16 +122,58 @@ internal sealed class FigureWindow : Window
         var viewport = new Viewport3D { Camera = _view, IsHitTestVisible = false, ClipToBounds = true };
         viewport.Children.Add(new ModelVisual3D { Content = lights });
         viewport.Children.Add(new ModelVisual3D { Content = solids });
-        var root = new Grid { IsHitTestVisible = false };
-        root.Children.Add(viewport);
-        root.Children.Add(_labels);
+        // The stage: faint enough to see the screen through, framed so it is clear where the figure is and that it can be held.
+        var stage = new Grid { Background = new SolidColorBrush(MediaColor.FromArgb(0x38, 0x12, 0x14, 0x1A)), Cursor = System.Windows.Input.Cursors.SizeAll };
+        stage.Children.Add(viewport);
+        stage.Children.Add(_labels);
+        stage.MouseLeftButtonDown += (_, e) => { _dragFrom = e.GetPosition(stage); stage.CaptureMouse(); _spin = false; e.Handled = true; };
+        stage.MouseLeftButtonUp += (_, e) => { _dragFrom = null; stage.ReleaseMouseCapture(); e.Handled = true; };
+        stage.MouseMove += (_, e) =>
+        {
+            if (_dragFrom is not { } from || e.LeftButton != System.Windows.Input.MouseButtonState.Pressed) return;
+            var now = e.GetPosition(stage);
+            _turn.Angle = (_turn.Angle + (now.X - from.X) * DragDegreesPerDip) % 360;
+            _tilt.Angle = Math.Clamp(_tilt.Angle + (now.Y - from.Y) * DragDegreesPerDip, -85, 85);
+            _dragFrom = now;
+            PlaceLabels();
+        };
+        stage.MouseWheel += (_, e) =>
+        {
+            _zoom = Math.Clamp(_zoom * (e.Delta > 0 ? 0.9 : 1.1), MinZoom, MaxZoom);
+            ApplyZoom();
+            e.Handled = true;
+        };
+        var close = new Border
+        {
+            Width = 22, Height = 22, CornerRadius = new CornerRadius(11), Cursor = System.Windows.Input.Cursors.Hand,
+            Background = new SolidColorBrush(MediaColor.FromArgb(0xCC, 0x20, 0x23, 0x2B)),
+            Child = new TextBlock { Text = "✕", FontSize = 11, Foreground = MediaBrushes.White, HorizontalAlignment = System.Windows.HorizontalAlignment.Center, VerticalAlignment = System.Windows.VerticalAlignment.Center },
+            ToolTip = "Close this figure",
+        };
+        System.Windows.Automation.AutomationProperties.SetName(close, "Close this figure");
+        close.MouseLeftButtonUp += (_, e) => { e.Handled = true; Dismissed?.Invoke(this, EventArgs.Empty); };
+        var header = new DockPanel { Margin = new Thickness(10, 6, 6, 0), VerticalAlignment = System.Windows.VerticalAlignment.Top, LastChildFill = true };
+        DockPanel.SetDock(close, Dock.Right);
+        header.Children.Add(close);
+        header.Children.Add(new TextBlock
+        {
+            Text = $"{(figure.Title is { Length: > 0 } t ? t : "3D figure")}  ·  drag to turn, scroll to zoom",
+            FontFamily = new System.Windows.Media.FontFamily("Segoe UI"), FontSize = 11, FontWeight = FontWeights.SemiBold,
+            Foreground = new SolidColorBrush(MediaColor.FromArgb(0xE6, 0xFF, 0xFF, 0xFF)), TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = System.Windows.VerticalAlignment.Center, IsHitTestVisible = false,
+        });
+        var root = new Border
+        {
+            CornerRadius = new CornerRadius(14), BorderThickness = new Thickness(1.5), ClipToBounds = true,
+            BorderBrush = new SolidColorBrush(MediaColor.FromArgb(0x99, accent.R, accent.G, accent.B)),
+            Child = new Grid { Children = { stage, header } },
+        };
         Content = root;
         if (_reducedMotion && !double.IsNegativeInfinity(_start)) Opacity = 0;
 
         SizeChanged += (_, _) =>
         {
-            _view.FieldOfView = FigureCamera.HorizontalFieldOfView(_camera, ActualWidth, ActualHeight);
-            if (_labels.Visibility == Visibility.Visible) PlaceLabels();
+            ApplyZoom();
         };
         IsVisibleChanged += (_, _) => Animate(IsVisible);
         Closed += (_, _) => Animate(false);
@@ -170,7 +218,20 @@ internal sealed class FigureWindow : Window
     {
         base.OnSourceInitialized(e);
         var hwnd = new WindowInteropHelper(this).Handle;
-        SetWindowLongPtr(hwnd, GwlExStyle, (nint)((long)GetWindowLongPtr(hwnd, GwlExStyle) | WsExLayered | WsExTransparent | WsExToolWindow | WsExNoActivate));
+        // Holdable (drag, wheel, close) but never activated: the app the user was in keeps the keyboard.
+        SetWindowLongPtr(hwnd, GwlExStyle, (nint)((long)GetWindowLongPtr(hwnd, GwlExStyle) | WsExLayered | WsExToolWindow | WsExNoActivate));
+    }
+
+    /// <summary>The user pressed ×: the owner closes this window and keeps it closed.</summary>
+    public event EventHandler? Dismissed;
+
+    /// <summary>The fitted camera with the wheel's zoom: the view and the label pills both use it, so pills stay on their parts.</summary>
+    private CameraSpec Zoomed => _camera with { FieldOfViewDegrees = (float)Math.Clamp(_camera.FieldOfViewDegrees * _zoom, 5, 120) };
+
+    private void ApplyZoom()
+    {
+        _view.FieldOfView = FigureCamera.HorizontalFieldOfView(Zoomed, ActualWidth, ActualHeight);
+        if (_labels.Visibility == Visibility.Visible) PlaceLabels();
     }
 
     private void Place(nint hwnd) =>
@@ -218,7 +279,7 @@ internal sealed class FigureWindow : Window
         foreach (var (at, pill) in _pills)
         {
             var now = _motion.Transform(at);
-            if (FigureCamera.Project(new Vector3((float)now.X, (float)now.Y, (float)now.Z), _camera, w, h) is not { } p)
+            if (FigureCamera.Project(new Vector3((float)now.X, (float)now.Y, (float)now.Z), Zoomed, w, h) is not { } p)
             {
                 pill.Visibility = Visibility.Hidden;
                 continue;

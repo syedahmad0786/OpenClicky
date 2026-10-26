@@ -242,9 +242,19 @@ public sealed class TalkOrchestrator : IDisposable
             var animations = Drawing.Apply(mapped, line);
             _overlay.ShowDrawing(Drawing.Parts.ToArray(), animations);
             _log($"drawing_parts={Drawing.Parts.Count} ops={mapped.Count}");
-            return mapped;
         }
+        foreach (var (_, source, _) in mapped)
+            if (source is { Kind: DrawOpKind.Figure, Screen: { } n } && n >= 1 && n <= screens.Count)
+            {
+                var where = FigureStage.Where(source.Box, screens[n - 1]);
+                _log($"figure_shown screen={n} where={where.Replace(' ', '_')}");
+                FigureShown?.Invoke(new FigurePlacement(source.Text is { Length: > 0 } t ? t : "3D figure", n, screens.Count, where));
+            }
+        return mapped;
     }
+
+    /// <summary>A 3D figure was put on screen: what it is and where, so the user can be told. Any thread.</summary>
+    public event Action<FigurePlacement>? FigureShown;
 
     /// <summary>The turn ended with its drawing still up: keep what it said and drew, and tell the app it can offer to save it.</summary>
     private void PublishDrawingTurn(DrawingTurnRecorder recorder)
@@ -1082,6 +1092,9 @@ public sealed class TalkOrchestrator : IDisposable
             var intelligent = IntelligentUiParser.Parse(drawn.Text);
             IntelligentUiChanged?.Invoke(intelligent.Document);
             var visual = VisualArtifactReply.Parse(intelligent.PlainText);
+            // A 3D artifact in a screen turn floats on screen like any figure; it never opens the classic window.
+            var stagedFigure = !selfContainedVisual && visual.Artifact is { } scene && screens.Count > 0
+                ? FigureStage.FromScene3d(scene, CursorScreenNumber(screens), screens[CursorScreenNumber(screens) - 1]) : null;
             var annotated = ScreenAnnotations.Parse(visual.PlainText);
             var parsed = PointParser.Parse(annotated.Text);
             var spoken = string.IsNullOrWhiteSpace(parsed.SpokenText)
@@ -1094,7 +1107,7 @@ public sealed class TalkOrchestrator : IDisposable
             MessageReceived?.Invoke("OpenClicky", spoken);
             token.ThrowIfCancellationRequested();
             if (remember) { CommitHistory(transcript, spoken); turnCommitted = true; }
-            if (visual.Artifact is { } artifact) VisualArtifactChanged?.Invoke(artifact);
+            if (visual.Artifact is { } artifact && stagedFigure is null) VisualArtifactChanged?.Invoke(artifact);
             if (!selfContainedVisual && parsed is { X: { } px, Y: { } py, IsNone: false } && screens.Count > 0
                 && (parsed.ScreenNumber ?? CursorScreenNumber(screens)) is var pointScreen && pointScreen >= 1 && pointScreen <= screens.Count
                 && DrawingSnap.PointAt(parsed.ElementLabel, (float)px, (float)py, pointScreen, await screenText.ConfigureAwait(false), screens[pointScreen - 1]) is { } onText)
@@ -1117,7 +1130,8 @@ public sealed class TalkOrchestrator : IDisposable
             }
             // MARK tags still draw: they join the drawing as their equivalent DRAW ops, with the reply's last line. So do figures.
             IReadOnlyList<DrawOp> finalOps = selfContainedVisual ? []
-                : [.. DrawCommandParser.FromMarks(annotated.Marks), .. figured.Figures.Select(FigureBlockParser.ToOp)];
+                : [.. DrawCommandParser.FromMarks(annotated.Marks), .. figured.Figures.Select(FigureBlockParser.ToOp),
+                    .. (stagedFigure is null ? [] : new[] { FigureBlockParser.ToOp(stagedFigure) })];
             _log($"annotations={annotated.Marks.Count} figures={figured.Figures.Count}");
             cues.Update(raw); // a reply that was not streamed is cued here
             if (walkthrough is not null) ApplyDrawing([], screens, FinalCueLine, clearFirst: true); // each step starts clean

@@ -10,12 +10,12 @@ public static class VisualArtifactReply
 
     public const string Instructions = """
         OpenClicky renders supported interactive artifacts automatically from the validated JSON block in your response. Emitting that block is the creation mechanism; it does not require an external tool, a special session capability, or an action in the foreground app. The screenshot shows a separate foreground app and does not limit this capability, including when it is a sandbox. The plain-speech formatting rules apply to your spoken answer, not the artifact block. When a request fits a supported shape, emit its validated block instead of claiming the visual workspace is unavailable.
-        When the user asks for an interactive chart, connected diagram, calculator or 3D explanation, append one ```artifact fenced JSON block after your spoken answer. This replaces the ag-ui card block for that answer. Use a stable id for follow-up changes. No code, HTML, URLs or actions belong in this data. Allowed shapes:
+        When the user asks for an interactive chart, connected diagram or calculator, append one ```artifact fenced JSON block after your spoken answer. This replaces the ag-ui card block for that answer. Use a stable id for follow-up changes. No code, HTML, URLs or actions belong in this data. Allowed shapes:
         {"kind":"chart","id":"chart1","title":"Example","series":[{"label":"A","value":10}]}
         {"kind":"diagram","id":"flow1","title":"Example","nodes":[{"id":"a","label":"Start","detail":"Explanation"}],"edges":[]}
         {"kind":"calculator","id":"calc1","title":"Example","fields":[{"id":"a","label":"Hours","value":3,"min":0,"max":24,"step":1}]}
-        {"kind":"scene3d","id":"shape1","title":"Example","shape":"cube","color":"#25664c","rotation":24}
-        Charts support 1-12 series; diagrams 1-12 unique nodes and 0-18 edges using from/to node ids; calculators sum 1-6 fields with finite numbers, distinct ids and positive step; scene3d supports cube or pyramid with rotation -360..360. Say clearly when the requested visual exceeds these supported forms; never invent unavailable interactions.
+        Charts support 1-12 series; diagrams 1-12 unique nodes and 0-18 edges using from/to node ids; calculators sum 1-6 fields with finite numbers, distinct ids and positive step. Say clearly when the requested visual exceeds these supported forms; never invent unavailable interactions.
+        A 3D object (a cube, cylinder, engine, molecule…) is never an artifact: draw it with a ```figure block so it floats on the user's screen.
         """;
 
     public static bool IsSelfContainedRequest(string request)
@@ -27,7 +27,8 @@ public static class VisualArtifactReply
             @"\b(screen|screenshot|current\s+(app|window)|selected\s+(area|region)|visible|what\s+i\s+see|this|that|these|those)\b",
             options, TimeSpan.FromMilliseconds(100))) return false;
         return System.Text.RegularExpressions.Regex.IsMatch(request,
-            @"^\s*(?:(?:please|can\s+you|could\s+you|would\s+you)\s+)?(?:create|make|build|render|design)\s+(?:(?:an?|the)\s+)?(?:(?:interactive|editable|connected|labelled|labeled|rotatable|simple|new|visual|effort|3d|three-dimensional)\s+){0,4}(?:chart|calculator|diagram|cube|pyramid|3d\s+(?:visual|scene|shape|cube|pyramid))\b",
+            // No 3D here: a cube, pyramid or any 3D object is a figure floating on screen, which needs the screen turn.
+            @"^\s*(?:(?:please|can\s+you|could\s+you|would\s+you)\s+)?(?:create|make|build|render|design)\s+(?:(?:an?|the)\s+)?(?:(?:interactive|editable|connected|labelled|labeled|simple|new|visual|effort)\s+){0,4}(?:chart|calculator|diagram)\b",
             options, TimeSpan.FromMilliseconds(100));
     }
 

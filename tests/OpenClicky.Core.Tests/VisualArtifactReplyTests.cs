@@ -7,14 +7,15 @@ public sealed class VisualArtifactReplyTests
 {
     [Theory]
     [InlineData("Create an interactive calculator with Research 3 and Build 5")]
-    [InlineData("Render a 3D visual cube named Plan")]
-    [InlineData("Create a rotatable 3D cube named Plan")]
     [InlineData("Could you create a simple chart named Plan")]
     [InlineData("Make a connected diagram with Start and Done")]
     public void RecognizesExplicitSelfContainedVisualRequests(string request) =>
         Assert.True(VisualArtifactReply.IsSelfContainedRequest(request));
 
     [Theory]
+    [InlineData("Render a 3D visual cube named Plan")]   // 3D floats on screen as a figure: the screen turn draws it
+    [InlineData("Create a rotatable 3D cube named Plan")]
+    [InlineData("Make a pyramid")]
     [InlineData("Create a chart from this screenshot")]
     [InlineData("Make a diagram of the current window")]
     [InlineData("Show a cube around what I see on screen")]
