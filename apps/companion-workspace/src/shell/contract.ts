@@ -29,6 +29,12 @@ export const settingsActions = [
   "previewVoice", "clearHistory", "exportMemory", "openNotes", "openClipboard", "openTasks", "chooseAgentFolder",
   "resetAgentFolder", "openPrivacySetting", "routine.run", "routine.pause", "routine.resume", "routine.delete",
   "connector.add", "connector.test", "connector.remove", "connector.signIn", "connector.label", "chrome.setup", "recordHotkey", "resetHotkeys", "openLogs",
+  // Extras pages: ids and texts travel in arg (the host allows note, memory and clipboard text args up to 24,000 characters).
+  "note.save", "note.delete", "note.export",
+  "clipboard.collect", "clipboard.add", "clipboard.edit", "clipboard.copy", "clipboard.copyAll", "clipboard.copyNext",
+  "clipboard.pin", "clipboard.unpin", "clipboard.moveUp", "clipboard.moveDown", "clipboard.delete", "clipboard.clear",
+  "task.pause", "task.resume", "task.stop", "task.export", "task.clear",
+  "memory.profile", "memory.add", "memory.update", "memory.delete", "memory.clear",
 ] as const;
 // Mirror of apps/windows/OpenClicky.Core/Shell/OnboardingContract.cs; tests/fixtures/onboarding.v1.json lists both.
 export const onboardingSteps = [
@@ -88,6 +94,45 @@ const documentViewSchema = z.object({
 const device = z.object({ id, name: text(160), state: z.enum(["active", "unavailable"]) }).strict();
 const hotkey = z.object({ keys: z.array(text(24)).min(1).max(6), trigger: z.enum(["hold", "doubleTap"]) }).strict();
 const hex = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+
+// Extras pages (host: ShellContract.Extras.cs).
+const extrasError = text(300).nullable();
+const notesSchema = z.object({
+  editable: z.boolean(),
+  error: extrasError,
+  items: z.array(z.object({ id: text(64).min(1), title: text(100), text: text(10_000), updatedAt: iso }).strict()).max(20),
+  limit: z.number().int().min(0),
+}).strict();
+const clipboardSchema = z.object({
+  available: z.boolean(),
+  collecting: z.boolean(),
+  error: extrasError,
+  /** text is at most 2,000 characters; truncated says the saved item is longer. */
+  items: z.array(z.object({
+    id: text(24).min(1), text: text(2_000), truncated: z.boolean(), source: text(160).nullable(), addedAt: iso, pinned: z.boolean(),
+  }).strict()).max(100),
+  nextId: text(24).nullable(),
+  limit: z.number().int().min(0),
+}).strict();
+const tasksSchema = z.object({
+  active: z.boolean(),
+  paused: z.boolean(),
+  /** Newest first. */
+  runs: z.array(z.object({
+    id: text(64).min(1), task: text(400), status: text(40), access: text(40), startedAt: iso,
+    events: z.array(z.object({ step: z.number().int().min(0), status: text(40), message: text(300) }).strict()).max(20),
+  }).strict()).max(20),
+}).strict();
+const memorySchema = z.object({
+  editable: z.boolean(),
+  saved: z.boolean(),
+  error: extrasError,
+  name: text(80),
+  personality: text(4_000),
+  instructions: text(8_000),
+  facts: z.array(z.object({ id: text(64).min(1), text: text(1_000), learned: z.boolean() }).strict()).max(100),
+  limit: z.number().int().min(0),
+}).strict();
 
 const settingsViewSchema = z.object({
   account: z.object({
@@ -170,6 +215,10 @@ const settingsViewSchema = z.object({
     morningBrief: z.boolean(), suggestions: z.boolean(), integrationNudges: z.boolean(), meetingCountdown: z.boolean(),
     calendarConnector: text(80).nullable(),
   }).strict(),
+  notes: notesSchema,
+  clipboard: clipboardSchema,
+  tasks: tasksSchema,
+  memory: memorySchema,
 }).strict();
 
 export const shellStateSchema = z.object({

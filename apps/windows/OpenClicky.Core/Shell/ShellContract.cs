@@ -145,7 +145,7 @@ public sealed record SettingsAccess(AccessModeView Mode, string DenyList, bool R
 public sealed record SettingsAdvanced(bool UseLocalProxy, string ProxyUrl, bool ForceGdiCapture);
 public sealed record SettingsProactive(bool MorningBrief, bool Suggestions, bool IntegrationNudges, bool MeetingCountdown, string? CalendarConnector);
 
-public sealed record SettingsView(
+public sealed partial record SettingsView(
     SettingsAccount Account,
     SettingsVoice Voice,
     SettingsMicrophone Microphone,
@@ -235,7 +235,17 @@ public static class ShellIntentParser
         "previewVoice", "clearHistory", "exportMemory", "openNotes", "openClipboard", "openTasks", "chooseAgentFolder",
         "resetAgentFolder", "openPrivacySetting", "routine.run", "routine.pause", "routine.resume", "routine.delete",
         "connector.add", "connector.test", "connector.remove", "connector.signIn", "connector.label", "chrome.setup", "recordHotkey", "resetHotkeys", "openLogs",
+        // Extras pages: ids and texts travel in arg (see ExtrasArgs).
+        "note.save", "note.delete", "note.export",
+        "clipboard.collect", "clipboard.add", "clipboard.edit", "clipboard.copy", "clipboard.copyAll", "clipboard.copyNext",
+        "clipboard.pin", "clipboard.unpin", "clipboard.moveUp", "clipboard.moveDown", "clipboard.delete", "clipboard.clear",
+        "task.pause", "task.resume", "task.stop", "task.export", "task.clear",
+        "memory.profile", "memory.add", "memory.update", "memory.delete", "memory.clear",
     ];
+
+    /// <summary>settings.action args that carry what the user typed (a note, a memory, clipboard text): allowed up to <see cref="MaxTextArgLength"/>.</summary>
+    public static readonly IReadOnlyList<string> TextArgActions = ["note.save", "memory.profile", "memory.add", "memory.update", "clipboard.add", "clipboard.edit"];
+    public const int MaxTextArgLength = 24_000;
 
     public static bool TryParse(string? json, out ShellIntent intent)
     {
@@ -287,10 +297,13 @@ public static class ShellIntentParser
         "settings.section" => OneOf(m, "section", ShellContract.Sections),
         "settings.patch" => Patch(m),
         "settings.action" => OneOf(m, "action", SettingsActions)
-            && OptionalStr(m, "arg", m.GetProperty("action").GetString() == "connector.add" ? ConnectorRequest.MaxArg : MaxActionArgLength),
+            && OptionalStr(m, "arg", ActionArgCap(m.GetProperty("action").GetString()!)),
         "onboarding" => OneOf(m, "action", OnboardingContract.Actions),
         _ => false,
     };
+
+    private static int ActionArgCap(string action) =>
+        action == "connector.add" ? ConnectorRequest.MaxArg : TextArgActions.Contains(action) ? MaxTextArgLength : MaxActionArgLength;
 
     private static bool Str(JsonElement m, string name, int max) =>
         m.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String && ReadString(v) is { Length: > 0 } s && s.Length <= max;
