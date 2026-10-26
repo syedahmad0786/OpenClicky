@@ -62,6 +62,8 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
     private string _visualMessageId = Guid.NewGuid().ToString("N");
     private string _lastTurnId = "unsaved";
     private string? _currentArtifactJson;
+    /// <summary>A visual was made while only the notch showed: its workspace (the classic window) opens once the turn is over.</summary>
+    private bool _showArtifactWhenIdle;
     private const string SessionId = "companion-main";
     private readonly ConnectorRegistry _connectors;
 
@@ -177,6 +179,8 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             if (state is CompanionVoiceState.Listening or CompanionVoiceState.Processing) ApplyCompanionStyle(); // Windows' reduced-motion setting may have changed
             if (state is CompanionVoiceState.Listening or CompanionVoiceState.Processing) CloseReplay(); // a new question takes over the screen
             _home.SetState(state);
+            // Not during the turn: taking the foreground then would stop the reply as a window change.
+            if (state == CompanionVoiceState.Idle && _showArtifactWhenIdle) { _showArtifactWhenIdle = false; ShowClassic(); }
             _home.SetConversationActive(_talk.ConversationActive);
             _companionDock.SetState(state, _talk.ConversationActive);
             if (state == CompanionVoiceState.Processing && _talk.CurrentTurnRequiresScreen) CaptureDrawingAnchor(); // before the shell minimizes
@@ -385,7 +389,11 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
                 var previous = generated ? null : VisualArtifactStore.Load(SessionId).FirstOrDefault(item => item.Id == validated.Id);
                 VisualArtifactStore.Save(SessionId, previous?.ConversationId ?? _lastTurnId, artifact);
             }
-            if (generated) _visualWorkspace?.ShowArtifact(artifact);
+            if (generated && _visualWorkspace is not null)
+            {
+                _visualWorkspace.ShowArtifact(artifact);
+                _showArtifactWhenIdle = !_home.Visible; // else the reply says "I made it" and nothing is on screen
+            }
         }
         catch (Exception ex) { _visualWorkspace?.PostRuntimeError("The visual could not be saved or displayed; your previous artifacts are preserved."); Log("artifact_error=" + ex.GetType().Name); }
     }
@@ -521,6 +529,8 @@ internal sealed partial class TrayApplicationContext : ApplicationContext
             return;
         }
         PauseTask();
+        // Typed in the notch, which holds the foreground while typing: the app the user came from is the one to look at.
+        if (fromShell) _shellSurface?.Window.ReleaseInput();
         var requiresTargetSwitch = HomeRequestRouting.RequiresTargetSwitch(text, agent);
         using var submission = new CancellationTokenSource();
         _submissionCts = submission;

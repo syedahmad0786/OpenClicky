@@ -9,6 +9,8 @@ public class CompanionPromptsTests
         Assert.True(prompt.Length <= 12_000, $"talk prompt is {prompt.Length} characters");
         Assert.Contains("[DRAW:", prompt);
         Assert.Contains("start of, or inside, the sentence it illustrates", prompt);
+        Assert.Contains("draw round it with a DRAW tag", prompt); // "look at this part" draws, not only talks
+        Assert.Contains("never say you drew, circled, marked, placed or showed anything unless this same reply carries", prompt);
         Assert.DoesNotContain("[MARK:", prompt); // still accepted, no longer taught
         Assert.DoesNotContain("green", prompt);
         Assert.Contains("is shown on the user's screen", prompt); // drawn text is not a channel for screen content

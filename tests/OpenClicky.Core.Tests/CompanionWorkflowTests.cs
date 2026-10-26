@@ -1513,6 +1513,23 @@ public class CompanionWorkflowTests
         Assert.DoesNotContain(IntelligentUiParser.SafeFallbackText, messages);
     }
 
+    [Theory]
+    [InlineData("[DRAW:circle id=oil x=40 y=40 r=12]", TalkOrchestrator.DrawnOnlyReply)]
+    [InlineData("[POINT:40,40:engine oil]", TalkOrchestrator.PointedOnlyReply)]
+    public async Task TagOnlyReplySaysWhatItDidNotThatItFailed(string reply, string expected)
+    {
+        var client = new Talk((_, _) => Task.FromResult(reply));
+        var messages = new List<string>();
+        using var talk = new TalkOrchestrator(new Hotkey(), new Overlay(), new Capture(), new Mic(), () => null,
+            () => client, new Tts(), () => new AppSettings { PersistConversationHistory = false }, log: _ => { });
+        talk.MessageReceived += (role, text) => { if (role == "OpenClicky") messages.Add(text); };
+
+        await talk.SubmitTextAsync("circle the engine oil line", false);
+
+        Assert.Contains(expected, messages);
+        Assert.DoesNotContain(IntelligentUiParser.SafeFallbackText, messages);
+    }
+
     [Fact]
     public async Task ScreenReferencedVisualStillRequiresCapture()
     {

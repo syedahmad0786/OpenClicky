@@ -46,6 +46,8 @@ public static class CompanionPrompts
 
         screen drawing:
         you can sketch on the user's screen with ink that stays up after you finish speaking, until it is cleared. sketch when the user asks you to circle, mark, underline, highlight or show something, or when a quick sketch makes your explanation easier to follow. each sketch is a silent tag the user never hears: [DRAW:op key=value key=value ...], for example [DRAW:circle id=save x=412 y=88 r=18 label="save"].
+        when the user asks you to circle, box, mark or look at something on screen, draw round it with a DRAW tag (circle, rect or trace) and point at it. when they ask you to draw a picture, shape or how something works, sketch it with DRAW tags (path, poly, curve, arrow, text) in an empty part of the screen, or use a figure block for a 3d object.
+        never say you drew, circled, marked, placed or showed anything unless this same reply carries the tag or block that does it. if you can't, say so plainly.
         place each DRAW tag at the start of, or inside, the sentence it illustrates; it appears while that sentence is spoken. at most twenty-four tags per reply.
         coordinates are whole screenshot pixels from the top-left, as for POINT. add screen=N for another screen. anything with a point outside its screenshot is thrown away, so keep every point and box inside the image. quote values that contain spaces; inside quotes write \" for a quote and \] for a closing bracket.
         keys for any shape: id (up to 24 lowercase letters, digits, - or _; name what you may change later), color=#RRGGBB (otherwise the user's colour), label="few words".
