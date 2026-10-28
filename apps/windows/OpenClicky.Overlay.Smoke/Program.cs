@@ -307,7 +307,7 @@ internal static partial class Program
             Console.Error.WriteLine("FAIL: figure " + figureFailure);
             return 27;
         }
-        Console.WriteLine("PASS: a figure opens its own click-through window over its box without taking focus, paints, follows Hide, closes with the drawing, and is excluded from capture when recordings are off");
+        Console.WriteLine("PASS: a figure opens its own window (takes the mouse, never the focus) over its box, paints, follows Hide, closes with the drawing, and is excluded from capture when recordings are off");
 
         var dockFailure = ValidateDockAndDetach(overlay, fixture, vs, targetX, targetY);
         if (dockFailure is not null)
@@ -858,14 +858,15 @@ internal static partial class Program
 
     /// <summary>
     /// A figure part (parsed from a real block) opens its own window exactly over its box (the window rectangle Windows
-    /// reports) with the click-through, non-activating styles, leaves the fixture in front, and paints the solid (pixels on the
+    /// reports) with non-activating styles that still take the mouse, leaves the fixture in front, and paints the solid (pixels on the
     /// real screen); Hide hides it before returning, the next Show brings it back, and clearing the drawing destroys it. Only
     /// the cursor position is set; nothing is clicked or typed.
     /// </summary>
     private static string? ValidateFigure(BuddyOverlayController overlay, Form fixture)
     {
         const int GwlExStyle = -20;
-        const long Required = 0x00080000 | 0x00000020 | 0x00000080 | 0x08000000 | 0x00000008; // layered, transparent, tool, no-activate, topmost
+        // Layered, tool, no-activate, topmost; never transparent: the figure takes drag, wheel and × (73418a5).
+        const long Required = 0x00080000 | 0x00000080 | 0x08000000 | 0x00000008, ClickThrough = 0x00000020;
         static bool Visible(IntPtr hwnd) => NativeMethods.IsWindowVisible(hwnd);
         static void Pump(int ms) => PumpUntil(() => false, TimeSpan.FromMilliseconds(ms));
         var saved = Cursor.Position;
@@ -890,7 +891,8 @@ internal static partial class Program
             if (!NativeMethods.GetWindowRect(hwnd, out var r) || new Rectangle(r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top) != box)
                 return $"the figure window [{r.Left},{r.Top},{r.Right - r.Left}x{r.Bottom - r.Top}] is not at its box {box}";
             var ex = (long)NativeMethods.GetWindowLongPtr(hwnd, GwlExStyle);
-            if ((ex & Required) != Required) return $"the figure window styles 0x{ex:X} miss click-through / no-activate / topmost";
+            if ((ex & Required) != Required) return $"the figure window styles 0x{ex:X} miss no-activate / topmost";
+            if ((ex & ClickThrough) != 0) return $"the figure window styles 0x{ex:X} are click-through, so it cannot be turned or closed";
             if (NativeMethods.GetForegroundWindow() != fixture.Handle) return "the figure took the foreground";
             Pump(900); // past the 0.5 s scale-in
 
