@@ -1186,6 +1186,8 @@ public sealed class TalkOrchestrator : IDisposable
         }
         finally
         {
+            // A turn that returned before its capture still consumes the gesture before it ends (never throws: the take catches).
+            await highlight.ConfigureAwait(false);
             if (entered) _currentTurnRequiresScreen = true;
             if (walkthrough is not null)
             {
