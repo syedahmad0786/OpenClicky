@@ -5,12 +5,17 @@ public sealed class CompositeAgentExecutor : IAgentActionExecutor
 {
     private readonly SendInputExecutor _input = new();
     private readonly UiaSnapshotService _uia = new();
+    private readonly InstalledAppExecutor _apps = new();
 
     public Task<AgentActionResult> ExecuteAsync(
         AgentActionRequest request,
         bool userConfirmed,
         CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (request.ToolName is AgentToolNames.ListApps or AgentToolNames.OpenApp)
+            return _apps.ExecuteAsync(request, userConfirmed, cancellationToken);
+
         if (request.ToolName.Equals(AgentToolNames.UiaSnapshot, StringComparison.OrdinalIgnoreCase))
         {
             try

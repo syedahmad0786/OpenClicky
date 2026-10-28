@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 
 namespace OpenClicky.Capture;
 
-internal static class CaptureImageEncoder
+public static class CaptureImageEncoder
 {
     public static (byte[] jpeg, int width, int height) BgraToJpeg(
         byte[] bgra,

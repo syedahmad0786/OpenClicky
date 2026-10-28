@@ -1,0 +1,208 @@
+using System.Windows.Automation;
+using OpenClicky.Core;
+using OpenClicky.Core.Dictation;
+
+namespace OpenClicky.Agent;
+
+public sealed class DictationTarget
+{
+    private readonly int[] _runtimeId;
+    private readonly AutomationElement _element;
+
+    private DictationTarget(IntPtr window, IntPtr focus, AutomationElement element, int[] runtimeId,
+        string appTitle, string controlName, bool readable)
+    {
+        Window = window;
+        Focus = focus;
+        _element = element;
+        _runtimeId = runtimeId;
+        AppTitle = appTitle;
+        ControlName = controlName;
+        CanVerifyText = readable;
+    }
+
+    public IntPtr Window { get; }
+    public IntPtr Focus { get; }
+    public string AppTitle { get; }
+    public string ControlName { get; }
+    public bool CanVerifyText { get; }
+    internal AutomationElement Element => _element;
+
+    public static bool TryCapture(out DictationTarget? target, out string error, IEnumerable<string>? exclusions = null) =>
+        TryCapture(out target, out _, out error, exclusions);
+
+    /// <summary>As <see cref="TryCapture(out DictationTarget?, out string, IEnumerable{string}?)"/>, plus why it failed, for dictation's gate.</summary>
+    public static bool TryCapture(out DictationTarget? target, out DictationCaptureFailure failure, out string error,
+        IEnumerable<string>? exclusions = null)
+    {
+        target = null;
+        failure = DictationCaptureFailure.NoFocus;
+        error = "Select an editable text field in another app, then start dictation again.";
+        var window = ForegroundFocusRestorer.Capture();
+        // Our notch's fields live in the WebView2 process, so the field's process alone cannot prove the window is not ours.
+        if (ForegroundWindowInfo.IsCurrentProcessWindow(window)) { failure = DictationCaptureFailure.OwnWindow; return false; }
+        var title = ForegroundWindowInfo.GetTitle();
+        if (AgentDenyList.IsDenied(title, exclusions))
+        {
+            failure = DictationCaptureFailure.Denied;
+            error = "This app is excluded from dictation. Nothing was inspected.";
+            return false;
+        }
+        var focus = ForegroundFocusRestorer.CaptureFocus(window);
+        if (window == IntPtr.Zero || focus == IntPtr.Zero) return false;
+
+        try
+        {
+            var element = AutomationElement.FocusedElement;
+            if (element is null) return false;
+            // First, and fail closed: a field whose password flag cannot be read is treated as a password field.
+            if (IsPasswordOrUnknown(element))
+            {
+                failure = DictationCaptureFailure.Password;
+                error = "Dictation is unavailable in password or protected fields.";
+                return false;
+            }
+            if (element.Current.ProcessId == Environment.ProcessId) { failure = DictationCaptureFailure.OwnWindow; return false; }
+            failure = DictationCaptureFailure.NotWritable;
+            if (!element.Current.IsEnabled || !element.Current.IsKeyboardFocusable)
+            {
+                error = "The selected control is disabled or cannot accept keyboard input.";
+                return false;
+            }
+
+            switch (Writability(element))
+            {
+                case TextWritability.ReadOnly:
+                    error = "The selected text field is read-only.";
+                    return false;
+                case TextWritability.None:
+                    error = "The selected control does not expose a writable text value. Choose a standard editable text field.";
+                    return false;
+            }
+
+            var name = string.IsNullOrWhiteSpace(element.Current.Name) ? element.Current.ControlType.LocalizedControlType : element.Current.Name;
+            target = new(window, focus, element, element.GetRuntimeId(), title ?? "Selected app", name, readable: true);
+            failure = DictationCaptureFailure.None;
+            error = "";
+            return true;
+        }
+        catch (ElementNotAvailableException)
+        {
+            failure = DictationCaptureFailure.NoFocus;
+            error = "The selected field disappeared. Select it again and restart dictation.";
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            failure = DictationCaptureFailure.NotWritable;
+            error = "The selected control cannot be used for dictation.";
+            return false;
+        }
+    }
+
+    public async Task<DictationInsertResult> InsertAsync(string text, IAgentActionExecutor executor,
+        CancellationToken cancellationToken = default, bool requireCurrentFocus = false,
+        IEnumerable<string>? exclusions = null)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return new(false, false, "Write or dictate some text before inserting.", false, null);
+        if (text.Length > 12000) return new(false, false, "Dictation is limited to 12,000 characters.", false, null);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!Revalidate(requireCurrentFocus, exclusions))
+            return new(false, false, "The original app or text field changed. Nothing was inserted; select it again.", false, null);
+
+        var beforeText = ReadText();
+        var request = new AgentActionRequest(AgentToolNames.TypeText,
+            new Dictionary<string, string> { ["text"] = text }, requireCurrentFocus ? "Insert finalized local dictation into the selected field" : "Insert the reviewed dictation draft");
+        AgentActionResult action;
+        try { action = await executor.ExecuteAsync(request, userConfirmed: true, cancellationToken).ConfigureAwait(false); }
+        catch (Exception ex)
+        {
+            return new(true, false, "Input was attempted but did not finish. The destination may contain partial text: " + ex.Message, false, null, beforeText);
+        }
+        if (!action.Success)
+            return new(true, false, "Input was attempted but did not finish. The destination may contain partial text: " + action.Message, false, null, beforeText);
+
+        await Task.Delay(80, cancellationToken).ConfigureAwait(false);
+        var finalText = ReadText();
+        if (finalText is null)
+            return new(true, true, $"Inserted {text.Length} characters. The destination does not expose readable text, so insertion is unverified.", false, null, beforeText);
+        var verified = DictationInsertionProof.IsExactContiguousChange(beforeText, finalText, text);
+        return verified
+            ? new(true, true, $"Inserted and verified {text.Length} characters in the destination.", true, finalText, beforeText)
+            : new(true, true, "Input was sent, but the readable destination did not show the reviewed draft as a new change. Treat insertion as unverified.", false, finalText, beforeText);
+    }
+
+    private bool Revalidate(bool requireCurrentFocus, IEnumerable<string>? exclusions)
+    {
+        if (requireCurrentFocus)
+        {
+            if (ForegroundFocusRestorer.Capture() != Window) return false;
+        }
+        else if (!ForegroundFocusRestorer.Restore(Window, focusedControl: Focus)) return false;
+        if (AgentDenyList.IsDenied(ForegroundWindowInfo.GetTitle(), exclusions)) return false;
+        try
+        {
+            var current = AutomationElement.FocusedElement;
+            return current is not null && current.GetRuntimeId().SequenceEqual(_runtimeId)
+                && current.Current.IsEnabled && current.Current.IsKeyboardFocusable && !current.Current.IsPassword
+                && Writability(current) == TextWritability.Writable;
+        }
+        catch (ElementNotAvailableException) { return false; }
+        catch (InvalidOperationException) { return false; }
+    }
+
+    /// <summary>
+    /// For the learned-correction watch (any thread, read-only): the field's current value, or null once the field is gone,
+    /// is no longer focused, turned into a password field or stopped exposing text.
+    /// </summary>
+    public string? ReadValueWhileFocused()
+    {
+        try
+        {
+            var focused = AutomationElement.FocusedElement;
+            if (focused is null || !focused.GetRuntimeId().SequenceEqual(_runtimeId) || _element.Current.IsPassword) return null;
+            return ReadText();
+        }
+        catch (ElementNotAvailableException) { return null; }
+        catch (InvalidOperationException) { return null; }
+    }
+
+    private string? ReadText()
+    {
+        try
+        {
+            return TryValuePattern(_element) is { } value ? value.Current.Value
+                : _element.TryGetCurrentPattern(TextPattern.Pattern, out var text) ? ((TextPattern)text).DocumentRange.GetText(-1) : null;
+        }
+        catch (ElementNotAvailableException) { return null; }
+        catch (InvalidOperationException) { return null; }
+    }
+
+    private static bool IsPasswordOrUnknown(AutomationElement element)
+    {
+        try { return element.Current.IsPassword; }
+        catch (Exception ex) when (ex is not OutOfMemoryException) { return true; }
+    }
+
+    private static ValuePattern? TryValuePattern(AutomationElement element) =>
+        element.TryGetCurrentPattern(ValuePattern.Pattern, out var pattern) ? pattern as ValuePattern : null;
+
+    private enum TextWritability { None, ReadOnly, Writable }
+
+    /// <summary>
+    /// A value says itself whether it is read-only. Rich web editors (contenteditable in Chromium and Electron: Slack, Gmail)
+    /// have no value, only text: their text range says whether it is read-only. A whole web page is a read-only value.
+    /// </summary>
+    private static TextWritability Writability(AutomationElement element)
+    {
+        if (TryValuePattern(element) is { } value) return value.Current.IsReadOnly ? TextWritability.ReadOnly : TextWritability.Writable;
+        return element.TryGetCurrentPattern(TextPattern.Pattern, out var text)
+            && ((TextPattern)text).DocumentRange.GetAttributeValue(TextPattern.IsReadOnlyAttribute) is false
+            ? TextWritability.Writable : TextWritability.None;
+    }
+
+}
+
+/// <param name="ValueBefore">The field's value read just before input was sent; null when nothing was attempted or it was unreadable.</param>
+public sealed record DictationInsertResult(bool InputAttempted, bool InputCompleted, string Message, bool Verified, string? FinalText,
+    string? ValueBefore = null);

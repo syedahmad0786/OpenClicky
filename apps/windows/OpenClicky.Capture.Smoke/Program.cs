@@ -2,6 +2,8 @@ using OpenClicky.Capture;
 
 // Headless capture smoke for windows-latest CI / local Win11.
 // Does NOT exercise tray, PTT, overlay, or OpenRouter — only capture backends.
+if (args.Contains("--own-windows")) return await OwnWindowsSmoke.RunAsync(args);
+
 Console.WriteLine("OpenClicky capture smoke starting…");
 
 var capture = new WgcScreenCaptureService(msg => Console.WriteLine(msg));

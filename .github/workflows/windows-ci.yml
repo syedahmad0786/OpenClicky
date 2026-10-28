@@ -20,6 +20,29 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.29.3
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: apps/companion-workspace/pnpm-lock.yaml
+
+      - name: Build and test companion workspace (shell)
+        # The app ships apps/companion-workspace/dist; publish-exe.ps1 refuses to package without it.
+        run: |
+          pnpm --dir apps/companion-workspace install --frozen-lockfile
+          pnpm --dir apps/companion-workspace test
+          pnpm --dir apps/companion-workspace build
+
+      - name: Fetch OpenWork runtime (pinned, hash-verified)
+        # Node, the OpenCode engine and openwork-server, as listed in scripts/setup-openwork.ps1; background jobs need it.
+        run: powershell -ExecutionPolicy Bypass -File scripts/setup-openwork.ps1
+
       - name: Build solution
         run: dotnet build OpenClicky.sln -c Release
 
@@ -51,12 +74,12 @@ jobs:
         run: dotnet run --project apps/windows/OpenClicky.App.SecretStore.Smoke/OpenClicky.App.SecretStore.Smoke.csproj -c Release --no-launch-profile
 
       - name: Publish self-contained win-x64 EXE (unsigned)
-        run: powershell -ExecutionPolicy Bypass -File scripts/publish-exe.ps1
+        run: powershell -ExecutionPolicy Bypass -File scripts/publish-exe.ps1 -OutputDirectory artifacts/exe/win-x64
 
       - name: Pack unsigned MSIX
         # makeappx is auto-discovered from Windows Kits on windows-latest.
         # Package is unsigned — SmartScreen / sideload policy still apply.
-        run: powershell -ExecutionPolicy Bypass -File scripts/pack-msix.ps1
+        run: powershell -ExecutionPolicy Bypass -File scripts/pack-msix.ps1 -PayloadDirectory artifacts/exe/win-x64 -OutputDirectory artifacts/msix
 
       - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
@@ -70,6 +93,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: openclicky-msix
-          path: artifacts/msix/OpenClicky.msix
+          path: artifacts/msix/*.msix
           if-no-files-found: error
           retention-days: 14

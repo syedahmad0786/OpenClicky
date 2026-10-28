@@ -58,6 +58,38 @@ public class HotkeyChordTests
         Assert.Equal("Ctrl+Shift+T", chord.DisplayName);
     }
 
+    [Theory]
+    [InlineData(0x70, "F1")]
+    [InlineData(0x78, "F9")]
+    [InlineData(0x7B, "F12")]
+    [InlineData(0x87, "F24")]
+    public void DisplayName_FormatsWindowsFunctionKeys(int key, string name)
+    {
+        var chord = new HotkeyChord(false, false, true, true, key);
+
+        Assert.Equal($"Ctrl+Shift+{name}", chord.DisplayName);
+    }
+
+    [Fact]
+    public void DisplayName_UnknownKeyKeepsVirtualKeyFallback()
+    {
+        var chord = new HotkeyChord(false, false, true, false, 0x88);
+
+        Assert.Equal("Ctrl+Vk88", chord.DisplayName);
+    }
+
+    [Theory]
+    [InlineData(0x1B)]
+    [InlineData(-1)]
+    [InlineData(0xFF)]
+    public void TryValidate_RejectsCancelOrInvalidKey(int key)
+    {
+        var chord = new HotkeyChord(false, false, true, true, key);
+        Assert.False(chord.TryValidate(out var error));
+        Assert.NotNull(error);
+        Assert.Equal(HotkeyChord.Default, HotkeyChord.NormalizeOrDefault(chord));
+    }
+
     [Fact]
     public void NormalizeOrDefault_FallsBackForInvalid()
     {

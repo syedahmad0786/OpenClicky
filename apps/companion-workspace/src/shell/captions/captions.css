@@ -1,0 +1,15 @@
+/* Captions: a dark pill at the bottom centre (above the taskbar), at most two lines; the newest words sit at the
+   bottom and older lines scroll out above. No shadow: the window shows only the reported region. */
+.captions {
+  position: fixed; left: 50%; bottom: 72px; translate: -50% 0; z-index: 2;
+  box-sizing: border-box; width: max-content; max-width: min(720px, calc(100vw - 32px));
+  padding: 8px 18px; border-radius: 18px;
+  background: rgb(12 12 16 / 0.92); color: #f5f5f7;
+  font: 500 17px/24px var(--font-ui);
+  display: flex; flex-direction: column; justify-content: flex-end;
+  max-height: calc(2 * 24px + 16px); overflow: hidden;
+  transition: opacity 250ms var(--ease);
+}
+.captions--fading { opacity: 0; }
+.captions__text { margin: 0; overflow-wrap: anywhere; text-align: center; }
+:root[data-reduced-motion="true"] .captions { transition-duration: 120ms; }

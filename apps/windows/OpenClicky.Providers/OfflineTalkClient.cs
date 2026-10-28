@@ -12,10 +12,10 @@ public sealed class OfflineTalkClient : ITalkClient
 
     /// <summary>Spoken text portion of the canned reply (no POINT tag).</summary>
     public const string SpokenText =
-        "offline smoke: pointing near the center of your screen.";
+        "Here's the center of this screen. This demo works without an AI account.";
 
     /// <summary>Label embedded in the canned POINT tag.</summary>
-    public const string PointLabel = "smoke";
+    public const string PointLabel = "screen center";
 
     public static bool IsEnvEnabled()
     {

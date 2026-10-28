@@ -5,6 +5,8 @@
     <Nullable>enable</Nullable>
     <RootNamespace>OpenClicky.Overlay</RootNamespace>
     <UseWindowsForms>true</UseWindowsForms>
+    <!-- WPF only for FigureWindow (Viewport3D); everything else is WinForms/GDI+. -->
+    <UseWPF>true</UseWPF>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\OpenClicky.Core\OpenClicky.Core.csproj" />

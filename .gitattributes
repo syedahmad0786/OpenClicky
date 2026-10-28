@@ -1,0 +1,2 @@
+# Pinned by SHA-256 in sources.json (scripts/collect-third-party-licenses.ps1): check out byte-for-byte, never CRLF.
+packaging/third-party-license-fallbacks/** -text

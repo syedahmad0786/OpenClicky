@@ -12,6 +12,7 @@ obj/
 # Node
 node_modules/
 services/local-proxy/dist/
+apps/companion-workspace/dist/
 *.log
 .env
 .dev.vars
@@ -28,6 +29,9 @@ Thumbs.db
 *.jpeg
 *.png
 !docs/**/*.png
+!assets/*.png
+!packaging/msix/Assets/*.png
 
 # Publish output
 artifacts/
+.codex-build/

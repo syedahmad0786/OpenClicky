@@ -23,8 +23,11 @@ public sealed class ChatGptCredential
     public bool HasUsableSession =>
         !string.IsNullOrWhiteSpace(AccessToken)
         && !string.IsNullOrWhiteSpace(ClientId)
-        && Scopes.Any(s => s.Equals("chatgpt.tokens.use.direct", StringComparison.OrdinalIgnoreCase));
+        && ClientId != "dynamic_agent_client"
+        && !string.IsNullOrWhiteSpace(Subject)
+        && Issuer == "https://auth.openai.com"
+        && Scopes?.Contains("chatgpt.tokens.use.direct", StringComparer.Ordinal) == true;
 
     public bool AccessTokenNearExpiry(TimeSpan skew) =>
-        AccessTokenExpiresAt is { } exp && DateTimeOffset.UtcNow >= exp - skew;
+        AccessTokenExpiresAt is not { } exp || DateTimeOffset.UtcNow >= exp - skew;
 }

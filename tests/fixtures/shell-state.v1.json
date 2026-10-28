@@ -1,0 +1,208 @@
+{
+  "version": 1,
+  "theme": "dark",
+  "accent": "#3380FF",
+  "reducedMotion": false,
+  "user": { "displayName": "Ahmad" },
+  "hotkeys": {
+    "talk": ["Ctrl", "Alt"],
+    "text": ["Ctrl", "Alt", "T"],
+    "dictate": ["Ctrl", "Alt", "D"],
+    "handsFree": ["Ctrl", "Alt", "H"]
+  },
+  "status": { "phase": "working", "jobsWorking": 2, "jobsNeedYou": 1 },
+  "notch": { "tab": "home", "open": true, "section": "general" },
+  "featured": {
+    "id": "job-working",
+    "title": "Summarise the quarterly report",
+    "state": "working",
+    "colour": "blue",
+    "summary": "Reading the PDF and pulling out the headline numbers.",
+    "stat": { "value": "3 of 5", "label": "steps done" },
+    "bullets": ["Opened the report", "Found the revenue table"], "next": ["Email the summary to the team"],
+    "files": [{ "name": "q3-report.pdf", "path": "C:\\Users\\demo\\Documents\\q3-report.pdf", "kind": "pdf" }],
+    "liveLine": "Extracting table 2",
+    "plan": [
+      { "text": "Open the report", "done": true },
+      { "text": "Write the summary", "done": false }
+    ],
+    "updatedAt": "2026-10-24T09:30:00Z"
+  },
+  "jobs": [
+    {
+      "id": "job-queued", "title": "Tidy the downloads folder", "state": "queued", "colour": "yellow",
+      "bullets": [], "next": [], "files": [{ "name": "Downloads", "path": "C:\\Users\\demo\\Downloads", "kind": "folder" }],
+      "plan": [], "updatedAt": "2026-10-24T09:00:00Z"
+    },
+    {
+      "id": "job-working", "title": "Summarise the quarterly report", "state": "working", "colour": "blue",
+      "summary": "Reading the PDF and pulling out the headline numbers.",
+      "stat": { "value": "3 of 5", "label": "steps done" },
+      "bullets": ["Opened the report", "Found the revenue table"], "next": ["Email the summary to the team"],
+      "files": [{ "name": "q3-report.pdf", "path": "C:\\Users\\demo\\Documents\\q3-report.pdf", "kind": "pdf" }],
+      "liveLine": "Extracting table 2",
+      "plan": [{ "text": "Open the report", "done": true }, { "text": "Write the summary", "done": false }],
+      "updatedAt": "2026-10-24T09:30:00Z"
+    },
+    {
+      "id": "job-needs-you", "title": "Book the flight", "state": "needsYou", "colour": "red",
+      "summary": "Two fares match. Pick one to continue.",
+      "bullets": ["Fare A is cheaper", "Fare B is refundable", "Both leave at 8am", "Checked three sites"], "next": [],
+      "files": [
+        { "name": "fares.xlsx", "path": "C:\\Users\\demo\\Documents\\fares.xlsx", "kind": "sheet" },
+        { "name": "itinerary.docx", "path": "C:\\Users\\demo\\Documents\\itinerary.docx", "kind": "doc" }
+      ],
+      "plan": [], "updatedAt": "2026-10-24T09:20:00Z"
+    },
+    {
+      "id": "job-done", "title": "Resize the photos", "state": "done", "colour": "green",
+      "summary": "All twelve photos are resized.",
+      "bullets": ["12 photos resized"], "next": [],
+      "files": [
+        { "name": "cover.png", "path": "C:\\Users\\demo\\Pictures\\cover.png", "kind": "image" },
+        { "name": "intro.mp3", "path": "C:\\Users\\demo\\Music\\intro.mp3", "kind": "audio" },
+        { "name": "demo.mp4", "path": "C:\\Users\\demo\\Videos\\demo.mp4", "kind": "video" }
+      ],
+      "plan": [], "updatedAt": "2026-10-24T08:50:00Z"
+    },
+    {
+      "id": "job-failed", "title": "Upload the backup", "state": "failed", "colour": "red",
+      "summary": "The drive was offline.",
+      "bullets": [], "next": [],
+      "files": [{ "name": "help", "path": "https://example.com/help", "kind": "link" }, { "name": "notes.bin", "path": "C:\\Users\\demo\\notes.bin", "kind": "other" }],
+      "plan": [], "updatedAt": "2026-10-24T08:40:00Z"
+    },
+    {
+      "id": "job-stopped", "title": "Draft the newsletter", "state": "stopped", "colour": "yellow",
+      "bullets": [], "next": [], "files": [], "plan": [], "updatedAt": "2026-10-24T08:30:00Z"
+    },
+    {
+      "id": "job-new", "title": "Plan the week", "state": "new", "colour": "green",
+      "bullets": [], "next": [], "files": [], "plan": [], "updatedAt": "2026-10-24T09:45:00Z"
+    }
+  ],
+  "chat": {
+    "rows": [
+      { "id": "row-1", "role": "user", "text": "Summarise the quarterly report", "at": "2026-10-24T09:29:00Z" },
+      { "id": "row-2", "role": "assistant", "text": "On it. I will start with the revenue table.", "at": "2026-10-24T09:29:05Z", "jobId": "job-working" },
+      { "id": "row-3", "role": "event", "text": "Job started", "at": "2026-10-24T09:29:06Z", "jobId": "job-working" },
+      { "id": "drawing-0f1e2d3c4b5a69788796a5b4c3d2e1f0", "role": "event", "text": "Drew a box around the total", "at": "2026-10-24T09:30:00Z", "drawingId": "0f1e2d3c4b5a69788796a5b4c3d2e1f0" }
+    ]
+  },
+  "cards": [
+    { "id": "card-activity", "kind": "activity", "title": "Working on it", "body": "Reading the report", "actions": [] },
+    { "id": "card-text", "kind": "textResponse", "title": "Here is the answer", "body": "Revenue grew eleven percent.", "actions": [{ "id": "copy", "label": "Copy", "style": "secondary" }] },
+    { "id": "card-update", "kind": "jobUpdate", "title": "Photos resized", "actions": [{ "id": "open", "label": "Open", "style": "primary" }] },
+    { "id": "card-needs", "kind": "needsYou", "title": "Pick a fare", "body": "Two options match.", "actions": [{ "id": "a", "label": "Fare A", "style": "primary" }, { "id": "b", "label": "Fare B", "style": "secondary" }, { "id": "stop", "label": "Cancel job", "style": "danger" }] },
+    { "id": "card-muted", "kind": "mutedSpeaker", "title": "Speaker is muted", "actions": [] },
+    { "id": "card-mic", "kind": "micTrouble", "title": "Microphone not heard", "actions": [] },
+    { "id": "card-clip", "kind": "clipboard", "title": "Copied text", "actions": [] },
+    { "id": "card-dict", "kind": "dictionaryLearned", "title": "Learned a word", "actions": [] },
+    { "id": "card-doc", "kind": "documentAccess", "title": "Allow file access?", "actions": [] },
+    { "id": "card-app", "kind": "appUpdated", "title": "Updated", "actions": [] },
+    { "id": "card-tip", "kind": "tip", "title": "Try holding the talk keys", "actions": [] },
+    { "id": "card-toast", "kind": "toast", "title": "Saved", "actions": [], "autoDismissMs": 3000 }
+  ],
+  "apps": { "connected": [{ "id": "notion", "name": "Notion" }, { "id": "slack", "name": "Slack" }] },
+  "general": { "showInTaskbar": true, "showInRecordings": false, "launchAtLogin": true, "paused": false },
+  "update": { "current": "1.4.0", "available": "1.5.0", "state": "available", "progress": 0 },
+  "document": { "path": "C:\\Users\\demo\\Documents\\notes.md", "name": "notes.md", "kind": "markdown", "content": "# Notes\n\nHello.", "truncated": false },
+  "settings": {
+    "account": {
+      "provider": "chatgpt", "signedInAs": "ahmad@example.com", "model": "gpt-5", "quickModel": "gpt-5-mini",
+      "models": ["gpt-5", "gpt-5-mini"], "openRouterKeySet": false, "openRouterModel": "anthropic/claude-sonnet-4.5",
+      "anthropicKeySet": true, "anthropicModel": "claude-sonnet-5-5", "xaiKeySet": false, "xaiModel": "grok-4"
+    },
+    "voice": {
+      "voice": "windows-default",
+      "voices": [
+        { "id": "windows-default", "name": "Windows default", "detail": "Installed voice", "available": true },
+        { "id": "alloy", "name": "Alloy", "detail": "Needs your OpenAI key", "available": false }
+      ],
+      "speed": 1, "captions": true, "readReplies": true, "outputDeviceId": null,
+      "outputDevices": [{ "id": "spk-1", "name": "Speakers", "state": "active" }]
+    },
+    "microphone": {
+      "deviceId": "mic-1",
+      "devices": [{ "id": "mic-1", "name": "Headset", "state": "active" }, { "id": "mic-2", "name": "USB mic", "state": "unavailable" }],
+      "whisper": "downloading", "whisperProgress": 0.4,
+      "accurate": "missing", "accurateProgress": 0, "useAccurate": false
+    },
+    "dictation": {
+      "autoDetect": true, "language": "en",
+      "languages": [{ "code": "en", "name": "English", "native": "English" }, { "code": "ur", "name": "Urdu", "native": "اردو" }],
+      "dictionary": ["OpenClicky", "Ahmad"],
+      "cleanup": true, "multilingual": "missing", "multilingualProgress": 0
+    },
+    "shortcuts": {
+      "talk": { "keys": ["Ctrl", "Alt"], "trigger": "hold" },
+      "text": { "keys": ["Ctrl"], "trigger": "doubleTap" },
+      "dictate": { "keys": ["Ctrl", "Win"], "trigger": "hold" },
+      "handsFree": { "keys": ["Ctrl", "Win"], "trigger": "doubleTap" }
+    },
+    "cursor": { "colour": "#3380FF", "hidden": false, "screenHighlight": true, "shakeToDetach": true },
+    "integrations": {
+      "chrome": "waiting",
+      "connectors": [
+        { "key": "notion", "name": "Notion", "host": "mcp.notion.com", "status": "connected", "toolCount": 12, "app": "notion", "label": "Work", "kind": "remote", "auth": "browser", "since": "2026-10-20T09:00:00Z" },
+        { "key": "slack", "name": "Slack", "host": "mcp.slack.com", "status": "reconnect", "toolCount": null, "app": null, "label": null, "kind": "remote", "auth": "browser", "since": null }
+      ],
+      "catalog": [
+        { "id": "linear", "name": "Linear", "description": "Issues, projects and cycles.", "setup": "signIn", "multiAccount": true },
+        { "id": "obsidian", "name": "Obsidian", "description": "Notes in a vault on this PC. No account needed.", "setup": "folder", "multiAccount": false }
+      ],
+      "browser": {
+        "browserId": null, "profileDir": null,
+        "browsers": [{ "id": "chrome", "name": "Chrome", "profiles": [{ "dir": "Default", "name": "Ahmad" }, { "dir": "Profile 2", "name": "Work" }] }],
+        "instances": [],
+        "extensionFolder": "C:\\Users\\demo\\AppData\\Local\\OpenClicky\\browser-extension"
+      }
+    },
+    "agents": {
+      "folder": "C:\\Users\\demo\\OpenClicky\\Agents", "folderIsDefault": true, "speakAnnouncements": true, "cursorUpdates": true,
+      "reach": [{ "id": "files", "label": "Files and folders", "state": "allowed" }, { "id": "camera", "label": "Camera", "state": "unknown" }]
+    },
+    "routines": [
+      { "id": "r1", "title": "Morning summary", "schedule": "Every day at 8:00", "next": "2026-10-25T08:00:00Z", "last": null, "status": "scheduled", "note": null },
+      { "id": "r2", "title": "Weekly backup", "schedule": "Every Friday at 18:00", "next": null, "last": "2026-10-23T18:00:00Z", "status": "paused", "note": "Paused after 3 failed runs" }
+    ],
+    "access": { "mode": "confirmEach", "denyList": "C:\\Windows\\System32", "rememberHistory": true },
+    "advanced": { "useLocalProxy": false, "proxyUrl": "", "forceGdiCapture": false },
+    "proactive": { "morningBrief": false, "suggestions": true, "integrationNudges": false, "meetingCountdown": true, "calendarConnector": null },
+    "notes": {
+      "editable": true, "error": null, "limit": 20,
+      "items": [
+        { "id": "5f0c2a9e7b1d4c3e8a6f9b2d1c0e7a4b", "title": "Dentist", "text": "Thursday 3pm, bring the insurance card.", "updatedAt": "2026-10-24T09:30:00.000Z" },
+        { "id": "a1b2c3d4e5f60718293a4b5c6d7e8f90", "title": "Gift ideas", "text": "Book for Sam, headphones for Ali", "updatedAt": "2026-10-20T18:05:00.000Z" }
+      ]
+    },
+    "clipboard": {
+      "available": true, "collecting": false, "error": null, "nextId": "12", "limit": 100,
+      "items": [
+        { "id": "12", "text": "Order #4471 ships Monday", "truncated": false, "source": "Outlook", "addedAt": "2026-10-24T10:00:00.000Z", "pinned": true },
+        { "id": "13", "text": "https://example.com/report", "truncated": false, "source": null, "addedAt": "2026-10-24T10:02:00.000Z", "pinned": false }
+      ]
+    },
+    "tasks": {
+      "active": false, "paused": false,
+      "runs": [
+        {
+          "id": "run-2", "task": "Rename the screenshots on the desktop", "status": "completed", "access": "ConfirmEach", "startedAt": "2026-10-24T11:00:00.000Z",
+          "events": [
+            { "step": 1, "status": "planning", "message": "Looking at the desktop." },
+            { "step": 2, "status": "completed", "message": "Renamed 4 files." }
+          ]
+        },
+        { "id": "run-1", "task": "Fill in the timesheet", "status": "failed", "access": "Preview", "startedAt": "2026-10-23T16:00:00.000Z", "events": [] }
+      ]
+    },
+    "memory": {
+      "editable": true, "saved": true, "error": null, "limit": 100,
+      "name": "Clicky", "personality": "Warm and brief.", "instructions": "Use British spelling.",
+      "facts": [
+        { "id": "f1", "text": "Prefers mornings for meetings.", "learned": false },
+        { "id": "f2", "text": "Works on the OpenClicky project.", "learned": true }
+      ]
+    }
+  }
+}

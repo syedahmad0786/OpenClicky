@@ -1,0 +1,117 @@
+/* Notch shell. Numbers are the design-spec geometry: pill 60x8, peek 532 wide / 280 content, settings 920x720,
+   top corners 10, sheet corners 26, open 430 ms, close 300 ms, content fade 180 ms, reduced motion 120 ms fade. */
+
+/* Notch and its cards, centred at the top. Only [data-region] children are drawn or clickable. */
+.notch-shell {
+  position: fixed; top: 0; left: 50%; translate: -50% 0; z-index: 1;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+}
+/* The panel keeps its full size while closing, so the cards wait below it and appear once it has collapsed. */
+.notch-shell[data-phase="closing"] > .notch-cards { visibility: hidden; }
+
+.notch {
+  position: relative;
+  width: 60px; height: 8px;
+  color: var(--text); font-family: var(--font-ui);
+}
+.notch--open, .notch--closing { width: 532px; height: auto; }
+.notch--settings { width: 920px; height: 720px; }
+
+.notch__panel {
+  position: relative; height: 100%; overflow: hidden;
+  background: var(--panel); box-shadow: inset 0 0 0 1px var(--panel-border), inset 0 1px 0 rgb(255 255 255 / 0.06);
+  border-radius: 0 0 4px 4px;
+}
+.notch--open .notch__panel, .notch--closing .notch__panel { border-radius: 10px 10px 26px 26px; }
+
+/* The layout box is already the final size; the clip-path grows out of the pill. */
+.notch--open .notch__panel { animation: notch-open 430ms var(--ease) both; }
+.notch--closing .notch__panel { animation: notch-close 300ms var(--ease) both; }
+.notch--open.notch--settings .notch__panel { animation-name: notch-grow; }
+@keyframes notch-open {
+  from { clip-path: inset(0 calc(50% - 30px) calc(100% - 8px) calc(50% - 30px) round 0 0 4px 4px); }
+  to { clip-path: inset(0 0 0 0 round 10px 10px 26px 26px); }
+}
+@keyframes notch-close {
+  from { clip-path: inset(0 0 0 0 round 10px 10px 26px 26px); }
+  to { clip-path: inset(0 calc(50% - 30px) calc(100% - 8px) calc(50% - 30px) round 0 0 4px 4px); }
+}
+@keyframes notch-grow {
+  from { clip-path: inset(0 194px calc(100% - 340px) 194px round 10px 10px 26px 26px); }
+  to { clip-path: inset(0 0 0 0 round 10px 10px 26px 26px); }
+}
+@keyframes notch-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes notch-fade-out { from { opacity: 1; } to { opacity: 0; } }
+
+.notch[data-reduced="true"] .notch__panel { clip-path: none; }
+.notch[data-reduced="true"].notch--open .notch__panel { animation: notch-fade 120ms linear both; }
+.notch[data-reduced="true"].notch--closing .notch__panel { animation: notch-fade-out 120ms linear both; }
+
+.notch-peek { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.notch-peek__bar { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px 6px; }
+.notch-peek__tab { display: flex; flex: 1; flex-direction: column; min-height: 0; animation: notch-fade 180ms var(--ease) both; }
+.notch[data-reduced="true"] .notch-peek__tab { animation-duration: 120ms; }
+.notch-tabs .oc-icon-btn { position: relative; width: 36px; height: 28px; border-radius: 999px; }
+
+.notch-body { max-height: 280px; padding: 4px 18px 10px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--track-off) transparent; }
+.notch--settings .notch-body { flex: 1; max-height: none; }
+
+/* Home */
+.notch-home__greeting { margin: 6px 0 4px; text-align: center; font: 600 21px/1.2 var(--font-display); letter-spacing: -0.01em; }
+.notch-home__hint { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px; margin: 0 0 14px; text-align: center; font-size: 13px; color: var(--text-2); }
+.notch-home__footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 18px 14px; }
+.notch-home__status { font-size: 12px; color: var(--text-2); }
+
+/* Featured job card (paper) */
+.notch-job { margin-top: 4px; font-size: 13px; line-height: 1.4; }
+.notch-job__tag { position: absolute; top: 6px; left: 12px; }
+.notch-job__close {
+  position: absolute; top: 6px; right: 8px; display: grid; place-items: center; width: 24px; height: 24px; padding: 0;
+  color: #2a2620; background: transparent; border: 0; border-radius: 50%; cursor: pointer; opacity: 0.7;
+  transition: opacity var(--dur-fast), background-color var(--dur-fast);
+}
+.notch-job__close svg { width: var(--icon-md); height: var(--icon-md); }
+.notch-job__close:hover, .notch-job__close:focus-visible { opacity: 1; background: rgb(42 38 32 / 0.1); }
+.notch-job__close:active { background: rgb(42 38 32 / 0.16); }
+.notch-job__summary { margin: 0 0 8px; padding: 8px 10px; background: rgb(42 38 32 / 0.07); border-radius: 8px; }
+.notch-job__stat { margin: 0 0 8px; font-size: 12px; }
+.notch-job__stat strong { margin-right: 4px; font: 700 22px/1 var(--font-display); }
+.notch-job__plan { margin: 0 0 8px; }
+.notch-job__plan-count { margin: 0 0 4px; font-size: 11px; opacity: 0.82; }
+.notch-job__step { display: flex; gap: 6px; align-items: baseline; font-size: 12px; line-height: 1.35; }
+.notch-job__step[data-done="true"] .notch-job__step-text { text-decoration: line-through; opacity: 0.78; }
+.notch-job__tick { display: inline-grid; flex: none; place-items: center; width: 12px; align-self: center; }
+.notch-job__tick svg { width: 12px; height: 12px; }
+.notch-job__live { margin: 0 0 8px; font-size: 12px; font-style: italic; opacity: 0.82; }
+.notch-job__bullets { margin: 0 0 8px; padding-left: 18px; }
+.notch-job__next { margin: 0 0 4px; font-size: 12px; opacity: 0.8; }
+.notch-job__files { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+.notch-job__file { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; padding: 3px 3px 3px 10px; font-size: 12px; background: rgb(255 255 255 / 0.6); border-radius: 999px; }
+.notch-job__filename { max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.notch-job__actions { display: flex; gap: 8px; margin-top: 10px; }
+.notch-job__input {
+  display: block; box-sizing: border-box; width: 100%; min-height: 34px; max-height: 90px; margin-top: 10px; padding: 7px 14px; resize: none; field-sizing: content;
+  overflow-y: auto; scrollbar-width: none; color: #2a2620; font: 13px/20px var(--font-ui); background: rgb(255 255 255 / 0.6); border: 0; border-radius: 999px;
+}
+.notch-job__input::placeholder { color: rgb(42 38 32 / 0.72); }
+.notch-job .oc-pill--outline { color: #2a2620; border-color: rgb(42 38 32 / 0.3); }
+.notch-job .oc-pill--outline:hover:not(:disabled) { background: rgb(42 38 32 / 0.08); }
+
+/* Chat */
+.notch-chat__list { display: flex; flex-direction: column; gap: 8px; min-height: 120px; scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 22%, transparent) transparent; }
+.notch-chat__row { max-width: 420px; padding: 8px 12px; font-size: 13px; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; border-radius: 16px; }
+.notch-chat__row[data-role="assistant"] { align-self: flex-start; background: var(--card); }
+.notch-chat__row[data-role="user"] { align-self: flex-end; color: var(--on-tint); background: var(--accent-tint); }
+.notch-chat__row[data-role="event"] { align-self: center; padding: 2px 8px; font-size: 11px; color: var(--text-3); }
+.notch-chat__drawing { display: flex; flex-direction: column; align-items: center; gap: 4px; align-self: center; }
+.notch-chat__drawing-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+.notch-chat__empty { display: flex; flex-direction: column; align-items: center; gap: 4px; margin: auto; font-size: 12px; color: var(--text-2); }
+.notch-chat__empty strong { font-size: 14px; color: var(--text); }
+.notch-chat__bar { display: flex; align-items: flex-end; gap: 8px; padding: 10px 18px 14px; }
+.notch-chat__talk { flex: 3 1 0; min-width: 0; min-height: 40px; }
+/* One-line pill, same height as the talk pill (40px); grows upward (the bar is bottom-aligned) up to 4 lines while the text wraps. */
+.notch-chat__input {
+  flex: 2 1 0; box-sizing: border-box; min-width: 0; min-height: 40px; max-height: 100px; padding: 10px 16px; resize: none; field-sizing: content;
+  overflow-y: auto; scrollbar-width: none; color: var(--text); font: 13px/20px var(--font-ui); background: var(--field); border: 0; border-radius: 999px;
+}
+.notch-chat__input::placeholder { color: var(--text-3); }
