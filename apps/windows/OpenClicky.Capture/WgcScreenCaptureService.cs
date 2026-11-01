@@ -29,6 +29,9 @@ public sealed class WgcScreenCaptureService : IScreenCaptureService, IDisposable
     /// <summary>Backend used for the last capture: "wgc" or "gdi".</summary>
     public string LastBackend { get; private set; } = "gdi";
 
+    public Task<ScreenCaptureResult?> CaptureRegionJpegAsync((int X, int Y, int Width, int Height) bounds, CancellationToken cancellationToken = default)
+        => _fallback.CaptureRegionJpegAsync(bounds, cancellationToken);
+
     public Task<IReadOnlyList<ScreenCaptureResult>> CaptureAllMonitorsJpegAsync(
         CancellationToken cancellationToken = default)
     {

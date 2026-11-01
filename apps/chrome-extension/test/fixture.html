@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>OpenClicky Fixture</title>
+<style>
+  body { font: 16px sans-serif; margin: 0; }
+  .gap { height: 700px; }
+  main { padding: 0 16px; }
+  #banner { position: fixed; left: 0; right: 0; top: 30%; height: 40%; z-index: 9; background: #fde8e8; padding: 16px; }
+  #banner[hidden] { display: none; }
+  #corner { position: fixed; left: 8px; top: 8px; width: 120px; height: 40px; z-index: 5; }
+  #notes { border: 1px solid #888; min-height: 2em; padding: 4px; }
+</style>
+</head>
+<body>
+<button id="corner" type="button">Corner</button>
+<div class="gap"></div>
+<main>
+  <h1>OpenClicky Fixture</h1>
+  <form onsubmit="return false">
+    <p><label for="name">Name</label> <input id="name" type="text"></p>
+    <p><label for="pw">Password</label> <input id="pw" type="password"></p>
+    <p><label for="color">Colour</label>
+      <select id="color"><option value="r">Red</option><option value="g">Green</option><option value="b">Blue</option></select></p>
+    <p><span id="noteslabel">Notes</span>
+      <div id="notes" contenteditable="true" role="textbox" aria-labelledby="noteslabel"></div></p>
+  </form>
+  <p><button id="add" type="button">Add line</button></p>
+  <ul id="lines"></ul>
+  <p><button id="showbanner" type="button">Show banner</button></p>
+  <p><button id="under" type="button">Under banner</button> <span id="ucount">0</span></p>
+  <table>
+    <caption>Stock</caption>
+    <tr><th>Item</th><th>Qty</th></tr>
+    <tr><td>Apples</td><td>3</td></tr>
+    <tr><td>Pears</td><td>5</td></tr>
+  </table>
+  <p><a id="next" href="/page2">Second page</a></p>
+  <p><button id="alertbtn" type="button">Alert</button> <span id="alerted">not yet</span></p>
+  <p><iframe id="child" src="/frame" title="Child frame" width="300" height="60"></iframe></p>
+  <p id="cornercount">Corner clicks: 0</p>
+</main>
+<div class="gap"></div>
+<div id="banner" role="dialog" aria-label="Cookie notice" hidden>
+  <p>We use cookies on this page.</p>
+  <button id="close" type="button">Close</button>
+</div>
+<script>
+  let lines = 0, under = 0, corner = 0;
+  document.getElementById("add").onclick = () => {
+    const li = document.createElement("li");
+    li.textContent = "Line " + (++lines);
+    document.getElementById("lines").append(li);
+  };
+  document.getElementById("showbanner").onclick = () => { document.getElementById("banner").hidden = false; };
+  document.getElementById("close").onclick = () => { document.getElementById("banner").hidden = true; };
+  document.getElementById("under").onclick = () => { document.getElementById("ucount").textContent = String(++under); };
+  document.getElementById("corner").onclick = () => { document.getElementById("cornercount").textContent = "Corner clicks: " + (++corner); };
+  // The dialog opens after the click returns, so the click itself is not stuck behind it.
+  document.getElementById("alertbtn").onclick = () => {
+    setTimeout(() => { alert("Heads up"); document.getElementById("alerted").textContent = "answered"; }, 50);
+  };
+</script>
+</body>
+</html>

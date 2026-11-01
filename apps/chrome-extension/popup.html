@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>OpenClicky</title>
+  <style>
+    :root { color-scheme: light dark; --accent: #3380ff; --muted: #6b7280; --line: #d1d5db; }
+    @media (prefers-color-scheme: dark) { :root { --muted: #9ca3af; --line: #374151; } }
+    body { font: 13px/1.4 system-ui, sans-serif; margin: 0; padding: 12px; width: 280px; }
+    h1 { font-size: 14px; margin: 0 0 8px; }
+    p { margin: 0 0 8px; }
+    .job { border-top: 1px solid var(--line); padding: 8px 0; }
+    .title { font-weight: 600; }
+    .say, .note { color: var(--muted); }
+    button { font: inherit; display: block; width: 100%; margin: 4px 0; padding: 5px 8px; text-align: left; cursor: pointer;
+      border: 1px solid var(--line); border-radius: 6px; background: transparent; color: inherit;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; text-align: center; }
+  </style>
+</head>
+<body>
+  <h1>OpenClicky</h1>
+  <p id="state">Checking the connection…</p>
+  <div id="actions"></div>
+  <div id="jobs"></div>
+  <script src="popup.js"></script>
+</body>
+</html>

@@ -11,6 +11,7 @@ public sealed class ConfirmingAgentExecutor : IAgentActionExecutor
         AgentToolNames.TypeText,
         AgentToolNames.Hotkey,
         AgentToolNames.Scroll,
+        AgentToolNames.OpenApp,
     };
 
     public Task<AgentActionResult> ExecuteAsync(

@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/artifacts.test.tsx","./src/artifacts.tsx","./src/bootstrap.test.tsx","./src/chrome-content-script.test.ts","./src/contracts.test.ts","./src/contracts.ts","./src/copilot-transport.test.tsx","./src/host-bridge.ts","./src/main.tsx","./src/runtime-auth.ts","./src/test-setup.ts"],"version":"5.9.2"}

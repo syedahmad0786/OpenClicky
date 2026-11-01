@@ -11,6 +11,19 @@ namespace OpenClicky.Capture;
 /// </summary>
 public sealed class GdiScreenCaptureService : IScreenCaptureService
 {
+    public Task<ScreenCaptureResult?> CaptureRegionJpegAsync((int X, int Y, int Width, int Height) bounds, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (bounds.Width <= 0 || bounds.Height <= 0) return Task.FromResult<ScreenCaptureResult?>(null);
+        var region = Rectangle.Intersect(new Rectangle(bounds.X, bounds.Y, bounds.Width, bounds.Height), SystemInformation.VirtualScreen);
+        if (region.IsEmpty || region.Width <= 0 || region.Height <= 0) return Task.FromResult<ScreenCaptureResult?>(null);
+        using var bitmap = new Bitmap(region.Width, region.Height, PixelFormat.Format32bppArgb);
+        using (var graphics = Graphics.FromImage(bitmap))
+            graphics.CopyFromScreen(region.Left, region.Top, 0, 0, region.Size, CopyPixelOperation.SourceCopy);
+        var (jpeg, width, height) = CaptureImageEncoder.BitmapToJpeg(bitmap, 1280);
+        return Task.FromResult<ScreenCaptureResult?>(new(jpeg, width, height, region.Left, region.Top, region.Width, region.Height, false, "active window detail"));
+    }
+
     public Task<IReadOnlyList<ScreenCaptureResult>> CaptureAllMonitorsJpegAsync(
         CancellationToken cancellationToken = default)
     {

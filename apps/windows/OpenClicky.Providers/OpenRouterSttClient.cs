@@ -5,6 +5,7 @@ namespace OpenClicky.Providers;
 
 public sealed class OpenRouterSttClient : ISttClient
 {
+    private static readonly HttpClient DefaultHttp = new() { Timeout = TimeSpan.FromMinutes(2) };
     private readonly HttpClient _http;
     private readonly string _apiKey;
     private readonly string _baseUrl;
@@ -15,7 +16,7 @@ public sealed class OpenRouterSttClient : ISttClient
         _apiKey = apiKey;
         _model = model;
         _baseUrl = (baseUrl ?? "https://openrouter.ai/api/v1").TrimEnd('/');
-        _http = httpClient ?? new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
+        _http = httpClient ?? DefaultHttp;
     }
 
     public async Task<string> TranscribeAsync(byte[] wavBytes, CancellationToken cancellationToken = default)
@@ -40,11 +41,11 @@ public sealed class OpenRouterSttClient : ISttClient
         }
 
         using var doc = System.Text.Json.JsonDocument.Parse(body);
-        if (doc.RootElement.TryGetProperty("text", out var text))
+        if (doc.RootElement.TryGetProperty("text", out var text) && text.ValueKind == System.Text.Json.JsonValueKind.String)
         {
             return text.GetString() ?? string.Empty;
         }
 
-        return body;
+        throw new FormatException("The transcription provider did not return transcript text.");
     }
 }

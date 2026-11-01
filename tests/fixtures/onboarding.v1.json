@@ -1,0 +1,4 @@
+{
+  "steps": ["welcome", "colour", "microphone", "screen", "micCheck", "voiceHello", "drawDemo", "circleToAsk", "driveDemo", "textMode", "dictation", "finale"],
+  "actions": ["start", "next", "back", "skip", "finish", "recheck", "openScreenSettings", "drawDemo", "driveDemo"]
+}

@@ -5,13 +5,19 @@
 #
 # Requires: makeappx.exe from Windows 10/11 SDK (PATH or auto-discovered under Windows Kits).
 
+param([string]$PayloadDirectory, [string]$OutputDirectory)
+
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
-$payload = Join-Path $root "artifacts\exe\win-x64"
-$staging = Join-Path $root "artifacts\msix\staging"
-$outDir = Join-Path $root "artifacts\msix"
+
+$payload = if ($PayloadDirectory) { [IO.Path]::GetFullPath($PayloadDirectory) } else { Join-Path $root "artifacts\phase-one-preview\win-x64" }
+$outDir = if ($OutputDirectory) { [IO.Path]::GetFullPath($OutputDirectory) } else { Join-Path $root "artifacts\phase-one-preview\msix" }
+$staging = Join-Path $outDir "staging"
 $manifestSrc = Join-Path $root "packaging\msix\Package.appxmanifest"
-$msix = Join-Path $outDir "OpenClicky.msix"
+$msix = Join-Path $outDir "OpenClicky-0.6.0-unsigned.msix"
+$resolvedStaging = [IO.Path]::GetFullPath($staging)
+$expectedRoot = [IO.Path]::GetFullPath((Join-Path $root 'artifacts')) + [IO.Path]::DirectorySeparatorChar
+if (-not $resolvedStaging.StartsWith($expectedRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Package staging must remain under repository artifacts.' }
 
 function Find-MakeAppx {
     $fromPath = Get-Command makeappx -ErrorAction SilentlyContinue
@@ -47,15 +53,16 @@ if (-not $makeappx) {
 Write-Host "Using makeappx: $makeappx"
 
 New-Item -ItemType Directory -Force -Path $staging, $outDir | Out-Null
-Get-ChildItem $staging -Force -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+Get-ChildItem -LiteralPath $resolvedStaging -Force | ForEach-Object {
+    if (-not $_.FullName.StartsWith($resolvedStaging + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe staging item.' }
+    Remove-Item -LiteralPath $_.FullName -Recurse -Force
+}
 Copy-Item -Path (Join-Path $payload "*") -Destination $staging -Recurse -Force
 Copy-Item -Path $manifestSrc -Destination (Join-Path $staging "AppxManifest.xml") -Force
 
 New-Item -ItemType Directory -Force -Path (Join-Path $staging "Assets") | Out-Null
-# Placeholder 1x1 PNGs so makeappx accepts the package; replace before Store submission.
-$pngBytes = [Convert]::FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
 foreach ($name in @("StoreLogo.png", "Square150x150Logo.png", "Square44x44Logo.png")) {
-    [IO.File]::WriteAllBytes((Join-Path $staging "Assets\$name"), $pngBytes)
+    Copy-Item -LiteralPath (Join-Path $root "packaging\msix\Assets\$name") -Destination (Join-Path $staging "Assets\$name") -Force
 }
 
 & $makeappx pack /d $staging /p $msix /o

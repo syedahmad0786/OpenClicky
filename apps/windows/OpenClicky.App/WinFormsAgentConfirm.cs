@@ -11,13 +11,37 @@ namespace OpenClicky.App;
 internal sealed class WinFormsAgentConfirm : IAgentConfirm
 {
     private readonly SynchronizationContext _ui;
+    private readonly Func<(IntPtr window, IntPtr focus)?>? _testTarget;
+    /// <summary>Dialogs up now: concurrent jobs can stack one confirm over another, and closing the top one leaves the rest open.</summary>
+    private int _openDialogs;
+    public bool IsDialogOpen => Volatile.Read(ref _openDialogs) > 0;
 
-    public WinFormsAgentConfirm(SynchronizationContext uiContext)
+    public WinFormsAgentConfirm(SynchronizationContext uiContext, Func<(IntPtr window, IntPtr focus)?>? testTarget = null)
     {
         _ui = uiContext;
+        _testTarget = testTarget;
     }
 
     public Task<bool> ConfirmAsync(string summary, CancellationToken cancellationToken = default)
+        => ConfirmCoreAsync(summary, Wording.Action, true, cancellationToken);
+
+    public Task<bool> ConfirmNonInputAsync(string summary, CancellationToken cancellationToken = default)
+        => ConfirmCoreAsync(summary, Wording.Action, false, cancellationToken);
+
+    public Task<bool> ConfirmTaskAsync(string summary, CancellationToken cancellationToken = default)
+        => ConfirmCoreAsync(summary, Wording.Task, true, cancellationToken);
+
+    /// <summary>A talk reply's OPEN or TYPE: declining only skips that action. Restore the target when typing follows.</summary>
+    public Task<bool> ConfirmTalkAsync(string summary, bool restoreTarget, CancellationToken cancellationToken = default)
+        => ConfirmCoreAsync(summary, Wording.Talk, restoreTarget, cancellationToken);
+
+    /// <summary>Classic drive consent, asked once per task before its first mouse or keyboard input; the target is restored after.</summary>
+    public Task<bool> ConfirmDriveAsync(string question, string detail, CancellationToken cancellationToken = default)
+        => ConfirmCoreAsync(detail, Wording.Drive, true, cancellationToken, question);
+
+    private enum Wording { Action, Task, Talk, Drive }
+
+    private Task<bool> ConfirmCoreAsync(string summary, Wording wording, bool restoreTarget, CancellationToken cancellationToken, string? question = null)
     {
         var tcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         void Show()
@@ -28,27 +52,42 @@ internal sealed class WinFormsAgentConfirm : IAgentConfirm
                 return;
             }
 
-            var prior = ForegroundFocusRestorer.Capture();
+            var test = _testTarget?.Invoke();
+            var prior = test?.window ?? ForegroundFocusRestorer.Capture();
+            var focus = test?.focus ?? ForegroundFocusRestorer.CaptureFocus(prior);
+            Interlocked.Increment(ref _openDialogs);
+            var counted = true;
+            // Before the result is set: the asking run continues asynchronously and must not see its own closed dialog as open.
+            void Closed() { if (counted) { counted = false; Interlocked.Decrement(ref _openDialogs); } }
             try
             {
-                using var dialog = new AgentConfirmDialog(summary);
+                using var dialog = new AgentConfirmDialog(summary, wording, question);
+                using var registration = cancellationToken.Register(() => _ui.Post(_ =>
+                {
+                    if (!dialog.IsDisposed) dialog.Close();
+                }, null));
                 var result = dialog.ShowDialog();
                 // Form is closed/disposed; yield UI messages before restoring focus.
                 Application.DoEvents();
-                ForegroundFocusRestorer.Restore(prior);
-                tcs.TrySetResult(result == DialogResult.Yes);
+                var restored = !restoreTarget || ForegroundFocusRestorer.Restore(prior, test is not null, focus);
+                Closed();
+                if (cancellationToken.IsCancellationRequested) tcs.TrySetCanceled(cancellationToken);
+                else if (result == DialogResult.Yes && !restored)
+                    tcs.TrySetException(new InvalidOperationException("I couldn't restore the target app and field. Select the app you want to use, then try again."));
+                else tcs.TrySetResult(result == DialogResult.Yes);
             }
             catch (Exception ex)
             {
                 try
                 {
-                    ForegroundFocusRestorer.Restore(prior);
+                    if (restoreTarget) ForegroundFocusRestorer.Restore(prior, test is not null, focus);
                 }
                 catch
                 {
                     // best-effort restore on failure path
                 }
 
+                Closed();
                 tcs.TrySetException(ex);
             }
         }
@@ -60,54 +99,46 @@ internal sealed class WinFormsAgentConfirm : IAgentConfirm
     /// <summary>Top-most Yes/No form that fully closes before SendInput continues.</summary>
     private sealed class AgentConfirmDialog : Form
     {
-        public AgentConfirmDialog(string summary)
+        public AgentConfirmDialog(string summary, Wording wording, string? question)
         {
-            Text = "OpenClicky Agent";
+            var wholeTask = wording == Wording.Task;
+            var talk = wording == Wording.Talk;
+            var drive = wording == Wording.Drive;
+            Text = talk ? "OpenClicky" : "OpenClicky Agent";
+            AppTheme.Apply(this);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             StartPosition = FormStartPosition.CenterScreen;
             MinimizeBox = false;
             MaximizeBox = false;
-            ShowInTaskbar = false;
+            ShowInTaskbar = true;
             TopMost = true;
-            AutoScaleMode = AutoScaleMode.Font;
-            ClientSize = new Size(440, 180);
-            Padding = new Padding(16);
+            ClientSize = new Size(540, 340);
+            Padding = new Padding(24);
 
-            var label = new Label
+            var label = new TextBox
             {
-                AutoSize = false,
-                Dock = DockStyle.Top,
-                Height = 100,
-                Text = summary + "\n\nAllow this action?",
+                Dock = DockStyle.Fill, Multiline = true, ReadOnly = true,
+                ScrollBars = ScrollBars.Vertical, BorderStyle = BorderStyle.None,
+                BackColor = AppTheme.Background, ForeColor = AppTheme.Ink,
+                Text = (drive ? question : talk ? "Do this?" : wholeTask ? "Approve this task plan?" : "Allow this one action?") + "\r\n\r\n" + summary
+                    + (drive ? "\r\n\r\nThe task stops if you choose Not now or press Escape."
+                        : talk ? "\r\n\r\nNothing happens if you decline." : "\r\n\r\nThe task stops if you decline or press Escape."),
+                AccessibleName = "Proposed desktop action",
             };
 
-            var yes = new Button
-            {
-                Text = "Yes",
-                DialogResult = DialogResult.Yes,
-                Width = 96,
-                Height = 32,
-                Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
-            };
-            var no = new Button
-            {
-                Text = "No",
-                DialogResult = DialogResult.No,
-                Width = 96,
-                Height = 32,
-                Anchor = AnchorStyles.Bottom | AnchorStyles.Right,
-            };
-
-            no.Location = new Point(ClientSize.Width - no.Width - 16, ClientSize.Height - no.Height - 16);
-            yes.Location = new Point(no.Left - yes.Width - 8, no.Top);
-
-            AcceptButton = yes;
+            var yes = AppTheme.Button(drive ? "Let OpenClicky drive" : talk ? "Allow" : wholeTask ? "Approve task" : "Allow action", true);
+            yes.DialogResult = DialogResult.Yes;
+            var no = AppTheme.Button(drive ? "Not now" : talk ? "Don't" : "Stop task");
+            no.DialogResult = DialogResult.No;
+            var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, Height = 58, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(0,12,0,0) };
+            buttons.Controls.AddRange(new Control[] { no, yes });
+            AcceptButton = no;
             CancelButton = no;
             Controls.Add(label);
-            Controls.Add(yes);
-            Controls.Add(no);
+            Controls.Add(buttons);
             // Default to No (same as MessageBoxDefaultButton.Button2).
             ActiveControl = no;
+            ResumeLayout(true);
         }
 
         protected override void OnFormClosed(FormClosedEventArgs e)

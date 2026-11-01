@@ -6,6 +6,8 @@
     <Nullable>enable</Nullable>
     <RootNamespace>OpenClicky.Overlay.Smoke</RootNamespace>
     <UseWindowsForms>true</UseWindowsForms>
+    <!-- The overlay's figure windows are WPF. -->
+    <UseWPF>true</UseWPF>
     <Platforms>AnyCPU;x64</Platforms>
     <PlatformTarget>x64</PlatformTarget>
   </PropertyGroup>

@@ -3,7 +3,7 @@ namespace OpenClicky.Core;
 /// <summary>
 /// Chooses which HWND Agent confirm should restore before mutating SendInput.
 /// Modal Yes/No UI steals foreground; restoring our own process leaves hotkeys/type
-/// on the tray host — prefer a foreign prior window, else the shell/desktop.
+/// on the tray host. Only a living foreign target is valid; never switch to the desktop.
 /// </summary>
 public static class ForegroundRestorePolicy
 {
@@ -22,11 +22,6 @@ public static class ForegroundRestorePolicy
             return prior;
         }
 
-        if (shell != 0)
-        {
-            return shell;
-        }
-
-        return priorIsWindow ? prior : 0;
+        return 0;
     }
 }

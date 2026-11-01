@@ -1,146 +1,195 @@
+using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using OpenClicky.Core;
 
 namespace OpenClicky.Input;
 
-public sealed class NAudioMicrophoneRecorder : IMicrophoneRecorder
+public sealed record MicrophoneDevice(string? Id, string Name);
+
+public sealed class NAudioMicrophoneRecorder(Func<string?>? selectedDevice = null) : IMicrophoneRecorder
 {
     private readonly object _gate = new();
-    private WaveInEvent? _waveIn;
+    private readonly object _bufferGate = new();
+    private WasapiCapture? _capture;
+    private MMDevice? _device;
     private MemoryStream? _pcm;
     private WaveFormat? _format;
+    private TaskCompletionSource? _captureStopped;
+    private volatile Exception? _captureError;
     private bool _disposed;
 
-    public bool IsRecording
+    public bool IsRecording { get { lock (_gate) return _capture is not null && _captureError is null; } }
+    public float PeakLevel
     {
-        get
+        get { lock (_gate) { try { return _device?.AudioMeterInformation.MasterPeakValue ?? 0; } catch { return 0; } } }
+    }
+
+    public static IReadOnlyList<MicrophoneDevice> ListDevices()
+    {
+        using var devices = new MMDeviceEnumerator();
+        var result = new List<MicrophoneDevice> { new(null, "Windows default microphone") };
+        foreach (var device in devices.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active))
         {
-            lock (_gate)
-            {
-                return _waveIn is not null;
-            }
+            using (device) result.Add(new(device.ID, device.FriendlyName));
         }
+        return result;
+    }
+
+    public static string DeviceName(string? id)
+    {
+        try { using var device = OpenDevice(id); return device.FriendlyName; }
+        catch { return "Microphone unavailable · choose one in Settings"; }
+    }
+
+    private static MMDevice OpenDevice(string? id)
+    {
+        using var devices = new MMDeviceEnumerator();
+        var device = string.IsNullOrWhiteSpace(id)
+            ? devices.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Multimedia) : devices.GetDevice(id);
+        if (device.DataFlow == DataFlow.Capture && device.State == DeviceState.Active) return device;
+        device.Dispose();
+        throw new InvalidOperationException("The selected microphone is disconnected. Choose a connected microphone in Settings.");
     }
 
     public void Start()
     {
         lock (_gate)
         {
-            if (_waveIn is not null)
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_capture is not null) return;
+            try
             {
-                return;
+                _device = OpenDevice(selectedDevice?.Invoke());
+                // NAudio posts RecordingStopped to this context; stopping on the UI thread must not wait on itself.
+                _capture = WithoutSynchronizationContext(() => new WasapiCapture(_device));
+                var format = _format = _capture.WaveFormat;
+                var stopped = _captureStopped = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                _captureError = null;
+                var pcm = _pcm = new MemoryStream();
+                _capture.DataAvailable += (_, args) =>
+                {
+                    lock (_bufferGate)
+                        if (ReferenceEquals(_pcm, pcm))
+                        {
+                            if (pcm.Length + args.BytesRecorded <= (long)format.AverageBytesPerSecond * 60) pcm.Write(args.Buffer, 0, args.BytesRecorded);
+                            else _captureError = new InvalidOperationException("Keep voice requests shorter than one minute.");
+                        }
+                };
+                _capture.RecordingStopped += (_, args) =>
+                {
+                    if (args.Exception is not null) _captureError = args.Exception;
+                    stopped.TrySetResult();
+                };
+                _capture.StartRecording();
             }
-
-            _pcm = new MemoryStream();
-            _waveIn = new WaveInEvent
-            {
-                WaveFormat = new WaveFormat(16000, 16, 1),
-                BufferMilliseconds = 50,
-            };
-            _format = _waveIn.WaveFormat;
-            _waveIn.DataAvailable += (_, args) =>
-            {
-                _pcm?.Write(args.Buffer, 0, args.BytesRecorded);
-            };
-            _waveIn.StartRecording();
+            catch { Release(); throw; }
         }
+    }
+
+    internal static T WithoutSynchronizationContext<T>(Func<T> create)
+    {
+        var context = SynchronizationContext.Current;
+        try
+        {
+            SynchronizationContext.SetSynchronizationContext(null);
+            return create();
+        }
+        finally { SynchronizationContext.SetSynchronizationContext(context); }
+    }
+
+    public byte[] SnapshotToWav()
+    {
+        lock (_gate)
+        {
+            if (_pcm is null || _format is null) return [];
+            byte[] pcm;
+            lock (_bufferGate) pcm = _pcm.ToArray();
+            return PcmToWav(pcm, _format);
+        }
+    }
+
+    public void DiscardBufferedAudio()
+    {
+        lock (_gate)
+            lock (_bufferGate)
+                if (_pcm is not null) _pcm.SetLength(0);
     }
 
     public byte[] StopToWav()
     {
         lock (_gate)
         {
-            if (_waveIn is null || _pcm is null || _format is null)
+            if (_capture is null || _pcm is null || _format is null) return [];
+            try
             {
-                return Array.Empty<byte>();
+                _capture.StopRecording();
+                if (_captureStopped is null || !_captureStopped.Task.Wait(TimeSpan.FromSeconds(2)))
+                    throw new InvalidOperationException("The microphone did not finish stopping.");
+                if (_captureError is not null) throw new InvalidOperationException("Microphone recording stopped: " + _captureError.Message, _captureError);
+                byte[] pcm;
+                lock (_bufferGate) pcm = _pcm.ToArray();
+                return PcmToWav(pcm, _format);
             }
-
-            _waveIn.StopRecording();
-            _waveIn.Dispose();
-            _waveIn = null;
-
-            var pcmBytes = _pcm.ToArray();
-            _pcm.Dispose();
-            _pcm = null;
-            var format = _format;
-            _format = null;
-
-            return PcmToWav(pcmBytes, format);
+            finally { Release(); }
         }
     }
 
-    private static byte[] PcmToWav(byte[] pcm, WaveFormat format)
+    internal static byte[] PcmToWav(byte[] pcm, WaveFormat format)
     {
+        if (pcm.Length == 0) return [];
+        using var source = new RawSourceWaveStream(new MemoryStream(pcm, writable: false), format);
+        using var resampler = new MediaFoundationResampler(source, new WaveFormat(16000, 16, 1)) { ResamplerQuality = 60 };
         using var output = new MemoryStream();
-        using (var writer = new WaveFileWriter(new IgnoreDisposeStream(output), format))
-        {
-            writer.Write(pcm, 0, pcm.Length);
-        }
-
+        WaveFileWriter.WriteWavFileToStream(new IgnoreDisposeStream(output), resampler);
         return output.ToArray();
     }
 
+    private void Release()
+    {
+        _capture?.Dispose();
+        _capture = null;
+        _device?.Dispose();
+        _device = null;
+        lock (_bufferGate) { _pcm?.Dispose(); _pcm = null; }
+        _format = null;
+        _captureStopped = null;
+    }
+
     public void Dispose()
     {
-        if (_disposed)
-        {
-            return;
-        }
-
-        _disposed = true;
         lock (_gate)
         {
+            if (_disposed) return;
+            _disposed = true;
             try
             {
-                _waveIn?.StopRecording();
+                _capture?.StopRecording();
+                _captureStopped?.Task.Wait(TimeSpan.FromSeconds(2));
             }
-            catch
-            {
-                // ignore
-            }
-
-            _waveIn?.Dispose();
-            _waveIn = null;
-            _pcm?.Dispose();
-            _pcm = null;
+            finally { Release(); }
         }
     }
 
-    /// <summary>WaveFileWriter disposes the stream; we need the bytes afterward.</summary>
-    private sealed class IgnoreDisposeStream : Stream
+    private sealed class IgnoreDisposeStream(Stream inner) : Stream
     {
-        private readonly Stream _inner;
-
-        public IgnoreDisposeStream(Stream inner) => _inner = inner;
-
-        public override bool CanRead => _inner.CanRead;
-        public override bool CanSeek => _inner.CanSeek;
-        public override bool CanWrite => _inner.CanWrite;
-        public override long Length => _inner.Length;
-        public override long Position { get => _inner.Position; set => _inner.Position = value; }
-        public override void Flush() => _inner.Flush();
-        public override int Read(byte[] buffer, int offset, int count) => _inner.Read(buffer, offset, count);
-        public override long Seek(long offset, SeekOrigin origin) => _inner.Seek(offset, origin);
-        public override void SetLength(long value) => _inner.SetLength(value);
-        public override void Write(byte[] buffer, int offset, int count) => _inner.Write(buffer, offset, count);
-        protected override void Dispose(bool disposing) { /* keep inner open */ }
+        public override bool CanRead => inner.CanRead;
+        public override bool CanSeek => inner.CanSeek;
+        public override bool CanWrite => inner.CanWrite;
+        public override long Length => inner.Length;
+        public override long Position { get => inner.Position; set => inner.Position = value; }
+        public override void Flush() => inner.Flush();
+        public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, count);
+        public override long Seek(long offset, SeekOrigin origin) => inner.Seek(offset, origin);
+        public override void SetLength(long value) => inner.SetLength(value);
+        public override void Write(byte[] buffer, int offset, int count) => inner.Write(buffer, offset, count);
+        protected override void Dispose(bool disposing) { }
     }
 }
 
-/// <summary>No-op mic for environments without audio devices.</summary>
 public sealed class NullMicrophoneRecorder : IMicrophoneRecorder
 {
     public bool IsRecording { get; private set; }
-
     public void Start() => IsRecording = true;
-
-    public byte[] StopToWav()
-    {
-        IsRecording = false;
-        return Array.Empty<byte>();
-    }
-
-    public void Dispose()
-    {
-    }
+    public byte[] StopToWav() { IsRecording = false; return []; }
+    public void Dispose() { }
 }

@@ -1,0 +1,44 @@
+/* Job deck: paper cards (~150x110) beside the open panel. Everything stays inside each element's box, because the
+   window shows only the reported regions: no outer shadow, and the handle is pulled inside. */
+
+.notch-deck {
+  position: absolute; top: 14px; display: flex; align-items: flex-start; gap: 8px;
+  animation: notch-fade 180ms var(--ease) 220ms both;
+}
+.notch-deck--left { right: calc(100% + 6px); flex-direction: row-reverse; }
+.notch-deck--right { left: calc(100% + 6px); flex-direction: row; }
+:root[data-reduced-motion="true"] .notch-deck { animation: none; }
+
+/* Fanned: each card further out tucks under the one nearer the panel. */
+.notch-deck:not([data-expanded="true"]) .deck-card:not(:first-child) { margin-inline-end: -44px; }
+.notch-deck--right:not([data-expanded="true"]) .deck-card:not(:first-child) { margin-inline-end: 0; margin-inline-start: -44px; }
+.notch-deck[data-expanded="true"] { flex-wrap: wrap; max-width: calc((100vw - 532px) / 2 - 16px); }
+
+.oc-paper.deck-card {
+  display: flex; flex-direction: column; align-items: stretch; gap: 4px; flex: none; width: 150px; height: 110px;
+  padding: 18px 12px 10px 16px; overflow: hidden; font: inherit; text-align: left; border: 0; cursor: pointer;
+  box-shadow: inset 0 0 0 1px var(--paper-edge);
+}
+.deck-card { transition: filter var(--dur-fast); }
+.deck-card:hover { filter: brightness(1.04); }
+.deck-card:active { filter: brightness(0.97); }
+.deck-card:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
+.deck-card .oc-paper__handle { top: 0; border-radius: 0 0 5px 5px; }
+.deck-card__stripe { position: absolute; top: 14px; bottom: 10px; left: 6px; width: 4px; background: var(--stripe); border-radius: 2px; }
+.deck-card[data-colour="red"] { --stripe: #e5484d; }
+.deck-card[data-colour="blue"] { --stripe: #3380ff; }
+.deck-card[data-colour="yellow"] { --stripe: #d49a1a; }
+.deck-card[data-colour="green"] { --stripe: #2fa86a; }
+.deck-card__title {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+  font: 600 13px/1.25 var(--font-ui); overflow-wrap: anywhere;
+}
+.deck-card__state { margin-top: auto; font-size: 11px; font-weight: 600; opacity: 0.8; }
+.deck-card__state[data-tone="accent"] { color: var(--accent-ink); opacity: 1; }
+.deck-card__state[data-tone="warn"] { color: #7a4f00; opacity: 1; }
+.deck-card__progress { display: block; height: 3px; border-radius: 2px; background: rgba(0, 0, 0, 0.12); overflow: hidden; }
+.deck-card__progress > span { display: block; height: 100%; background: currentColor; opacity: 0.55; }
+.deck-card__live { font-size: 11px; font-style: italic; opacity: 0.82; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.deck-more { align-self: center; }
+.deck-more:focus-visible { outline-offset: -2px; } /* the window shows only the pill's own box */

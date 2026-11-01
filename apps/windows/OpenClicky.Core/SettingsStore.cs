@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using OpenClicky.Core.Settings;
 
 namespace OpenClicky.Core;
 
@@ -38,6 +39,13 @@ public static class SettingsStore
             var json = File.ReadAllText(path);
             var settings = JsonSerializer.Deserialize<AppSettings>(json, JsonOptions) ?? new AppSettings();
             settings.PushToTalk = HotkeyChord.NormalizeOrDefault(settings.PushToTalk);
+            SettingsPatch.Normalize(settings); // repair a hand-edited settings.json
+            // A legacy plaintext key must reach Credential Manager first (the tray saves after moving it): a save here would drop it.
+            if (HotkeyMigration.Apply(settings) && string.IsNullOrWhiteSpace(settings.OpenRouterApiKey))
+            {
+                try { Save(settings, path); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { } // migrated in memory; retried on the next load
+            }
             return settings;
         }
         catch
@@ -56,27 +64,30 @@ public static class SettingsStore
         settings.PushToTalk = HotkeyChord.NormalizeOrDefault(settings.PushToTalk);
         var disk = CloneWithoutSecrets(settings);
         var json = JsonSerializer.Serialize(disk, JsonOptions);
-        File.WriteAllText(path, json);
+        var temporary = path + ".tmp";
+        try
+        {
+            File.WriteAllText(temporary, json);
+            File.Move(temporary, path, overwrite: true);
+        }
+        catch
+        {
+            // A read-only settings.json or folder: do not leave the half-done copy behind.
+            try { File.Delete(temporary); }
+            catch (Exception cleanup) when (cleanup is IOException or UnauthorizedAccessException) { }
+            throw;
+        }
     }
 
-    public static AppSettings CloneWithoutSecrets(AppSettings settings) =>
-        new()
-        {
-            PushToTalk = settings.PushToTalk,
-            LocalProxyBaseUrl = settings.LocalProxyBaseUrl,
-            UseLocalProxy = settings.UseLocalProxy,
-            AuthProvider = settings.AuthProvider,
-            OpenRouterApiKey = null,
-            OpenRouterModel = settings.OpenRouterModel,
-            TranscriptionModel = settings.TranscriptionModel,
-            ChatGptHostId = settings.ChatGptHostId,
-            ChatGptIssuedClientId = settings.ChatGptIssuedClientId,
-            ChatGptAccountEmail = settings.ChatGptAccountEmail,
-            ChatGptModel = settings.ChatGptModel,
-            DebugTranscriptOverride = settings.DebugTranscriptOverride,
-            PersistConversationHistory = settings.PersistConversationHistory,
-            ForceGdiCapture = settings.ForceGdiCapture,
-            AgentDenyListExtra = settings.AgentDenyListExtra,
-            FirstRunCompleted = settings.FirstRunCompleted,
-        };
+    /// <summary>Settings properties that hold secrets and must never reach settings.json.</summary>
+    public static readonly IReadOnlyList<string> SecretProperties = [nameof(AppSettings.OpenRouterApiKey)];
+
+    /// <summary>Copies every property (JSON round-trip), then clears the secrets in <see cref="SecretProperties"/>.</summary>
+    public static AppSettings CloneWithoutSecrets(AppSettings settings)
+    {
+        var clone = JsonSerializer.Deserialize<AppSettings>(JsonSerializer.Serialize(settings, JsonOptions), JsonOptions)
+            ?? new AppSettings();
+        clone.OpenRouterApiKey = null;
+        return clone;
+    }
 }

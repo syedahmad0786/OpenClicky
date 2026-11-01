@@ -5,7 +5,7 @@ namespace OpenClicky.Agent;
 
 /// <summary>
 /// Captures and restores the interactive desktop focus around Agent confirm UI.
-/// MessageBox / modal dialogs steal foreground; SendInput (win+r, type_text) then
+/// Modal dialogs steal foreground; SendInput typing and hotkeys then
 /// hits the tray host instead of the intended desktop target unless we restore.
 /// </summary>
 public static class ForegroundFocusRestorer
@@ -15,24 +15,33 @@ public static class ForegroundFocusRestorer
 
     public static IntPtr Capture() => NativeMethods.GetForegroundWindow();
 
+    public static IntPtr CaptureFocus(IntPtr window)
+    {
+        var info = new NativeMethods.GuiThreadInfo { Size = Marshal.SizeOf<NativeMethods.GuiThreadInfo>() };
+        var thread = NativeMethods.GetWindowThreadProcessId(window, out _);
+        return thread != 0 && NativeMethods.GetGUIThreadInfo(thread, ref info) ? info.Focus : IntPtr.Zero;
+    }
+
     /// <summary>
     /// Restore keyboard focus to <paramref name="prior"/> when it is a living window
-    /// outside this process; otherwise fall back to the shell window (desktop).
+    /// outside this process, or the explicitly selected test window. Fail closed otherwise.
     /// </summary>
-    public static void Restore(IntPtr prior)
+    public static bool Restore(IntPtr prior, bool allowTestWindow = false, IntPtr focusedControl = default)
     {
         var target = (IntPtr)ForegroundRestorePolicy.ResolveTarget(
             prior,
             NativeMethods.IsWindow(prior),
-            IsCurrentProcess(prior),
+            IsCurrentProcess(prior) && !allowTestWindow,
             NativeMethods.GetShellWindow());
 
         if (target != IntPtr.Zero)
         {
-            ForceForeground(target);
+            ForceForeground(target, focusedControl);
         }
 
         Thread.Sleep(SettleMilliseconds);
+        return target != IntPtr.Zero && NativeMethods.GetForegroundWindow() == target
+            && (focusedControl == IntPtr.Zero || CaptureFocus(target) == focusedControl);
     }
 
     private static bool IsCurrentProcess(IntPtr hwnd)
@@ -46,7 +55,7 @@ public static class ForegroundFocusRestorer
         return pid != 0 && pid == (uint)Environment.ProcessId;
     }
 
-    private static void ForceForeground(IntPtr hwnd)
+    private static void ForceForeground(IntPtr hwnd, IntPtr focusedControl)
     {
         if (hwnd == IntPtr.Zero || !NativeMethods.IsWindow(hwnd))
         {
@@ -79,6 +88,9 @@ public static class ForegroundFocusRestorer
 
             _ = NativeMethods.BringWindowToTop(hwnd);
             _ = NativeMethods.SetForegroundWindow(hwnd);
+            if (focusedControl != IntPtr.Zero && NativeMethods.IsWindow(focusedControl)
+                && (focusedControl == hwnd || NativeMethods.IsChild(hwnd, focusedControl)))
+                _ = NativeMethods.SetFocus(focusedControl);
         }
         finally
         {
@@ -96,6 +108,25 @@ public static class ForegroundFocusRestorer
 
     private static class NativeMethods
     {
+        [StructLayout(LayoutKind.Sequential)]
+        public struct GuiThreadInfo
+        {
+            public int Size;
+            public uint Flags;
+            public IntPtr Active, Focus, Capture, MenuOwner, MoveSize, Caret;
+            public int Left, Top, Right, Bottom;
+        }
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool GetGUIThreadInfo(uint thread, ref GuiThreadInfo info);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        public static extern bool IsChild(IntPtr parent, IntPtr child);
+
+        [DllImport("user32.dll")]
+        public static extern IntPtr SetFocus(IntPtr window);
         public const int SwRestore = 9;
 
         [DllImport("user32.dll")]

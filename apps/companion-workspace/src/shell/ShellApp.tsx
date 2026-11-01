@@ -1,0 +1,67 @@
+import { useEffect, useRef, useState } from "react";
+import { listenToHost, postPage } from "./bridge";
+import { CaptionsBar } from "./captions/CaptionsBar";
+import type { JobCard, ShellState } from "./contract";
+import { JOB_STATE_LABEL } from "./deck/JobCardView";
+import { Notch } from "./notch/Notch";
+import { announce, LiveRegion } from "./ui";
+import { useRegions } from "./notch/useRegions";
+
+const MAX_ROW_TEXT = 32_000; // contract limit for a chat row
+
+/** Streamed assistant text: append to the row if the host still lists it. */
+function withDelta(state: ShellState, rowId: string, text: string): ShellState {
+  if (!state.chat.rows.some((row) => row.id === rowId)) return state;
+  const rows = state.chat.rows.map((row) => (row.id === rowId ? { ...row, text: (row.text + text).slice(0, MAX_ROW_TEXT) } : row));
+  return { ...state, chat: { rows } };
+}
+
+/**
+ * The host already sends a card (read by NotchCards) when a job finishes, fails or needs you (Core JobAnnouncer), so
+ * only the other changes are announced here: a job that starts working or is stopped. Never the jobs already there
+ * when the page loads.
+ */
+const ANNOUNCED: ReadonlySet<JobCard["state"]> = new Set(["working", "stopped"]);
+
+function useJobAnnouncements(jobs: JobCard[] | undefined) {
+  const seen = useRef<Map<string, JobCard["state"]> | null>(null);
+  useEffect(() => {
+    if (!jobs) return;
+    const before = seen.current;
+    seen.current = new Map(jobs.map((job) => [job.id, job.state]));
+    if (!before) return;
+    const changed = jobs.filter((job) => ANNOUNCED.has(job.state) && before.has(job.id) && before.get(job.id) !== job.state);
+    if (changed.length) announce(changed.map((job) => `${job.title}: ${JOB_STATE_LABEL[job.state].text}`).join(". "));
+  }, [jobs]);
+}
+
+export default function ShellApp() {
+  const [state, setState] = useState<ShellState | null>(null);
+  useRegions();
+  useEffect(() => {
+    const stop = listenToHost((message) => {
+      if (message.kind === "session.bootstrap") postPage({ kind: "ready" });
+      else if (message.kind === "shell.state") setState(message.state);
+      else if (message.kind === "chat.delta") setState((current) => (current ? withDelta(current, message.rowId, message.text) : current));
+    });
+    // Navigation can finish before React subscribes to native messages.
+    postPage({ kind: "bootstrap.request" });
+    return stop;
+  }, []);
+  useJobAnnouncements(state?.jobs);
+  const theme = state?.theme, accent = state?.accent, reduced = state?.reducedMotion;
+  useEffect(() => {
+    if (theme === undefined) return;
+    const root = document.documentElement;
+    root.dataset.theme = theme;
+    root.dataset.reducedMotion = String(reduced);
+    root.style.setProperty("--accent", accent!);
+  }, [theme, accent, reduced]);
+  return (
+    <>
+      {state ? <Notch state={state} /> : null}
+      <CaptionsBar />
+      {state ? <LiveRegion /> : null}
+    </>
+  );
+}

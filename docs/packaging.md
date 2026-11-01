@@ -1,88 +1,59 @@
 # Packaging
 
-## EXE (recommended for testing)
+## Portable app
 
-On Windows 11 with .NET 8 SDK:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts/publish-exe.ps1
-```
-
-Output:
-
-- `artifacts/exe/win-x64/OpenClicky.App.exe` — self-contained single-file (canonical; MSIX entry point)
-- `artifacts/exe/win-x64/OpenClicky.exe` — copy alias for manual installs
-
-From Linux CI (cross-compile):
-
-```bash
-bash scripts/publish-exe.sh
-```
-
-**Signing:** no Authenticode cert is applied in this repo. SmartScreen may warn on first run — expected for unsigned OSS builds. To sign locally once you have a cert:
-
-```powershell
-signtool sign /fd SHA256 /a /tr http://timestamp.digicert.com /td SHA256 artifacts\exe\win-x64\OpenClicky.App.exe
-```
-
-## MSIX (unsigned by default)
-
-Identity/manifest: `packaging/msix/Package.appxmanifest`.
+From the repository root on Windows, with a .NET 8 SDK or newer:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/publish-exe.ps1
+```
+
+The self-contained 0.6.0 x64 preview is published to `artifacts/phase-one-preview/win-x64/`. This separate path preserves existing 0.5 artifacts and installed user data. `OpenClicky.exe` is the friendly alias; `OpenClicky.App.exe` is the canonical executable used by the MSIX manifest. Run one, not both. Copy the whole folder; no .NET runtime installation is required.
+
+The preview always includes the verified local OpenWork 0.18.57 runtime, its internal OpenCode 1.18.30 engine, Node.js, and the built companion workspace. To use a separately staged verified OpenWork runtime:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/publish-exe.ps1 -OpenWorkRuntimeDirectory artifacts/runtime/openwork
+```
+
+Publishing runs the existing OpenWork verification script and then copies ordinary files rather than pnpm junctions. It generates `THIRD-PARTY-LICENSES/manifest.json` from the installed production pnpm and resolved NuGet graphs, copies their shipped license and notice files, and retains the OpenWork, OpenCode, and Node runtime notices. For npm packages that omit license text, the tracked fallback inventory records the exact npm version and either the package repository commit containing the license or the package's declared SPDX identifier plus canonical text at a pinned SPDX repository commit. Publishing verifies every fallback hash. Both unresolved lists must be empty. Direct standalone OpenCode 1.18.0 packaging is no longer supported because OpenClicky uses the single OpenWork runtime path.
+
+`runtime/workspace/` contains the previously built `server.mjs`, `index.html`, and browser assets. Packaged assets resolve beside the executable, including when .NET extracts the single-file application's assemblies elsewhere. `chrome-extension/` contains the optional guided local Chrome bridge setup; it is not installed or authorized by publishing. Rebuild and test the workspace before packaging whenever its source changes.
+
+For a zip:
+
+```powershell
+Compress-Archive -Path artifacts/phase-one-preview/win-x64/* -DestinationPath artifacts/phase-one-preview/OpenClicky-0.6.0-win-x64.zip -Force
+```
+
+Linux/macOS cross-publishing remains available with `bash scripts/publish-exe.sh`; interactive Windows acceptance must happen on Windows.
+
+Whisper's native loader looks for libraries relative to its assembly. The publish scripts extract bundled content to keep that path available in the portable EXE; the dedicated speech harness was also tested in this publish mode. The voice model is downloaded separately under LocalAppData. Local Whisper requires an AVX2-capable Windows 11 x64 CPU and the Visual C++ 2022 runtime; check these on a clean machine before distribution.
+
+The executable includes the original OpenClicky icon. The package carries proper 44, 50, and 150 pixel Windows logo assets, generated from the same artwork. `scripts/generate-brand.py` regenerates them using Pillow; running the generator is not required for a normal build.
+
+## MSIX
+
+After publishing:
+
+```powershell
 powershell -ExecutionPolicy Bypass -File scripts/pack-msix.ps1
-# → artifacts/msix/OpenClicky.msix
 ```
 
-`pack-msix.ps1` locates `makeappx.exe` on `PATH` or under `%ProgramFiles(x86)%\Windows Kits\10\bin\*\x64\`.
+Output: `artifacts/phase-one-preview/msix/OpenClicky-0.6.0-unsigned.msix`. The script finds `makeappx.exe` on PATH or in the installed Windows SDK. The manifest is under `packaging/msix/`; staging is restricted beneath repository `artifacts/`.
 
-**This MSIX is intentionally unsigned** until a code-signing certificate is available. Sideload options:
+MSIX staging includes the complete portable output: OpenWork, companion workspace, Chrome setup files, notices, and executables. Existing 0.4.1 and 0.5.0 artifacts remain historical and are not overwritten.
 
-1. Sign with `signtool` + your cert, then `Add-AppxPackage`.  
-2. Or enable **Developer Mode** (`Settings → Privacy & security → For developers`) and:
+The EXE and MSIX are **unsigned**. Local package creation does not prove the MSIX is installed or trusted. For normal distribution, sign with your code-signing certificate and verify installation on a clean Windows machine. No signing credentials or Microsoft Store release are configured in this repository. Do not weaken a user's Windows security settings as part of an automated test.
 
-```powershell
-Add-AppxPackage -Path artifacts\msix\OpenClicky.msix -AllowUnsigned
-```
+## Release checks
 
-(AllowUnsigned requires a recent Windows 11 build; otherwise sign first.)  
-3. Microsoft Store submission remains post-MVP.
+1. Launch the published EXE and inspect the home screen, icon, tray, and settings at the target display scaling.
+2. Run both built-in demos; inspect the real destination controls rather than trusting a success log.
+3. Connect your provider yourself and run the [live acceptance checklist](verification.md).
+4. Test the physical microphone and remapped shortcut. Test cancellation during processing, speech, and confirmation.
+5. Verify signed installation and upgrade behavior separately before distributing an installer.
 
-There is no CI signing secret in this repository — do not expect a signed Store package from `pack-msix.ps1` alone.
+Clean-machine launch, WebView2 availability, Chrome extension loading, native-host registration, MSIX trust, installation, and upgrade behavior remain manual acceptance items. Packaging success does not prove them.
 
-## CI artifacts
-
-Every push to `main` / `cursor/**` (and PRs into `main`) runs `.github/workflows/windows-ci.yml` on `windows-latest` and uploads:
-
-| Artifact | Contents |
-|----------|----------|
-| `openclicky-win-x64` | Folder `artifacts/exe/win-x64/` (`OpenClicky.exe` + `OpenClicky.App.exe` + deps) |
-| `openclicky-msix` | `artifacts/msix/OpenClicky.msix` (unsigned) |
-
-Download from the Actions run for that commit — still unsigned.
-
-### Install / run from CI (Ahmad / Windows 11)
-
-**EXE (fastest):**
-
-1. Open the green `windows-ci` run → Artifacts → download `openclicky-win-x64`.  
-2. Unzip to e.g. `%USERPROFILE%\Apps\OpenClicky\`.  
-3. Double-click `OpenClicky.exe` (or `OpenClicky.App.exe`).  
-4. If SmartScreen blocks: **More info → Run anyway**.  
-5. Tray icon → Settings → OpenRouter key **or** Continue with ChatGPT → hold **Win+Alt+Space**.  
-   (CredWrite/DPAPI fix is on phase-a `2cae07c` — ChatGPT token save should work for oversized OAuth blobs.)
-
-**MSIX (optional sideload):**
-
-1. Download artifact `openclicky-msix`.  
-2. Enable Developer Mode.  
-3. `Add-AppxPackage -Path .\OpenClicky.msix -AllowUnsigned` (or sign first).  
-4. Launch **OpenClicky** from the Start menu.
-
-## Smoke checklist after publish
-
-1. Run EXE → tray icon appears (single-instance; second launch shows a dialog).  
-2. Settings → OpenRouter key (Credential Manager). Debug log also at `%AppData%\OpenClicky\debug.log`.  
-3. Hold Win+Alt+Space (or remapped chord) → Talk reply; log shows `capture_backend=wgc` when Graphics Capture works.  
-4. `dotnet run --project apps/windows/OpenClicky.Sandbox` + `openclicky agent click the green button` → confirm dialogs → act.
+GitHub Actions publishes the `openclicky-win-x64` folder and unsigned `openclicky-msix` artifact. Check the run for the exact commit being distributed; the October 2026 local verification record does not claim that new changes have run in GitHub CI.

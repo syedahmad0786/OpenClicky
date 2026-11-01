@@ -10,6 +10,8 @@ public static class AgentToolNames
     public const string Hotkey = "hotkey";
     public const string Scroll = "scroll";
     public const string Wait = "wait";
+    public const string ListApps = "list_apps";
+    public const string OpenApp = "open_app";
 }
 
 public sealed record AgentActionRequest(

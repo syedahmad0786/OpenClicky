@@ -7,15 +7,20 @@ namespace OpenClicky.Providers;
 
 public sealed class OpenRouterTalkClient : ITalkClient
 {
+    private static readonly HttpClient DefaultHttp = new() { Timeout = TimeSpan.FromMinutes(3) };
     private readonly HttpClient _http;
     private readonly string _apiKey;
     private readonly string _baseUrl;
+    /// <summary>Who serves this OpenAI-compatible endpoint ("OpenRouter", "xAI"): error text, and OpenRouter's attribution headers.</summary>
+    internal string Provider { get; }
+    internal string BaseUrl => _baseUrl;
 
-    public OpenRouterTalkClient(string apiKey, string? baseUrl = null, HttpClient? httpClient = null)
+    public OpenRouterTalkClient(string apiKey, string? baseUrl = null, HttpClient? httpClient = null, string provider = "OpenRouter")
     {
         _apiKey = apiKey;
+        Provider = provider;
         _baseUrl = (baseUrl ?? "https://openrouter.ai/api/v1").TrimEnd('/');
-        _http = httpClient ?? new HttpClient { Timeout = TimeSpan.FromMinutes(3) };
+        _http = httpClient ?? DefaultHttp;
     }
 
     public async Task<string> CompleteVisionTalkAsync(
@@ -68,15 +73,18 @@ public sealed class OpenRouterTalkClient : ITalkClient
         var json = JsonSerializer.Serialize(payload);
         using var request = new HttpRequestMessage(HttpMethod.Post, $"{_baseUrl}/chat/completions");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
-        request.Headers.TryAddWithoutValidation("HTTP-Referer", "https://github.com/openclicky/OpenClicky");
-        request.Headers.TryAddWithoutValidation("X-Title", "OpenClicky");
+        if (Provider == "OpenRouter")
+        {
+            request.Headers.TryAddWithoutValidation("HTTP-Referer", "https://github.com/openclicky/OpenClicky");
+            request.Headers.TryAddWithoutValidation("X-Title", "OpenClicky");
+        }
         request.Content = new StringContent(json, Encoding.UTF8, "application/json");
 
         using var response = await _http.SendAsync(request, cancellationToken).ConfigureAwait(false);
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         if (!response.IsSuccessStatusCode)
         {
-            throw new InvalidOperationException($"OpenRouter chat {(int)response.StatusCode}: {body}");
+            throw new InvalidOperationException($"{Provider} chat {(int)response.StatusCode}: {body}");
         }
 
         using var doc = JsonDocument.Parse(body);
