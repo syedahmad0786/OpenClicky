@@ -1,0 +1,11 @@
+{
+  "pid": 16972,
+  "startedAt": "2026-10-28T15:56:40.1957979+05:00",
+  "isolatedModeConfirmed": true,
+  "verifiedDllMatches": true,
+  "normalHostUntouched": true,
+  "windowsWereHidden": true,
+  "processNotStartedOrTerminatedByThisRecheck": true,
+  "nextAction": "On fresh idle run prepared capture-fixed-existing-mvp.ps1 immediately. It opens only MVP browser after tray Capture: idle, validates physical input and own context keys, saves cropped toolbar. Do not rerun lifetime or launch another copy.",
+  "captureAttempt": "stopped at initial safety before keyboard action; no proof claimed"
+}

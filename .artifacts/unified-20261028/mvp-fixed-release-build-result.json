@@ -1,0 +1,5 @@
+{
+  "exitCode": 0,
+  "sourceBase": "12f5eb7 plus approved native fix",
+  "command": "dotnet build OpenClicky.sln -c Release -p:Platform=x64 --no-restore"
+}

@@ -1,0 +1,22 @@
+[
+  {
+    "exitCode": 0,
+    "revision": "103138428a66f69a26fb2de494d0a749eb7d16ec",
+    "suite": "Core"
+  },
+  {
+    "exitCode": 0,
+    "revision": "103138428a66f69a26fb2de494d0a749eb7d16ec",
+    "suite": "Input"
+  },
+  {
+    "exitCode": 0,
+    "revision": "103138428a66f69a26fb2de494d0a749eb7d16ec",
+    "suite": "Recording"
+  },
+  {
+    "exitCode": 0,
+    "revision": "103138428a66f69a26fb2de494d0a749eb7d16ec",
+    "suite": "MeetingAudio"
+  }
+]

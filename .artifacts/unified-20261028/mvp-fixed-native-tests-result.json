@@ -1,0 +1,18 @@
+[
+  {
+    "suite": "Core",
+    "exitCode": 0
+  },
+  {
+    "suite": "Input",
+    "exitCode": 0
+  },
+  {
+    "suite": "Recording",
+    "exitCode": 0
+  },
+  {
+    "suite": "MeetingAudio",
+    "exitCode": 0
+  }
+]

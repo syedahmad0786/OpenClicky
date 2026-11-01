@@ -1,0 +1,11 @@
+{
+  "exitCause": "Unverified; no retained exit receipt. Do not claim the app remains open.",
+  "temporaryOwnMonitorStopped": false,
+  "testedBuildUnchanged": true,
+  "temporaryMonitorPresent": false,
+  "observedAt": "2026-10-28T13:23:41.5239993+05:00",
+  "isolatedAppRunningNow": false,
+  "dllSha256": "72ABF9C830CB3BBDCC9BCABD1EB641BF1C98D67ECDD5C6286A151E5ECCF988EB",
+  "nativeExitReceipt": null,
+  "originalAppStillPresent": true
+}

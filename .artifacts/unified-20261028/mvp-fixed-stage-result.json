@@ -1,0 +1,15 @@
+{
+  "exitCode": 0,
+  "dllSha256": "D6FA3CA7693687FF842CF6AA3B62CAD501317C1F07D903AEC3BE6C1FD331E192",
+  "executable": "D:\\OpenClicky\\.artifacts\\unified-20261028\\MVP\\OpenClicky.App.exe",
+  "ffmpegBundled": false,
+  "sourceReview": "unavailable",
+  "nativeHiddenChecksPassed": 3,
+  "frontendSourceUnchanged": true,
+  "formalTestsPassed": 3081,
+  "visibleLifetime": "passed: bounded visible synthetic production-context fixture",
+  "revision": "103138428a66f69a26fb2de494d0a749eb7d16ec",
+  "visibleToolbar": "passed: actual PNG pixels inspected at DPI144/native180",
+  "verificationDocumentationRevision": "2ade76d6df45e3337b8846cee8e21d6792e94df5",
+  "fullFeatureAcceptance": false
+}

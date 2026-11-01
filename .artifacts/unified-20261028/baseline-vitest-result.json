@@ -1,0 +1,6 @@
+{
+  "command": "node node_modules/vitest/vitest.mjs run",
+  "exitCode": 0,
+  "time": "2026-10-28T08:59:23.4194575+05:00",
+  "scope": "Existing original checkout, no source modifications"
+}

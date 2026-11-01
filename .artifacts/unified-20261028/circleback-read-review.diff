@@ -1,0 +1,245 @@
+--- COMMITS ---
+5ac6a10 feat: add bounded read-only Circleback API client
+--- STAT ---
+ .../Circleback/CirclebackClient.cs                 | 88 ++++++++++++++++++++++
+ .../Circleback/CirclebackModels.cs                 | 18 +++++
+ .../plans/2026-10-28-circleback-read-sources.md    | 38 ++++++++++
+ .../plans/2026-10-28-circleback-read.md            | 22 ++++++
+ .../Circleback/CirclebackClientTests.cs            | 39 ++++++++++
+ 5 files changed, 205 insertions(+)
+--- DIFF ---
+diff --git a/apps/windows/OpenClicky.Providers/Circleback/CirclebackClient.cs b/apps/windows/OpenClicky.Providers/Circleback/CirclebackClient.cs
+new file mode 100644
+index 0000000..9326051
+--- /dev/null
++++ b/apps/windows/OpenClicky.Providers/Circleback/CirclebackClient.cs
+@@ -0,0 +1,88 @@
++using System.Net;
++using System.Net.Http.Headers;
++using System.Text.Json;
++using System.Text.RegularExpressions;
++namespace OpenClicky.Providers.Circleback;
++
++/// <summary>Read-only API. Injected handlers are trusted transports and must not follow redirects.</summary>
++public sealed class CirclebackClient : IDisposable
++{
++ private static readonly Uri Origin = new("https://circleback.ai");
++ private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { MaxDepth = 32 };
++ private readonly Func<CancellationToken, ValueTask<string?>> tokenAccessor;
++ private readonly HttpClient http;
++ private readonly int maxBytes;
++ public CirclebackClient(Func<CancellationToken, ValueTask<string?>> tokenAccessor, HttpMessageHandler? handler = null, int maxResponseBytes = 4194304)
++ {
++  ArgumentNullException.ThrowIfNull(tokenAccessor);
++  if(maxResponseBytes < 1 || maxResponseBytes > 16777216) throw new ArgumentOutOfRangeException(nameof(maxResponseBytes));
++  // Reject potentially credential-forwarding transports rather than mutating caller settings.
++  if(handler is HttpClientHandler h && h.AllowAutoRedirect || handler is SocketsHttpHandler s && s.AllowAutoRedirect) throw new ArgumentException("Redirects must be disabled.", nameof(handler));
++  this.tokenAccessor=tokenAccessor; maxBytes=maxResponseBytes;
++  http=new HttpClient(handler ?? new SocketsHttpHandler { AllowAutoRedirect=false, UseCookies=false, MaxResponseHeadersLength=32 }, true) { Timeout=TimeSpan.FromSeconds(60) };
++ }
++ public async Task<CirclebackMeetingPage> ListMeetingsAsync(Uri? nextPage = null, CancellationToken cancellationToken = default)
++ {
++  var endpoint=nextPage ?? new Uri(Origin,"/api/meetings"); ValidatePage(endpoint);
++  var response=await ReadAsync<List<CirclebackMeeting>>(endpoint,cancellationToken);
++  if(response.Value.Count>10000) throw Error(CirclebackErrorKind.MalformedResponse);
++  foreach(var meeting in response.Value) ValidateMeeting(meeting);
++  return new(response.Value.AsReadOnly(),response.Next,new(endpoint,response.At));
++ }
++ public async Task<CirclebackMeetingResult> GetMeetingAsync(string meetingId, CancellationToken cancellationToken = default)
++ {
++  var endpoint=MeetingEndpoint(meetingId, false);var response=await ReadAsync<CirclebackMeeting>(endpoint,cancellationToken);
++  ValidateMeeting(response.Value);if(response.Value.Id!=meetingId) throw Error(CirclebackErrorKind.MalformedResponse);
++  return new(response.Value,new(endpoint,response.At));
++ }
++ public async Task<CirclebackTranscriptResult> GetTranscriptAsync(string meetingId, CancellationToken cancellationToken = default)
++ {
++  var endpoint=MeetingEndpoint(meetingId,true);var response=await ReadAsync<List<CirclebackSegment>>(endpoint,cancellationToken);
++  if(response.Value.Count>10000 || response.Value.Any(x=>x is null || x.Speaker is null || x.Text is null || !double.IsFinite(x.Timestamp) || x.Timestamp<0)) throw Error(CirclebackErrorKind.MalformedResponse);
++  return new(meetingId,response.Value.AsReadOnly(),new(endpoint,response.At));
++ }
++ private static Uri MeetingEndpoint(string id,bool transcript)
++ {
++  if(string.IsNullOrEmpty(id) || id.Length>256 || !id.All(c=>char.IsAsciiLetterOrDigit(c)||c=='_'||c=='-')) throw new ArgumentException("Invalid meeting ID.",nameof(id));
++  return new Uri(Origin,"/api/meeting/"+id+(transcript?"/transcript":""));
++ }
++ private static void ValidatePage(Uri uri)
++ {
++  if(!uri.IsAbsoluteUri || uri.Scheme!="https" || uri.IdnHost!="circleback.ai" || uri.Port!=443 || uri.UserInfo.Length!=0 || uri.Fragment.Length!=0 || uri.AbsolutePath!="/api/meetings" || uri.OriginalString.Length>8192) throw Error(CirclebackErrorKind.UnsafeEndpoint);
++ }
++ private static void ValidateMeeting(CirclebackMeeting m)
++ {
++  if(m is null || string.IsNullOrWhiteSpace(m.Id) || string.IsNullOrWhiteSpace(m.Name) || m.Duration is double d && (!double.IsFinite(d)||d<0) || m.ActionItems?.Count>10000 || m.Attendees?.Count>10000 || m.Tags?.Count>10000 || m.ActionItems?.Any(a=>a is null || a.Id<=0 || string.IsNullOrWhiteSpace(a.Title))==true) throw Error(CirclebackErrorKind.MalformedResponse);
++ }
++ private async Task<(T Value,Uri? Next,DateTimeOffset At)> ReadAsync<T>(Uri endpoint,CancellationToken ct) where T:class
++ {
++  ct.ThrowIfCancellationRequested();var token=await tokenAccessor(ct);ct.ThrowIfCancellationRequested();
++  if(string.IsNullOrWhiteSpace(token) || token.Length>8192 || token.Any(c=>c<33||c>126)) throw Error(CirclebackErrorKind.Revoked);
++  using var request=new HttpRequestMessage(HttpMethod.Get,endpoint);request.Headers.Authorization=new AuthenticationHeaderValue("Bearer",token);request.Headers.Accept.Add(new("application/json"));
++  try {
++   using var response=await http.SendAsync(request,HttpCompletionOption.ResponseHeadersRead,ct);
++   int status=(int)response.StatusCode;
++   if(status>=300 && status<400) throw new CirclebackException(CirclebackErrorKind.UnsafeEndpoint,response.StatusCode);
++   if(!response.IsSuccessStatusCode) {
++    TimeSpan? retry=response.Headers.RetryAfter?.Delta;
++    if(retry is null && response.Headers.RetryAfter?.Date is DateTimeOffset date) retry=date>DateTimeOffset.UtcNow?date-DateTimeOffset.UtcNow:TimeSpan.Zero;
++    throw new CirclebackException(status is 401 or 403?CirclebackErrorKind.Revoked:status==429?CirclebackErrorKind.RateLimited:status>=500?CirclebackErrorKind.Unavailable:CirclebackErrorKind.RequestFailed,response.StatusCode,status==429?retry:null);
++   }
++   if(response.Content.Headers.ContentLength>maxBytes) throw Error(CirclebackErrorKind.ResponseTooLarge);
++   await using var stream=await response.Content.ReadAsStreamAsync(ct);using var buffer=new MemoryStream();byte[] chunk=new byte[Math.Min(8192,maxBytes+1)];
++   int read;while((read=await stream.ReadAsync(chunk.AsMemory(0,Math.Min(chunk.Length,maxBytes-(int)buffer.Length+1)),ct))>0){if(buffer.Length+read>maxBytes) throw Error(CirclebackErrorKind.ResponseTooLarge);buffer.Write(chunk,0,read);}
++   T value;try {value=JsonSerializer.Deserialize<T>(buffer.GetBuffer().AsSpan(0,(int)buffer.Length),JsonOptions) ?? throw Error(CirclebackErrorKind.MalformedResponse);}catch(JsonException){throw Error(CirclebackErrorKind.MalformedResponse);}
++   Uri? next=null;
++   if(endpoint.AbsolutePath=="/api/meetings" && response.Headers.TryGetValues("Link",out var links)) {
++    var combined=string.Join(",",links);if(combined.Length>8192) throw Error(CirclebackErrorKind.UnsafeEndpoint);
++    foreach(Match match in Regex.Matches(combined,@"<([^>]+)>s*((?:;[^<]*)?)",RegexOptions.CultureInvariant,TimeSpan.FromMilliseconds(100))) {
++     if(!Regex.IsMatch(match.Groups[2].Value,"""(?:^|;)\s*rel\s*=\s*(?:"[^"]*\bnext\b[^"]*"|next)(?:\s*;|\s*,|\s*$)""",RegexOptions.IgnoreCase|RegexOptions.CultureInvariant,TimeSpan.FromMilliseconds(100))) continue;
++     if(next is not null || !Uri.TryCreate(endpoint,match.Groups[1].Value,out next)) throw Error(CirclebackErrorKind.UnsafeEndpoint);ValidatePage(next);
++    }
++   }
++   return(value,next,DateTimeOffset.UtcNow);
++  } catch(HttpRequestException){throw Error(CirclebackErrorKind.Unavailable);}catch(IOException){throw Error(CirclebackErrorKind.Unavailable);}catch(OperationCanceledException) when(!ct.IsCancellationRequested){throw Error(CirclebackErrorKind.Unavailable);}
++ }
++ private static CirclebackException Error(CirclebackErrorKind kind)=>new(kind);
++ public void Dispose()=>http.Dispose();
++}
+diff --git a/apps/windows/OpenClicky.Providers/Circleback/CirclebackModels.cs b/apps/windows/OpenClicky.Providers/Circleback/CirclebackModels.cs
+new file mode 100644
+index 0000000..b8b0c06
+--- /dev/null
++++ b/apps/windows/OpenClicky.Providers/Circleback/CirclebackModels.cs
+@@ -0,0 +1,18 @@
++using System.Net;
++namespace OpenClicky.Providers.Circleback;
++public enum CirclebackErrorKind { Revoked, RateLimited, Unavailable, UnsafeEndpoint, MalformedResponse, ResponseTooLarge, RequestFailed }
++public sealed class CirclebackException(CirclebackErrorKind kind, HttpStatusCode? statusCode = null, TimeSpan? retryAfter = null) : Exception($"Circleback request failed: {kind}.")
++{
++ public CirclebackErrorKind Kind { get; } = kind;
++ public HttpStatusCode? StatusCode { get; } = statusCode;
++ public TimeSpan? RetryAfter { get; } = retryAfter;
++}
++public sealed record CirclebackSource(Uri Endpoint, DateTimeOffset RetrievedAt);
++public sealed record CirclebackPerson(int? ProfileId, string? Name, string? Title, string? CompanyName, string? Email, bool? IsCalendarEventOrganizer, bool? IsCalendarInvitee);
++public sealed record CirclebackTag(int Id, string Name, string? Description);
++public sealed record CirclebackAction(int Id, string Title, string? Description, CirclebackPerson? Assignee, string? Status);
++public sealed record CirclebackMeeting(string Id, string Name, DateTimeOffset? CreatedAt, DateTimeOffset? UpdatedAt, double? Duration, string? Url, string? RecordingUrl, string? IcalUid, IReadOnlyList<CirclebackTag>? Tags, IReadOnlyList<CirclebackPerson>? Attendees, string? Notes, string? PrivateNotes, IReadOnlyList<CirclebackAction>? ActionItems);
++public sealed record CirclebackSegment(string Speaker, string Text, [property: System.Text.Json.Serialization.JsonRequired] double Timestamp);
++public sealed record CirclebackMeetingPage(IReadOnlyList<CirclebackMeeting> Meetings, Uri? NextPage, CirclebackSource Source);
++public sealed record CirclebackMeetingResult(CirclebackMeeting Meeting, CirclebackSource Source);
++public sealed record CirclebackTranscriptResult(string MeetingId, IReadOnlyList<CirclebackSegment> Segments, CirclebackSource Source);
+diff --git a/docs/superpowers/plans/2026-10-28-circleback-read-sources.md b/docs/superpowers/plans/2026-10-28-circleback-read-sources.md
+new file mode 100644
+index 0000000..2b28a9e
+--- /dev/null
++++ b/docs/superpowers/plans/2026-10-28-circleback-read-sources.md
+@@ -0,0 +1,38 @@
++# Circleback Task 4 source and verification report
++
++## Official sources inspected 28 October 2026
++- https://circleback.ai/docs/api : base https://circleback.ai/api; bearer supplied API key. RFC8288 Link rel=next, opaque cursor. Account-wide limits, 429 Retry-After seconds. No key created or used.
++- https://circleback.ai/docs/api/meetings/list-meetings : GET /meetings; query ownership All/Mine/Shared (default Mine), statuses[], cursor, tagIds[], attendeeProfileIds[]. Response bare meeting array, NOT a data wrapper.
++- https://circleback.ai/docs/api/meetings/get-meeting : GET /meeting/{meetingId}; response bare meeting object. Read permission determines included details.
++- https://circleback.ai/docs/api/meetings/get-meeting-transcript : GET /meeting/{meetingId}/transcript; bare array of {speaker:string,text:string,timestamp:number}, timestamps fractional seconds (example4.56).
++
++List/detail examples: id/name strings; createdAt/updatedAt ISO dates; duration number; url/recordingUrl/icalUid strings; tags[{id,name,description}]; attendees[{profileId,name,title,companyName,email,isCalendarEventOrganizer,isCalendarInvitee}]; notes/privateNotes strings; actionItems[{id,title,description,assignee nullable person,status}]. The client projects these fields only. Insights (heterogeneous JSON), linkAccess, calendarEvent and sharedWith appear in docs but are deliberately not projected for Task4. Unknown fields ignored. RecordingUrl is inert data, never fetched. No standalone notes/action mutation or search/list-action API implemented.
++
++The docs rendered browser examples use circleback.ai/api; text extraction misleadingly showed example.com in generated snippets, so actual browser endpoint labels were checked. API base GET404 is not missing documentation.
++
++## Public signatures
++Namespace OpenClicky.Providers.Circleback.
++- CirclebackClient(Func<CancellationToken, ValueTask<string?>> tokenAccessor, HttpMessageHandler? handler = null, int maxResponseBytes = 4194304)
++- Task<CirclebackMeetingPage> ListMeetingsAsync(Uri? nextPage = null, CancellationToken cancellationToken = default)
++- Task<CirclebackMeetingResult> GetMeetingAsync(string meetingId, CancellationToken cancellationToken = default)
++- Task<CirclebackTranscriptResult> GetTranscriptAsync(string meetingId, CancellationToken cancellationToken = default)
++- void Dispose()
++
++DTO signatures are positional records in CirclebackModels.cs. Source is CirclebackSource(Uri Endpoint, DateTimeOffset RetrievedAt). Meeting detail returns Meeting+Source, list Meetings+NextPage+Source, transcript MeetingId+Segments+Source. Errors: CirclebackException.Kind/StatusCode/RetryAfter; kinds Revoked,RateLimited,Unavailable,UnsafeEndpoint,MalformedResponse,ResponseTooLarge,RequestFailed.
++
++Transport uses dedicated no-cookie, no-redirect SocketsHttpHandler by default; known auto-redirect HttpClientHandler/SocketsHttpHandler rejected. Arbitrary injected custom handlers are trusted transport infrastructure, not a security boundary: they must not independently forward requests. No caller HttpClient or mutable base URL. Response timeout60 seconds, header32KiB default transport, body4MiB configurable1..16MiB; count10000; JSON depth32; page links8192; IDs1..256 ASCII safe characters. No automatic retry or full-account pagination. Caller token accessor must return a protected credential just in time; credential not persisted/logged. Response bodies and underlying transport exceptions are not copied into errors.
++
++## Verification
++Initial fixture-first build: exit1, expected missing Circleback namespace/types; this was compile-red, not runtime-red.
++Initial implemented focused suite: exit0,26/26.
++Additional malformed transcript regression: exit1,33 pass1 fail; missing timestamp incorrectly defaulted0. Fixed using JsonRequired.
++Further focused/full results recorded below.
++
++## Acceptance boundary
++Real account access, entitlement, API key validity, actual provider payloads and caller integration are UNVERIFIED. Tests use injected HttpMessageHandler with synthetic tokens only. No real API calls, key creation, media downloads, writes, UI, integration or global configuration changes.
++
++## Final receipts
++- dotnet test tests/OpenClicky.Core.Tests/OpenClicky.Core.Tests.csproj -c Release --filter FullyQualifiedName~Circleback : exit0,34 passed/0 failed/0 skipped (154ms).
++- dotnet test tests/OpenClicky.Core.Tests/OpenClicky.Core.Tests.csproj -c Release --no-build : exit0,2385 passed/0 failed/0 skipped (18s).
++- Complete logs retained under C:\Users\ahmad\.aside\u\0\sessions\2026-10-26_Pm2QhgacjOhFyF8i\tmp: circleback-red.log, circleback-red-regression.log, circleback-final-focused.log, circleback-full-core.log.
++- Final focused build reported no warnings. Full Core is not full solution/native/UI acceptance.
+diff --git a/docs/superpowers/plans/2026-10-28-circleback-read.md b/docs/superpowers/plans/2026-10-28-circleback-read.md
+new file mode 100644
+index 0000000..c3bf2c2
+--- /dev/null
++++ b/docs/superpowers/plans/2026-10-28-circleback-read.md
+@@ -0,0 +1,22 @@
++# Circleback Read Client Implementation Plan
++> **For agentic workers:** Execute Task 4 only using Superpowers TDD.
++**Goal:** Bounded read-only meeting/transcript client.
++**Architecture:** Dedicated HttpClient; fixed HTTPS origin; token accessor called per request; trusted handler injection for fixtures only.
++**Tech Stack:** .NET8 System.Text.Json xUnit, no dependencies.
++**Spec:** ../specs/2026-10-28-unified-capabilities-design.md
++## Global Constraints
++No accounts, key creation, media, mutations, UI, configuration or integration edits.
++## Review Focus
++Redirects disabled; pagination exact origin/path validated before token access; opaque cursor preserved; bounded streams without Content-Length; cancellation and sanitized errors.
++## Files and interfaces
++Providers/Circleback/CirclebackModels.cs: typed DTOs, provenance, error.
++Providers/Circleback/CirclebackClient.cs: sealed IDisposable.
++Core.Tests/Circleback/CirclebackClientTests.cs: fixture transport tests.
++Constructor: CirclebackClient(Func<CancellationToken, ValueTask<string?>> tokenAccessor, HttpMessageHandler? handler = null, int maxResponseBytes = 4194304).
++Methods: Task<CirclebackMeetingPage> ListMeetingsAsync(Uri? nextPage = null, CancellationToken cancellationToken = default); Task<CirclebackMeetingResult> GetMeetingAsync(string meetingId, CancellationToken cancellationToken = default); Task<CirclebackTranscriptResult> GetTranscriptAsync(string meetingId, CancellationToken cancellationToken = default); void Dispose().
++Limits: default4MiB, allowed1..16MiB;10000 entries; JSON depth32; ID1..256 ASCII alphanumeric/underscore/hyphen; link8192. No automatic pagination/retry. Provider notes/privateNotes/actions are untrusted source content, not inferred facts.
++- [x] Write tests and observe RED.
++- [x] Implement exact DTO/transport contract; verify GREEN.
++- [x] Run focused and full Core, retain logs/exits in source report.
++- [x] Commit only owned files and exact plan/source documents.
++
+diff --git a/tests/OpenClicky.Core.Tests/Circleback/CirclebackClientTests.cs b/tests/OpenClicky.Core.Tests/Circleback/CirclebackClientTests.cs
+new file mode 100644
+index 0000000..1b751e3
+--- /dev/null
++++ b/tests/OpenClicky.Core.Tests/Circleback/CirclebackClientTests.cs
+@@ -0,0 +1,39 @@
++using System.Net;
++using System.Text;
++using OpenClicky.Providers.Circleback;
++using Xunit;
++namespace OpenClicky.Core.Tests.Circleback;
++public sealed class CirclebackClientTests
++{
++ const string Meeting = """{"id":"m1","name":"Review","notes":"notes","privateNotes":"private","actionItems":[{"id":1,"title":"Follow up","status":"PENDING"}]}""";
++ sealed class Handler(Func<HttpRequestMessage,CancellationToken,Task<HttpResponseMessage>> send):HttpMessageHandler {protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage r,CancellationToken c)=>send(r,c);}
++ static HttpResponseMessage Json(string body,HttpStatusCode status=HttpStatusCode.OK)=>new(status){Content=new StringContent(body,Encoding.UTF8,"application/json")};
++ static CirclebackClient Client(Func<HttpRequestMessage,CancellationToken,Task<HttpResponseMessage>> send,int max=4194304)=>new(_=>ValueTask.FromResult<string?>("fixture-token"),new Handler(send),max);
++ [Fact] public async Task Typed_meeting_and_bearer_scope(){using var client=Client((r,c)=>{Assert.Equal(HttpMethod.Get,r.Method);Assert.Equal("https://circleback.ai/api/meeting/m1",r.RequestUri!.AbsoluteUri);Assert.Equal("Bearer",r.Headers.Authorization!.Scheme);Assert.Equal("fixture-token",r.Headers.Authorization.Parameter);Assert.Null(r.Content);return Task.FromResult(Json(Meeting));});var result=await client.GetMeetingAsync("m1");Assert.Equal("notes",result.Meeting.Notes);Assert.Equal("private",result.Meeting.PrivateNotes);Assert.Equal("Follow up",Assert.Single(result.Meeting.ActionItems!).Title);Assert.Equal("/api/meeting/m1",result.Source.Endpoint.AbsolutePath);}
++ [Fact] public async Task Transcript_seconds(){using var client=Client((r,c)=>{Assert.EndsWith("/meeting/m1/transcript",r.RequestUri!.AbsoluteUri);return Task.FromResult(Json("""[{"speaker":"Jane","text":"Hello","timestamp":4.56}]"""));});Assert.Equal(4.56,Assert.Single((await client.GetTranscriptAsync("m1")).Segments).Timestamp);}
++ [Fact] public async Task Opaque_explicit_pagination(){int calls=0;using var client=Client((r,c)=>{calls++;var response=Json("["+Meeting+"]");if(calls==1)response.Headers.TryAddWithoutValidation("Link","</api/meetings?cursor=a%2Fb%3D>; rel=\"next\"");else Assert.Equal("?cursor=a%2Fb%3D",r.RequestUri!.Query);return Task.FromResult(response);});var first=await client.ListMeetingsAsync();Assert.Equal(1,calls);Assert.Single(first.Meetings);Assert.NotNull(first.NextPage);await client.ListMeetingsAsync(first.NextPage);Assert.Equal(2,calls);}
++ [Theory][InlineData("http://circleback.ai/api/meetings")][InlineData("https://evil.example/api/meetings")][InlineData("https://circleback.ai.evil.example/api/meetings")][InlineData("https://user@circleback.ai/api/meetings")][InlineData("https://circleback.ai/api/meeting/m1")][InlineData("https://circleback.ai:444/api/meetings")]
++ public async Task Unsafe_page_never_sends(string url){using var client=Client((r,c)=>throw new Xunit.Sdk.XunitException("No send"));await Assert.ThrowsAsync<CirclebackException>(()=>client.ListMeetingsAsync(new Uri(url)));}
++ [Fact] public async Task Foreign_next_rejected(){using var client=Client((r,c)=>{var response=Json("[]");response.Headers.TryAddWithoutValidation("Link","<https://evil.example/api/meetings>; rel=\"next\"");return Task.FromResult(response);});await Assert.ThrowsAsync<CirclebackException>(()=>client.ListMeetingsAsync());}
++ [Theory][InlineData(401,CirclebackErrorKind.Revoked)][InlineData(403,CirclebackErrorKind.Revoked)][InlineData(429,CirclebackErrorKind.RateLimited)][InlineData(503,CirclebackErrorKind.Unavailable)][InlineData(302,CirclebackErrorKind.UnsafeEndpoint)]
++ public async Task Sanitized_errors(int status,CirclebackErrorKind expected){using var client=Client((r,c)=>{var response=Json("sensitive response",(HttpStatusCode)status);response.Headers.TryAddWithoutValidation("Retry-After","17");return Task.FromResult(response);});var error=await Assert.ThrowsAsync<CirclebackException>(()=>client.ListMeetingsAsync());Assert.Equal(expected,error.Kind);Assert.DoesNotContain("sensitive",error.ToString());if(status==429)Assert.Equal(TimeSpan.FromSeconds(17),error.RetryAfter);}
++ [Theory][InlineData("null")][InlineData("{}")][InlineData("[{\"id\":\"m1\"}]")][InlineData("not json")]
++ public async Task Malformed_list(string body){using var client=Client((r,c)=>Task.FromResult(Json(body)));Assert.Equal(CirclebackErrorKind.MalformedResponse,(await Assert.ThrowsAsync<CirclebackException>(()=>client.ListMeetingsAsync())).Kind);}
++ [Fact] public async Task Bounded_body(){using var client=Client((r,c)=>Task.FromResult(Json(new string(' ',100))),32);Assert.Equal(CirclebackErrorKind.ResponseTooLarge,(await Assert.ThrowsAsync<CirclebackException>(()=>client.ListMeetingsAsync())).Kind);}
++ [Theory][InlineData("""[{"speaker":"Jane","text":"Hello"}]""")][InlineData("""[{"speaker":"Jane","text":"Hello","timestamp":-1}]""")][InlineData("[null]")]
++ public async Task Malformed_transcript(string body){using var client=Client((r,c)=>Task.FromResult(Json(body)));Assert.Equal(CirclebackErrorKind.MalformedResponse,(await Assert.ThrowsAsync<CirclebackException>(()=>client.GetTranscriptAsync("m1"))).Kind);}
++ [Fact] public void Rejects_auto_redirect_transport(){Assert.Throws<ArgumentException>(()=>new CirclebackClient(_=>ValueTask.FromResult<string?>("fixture"),new HttpClientHandler{AllowAutoRedirect=true}));}
++ [Fact] public async Task Http_failures_sanitized(){using var client=Client((r,c)=>throw new HttpRequestException("sensitive"));var e=await Assert.ThrowsAsync<CirclebackException>(()=>client.ListMeetingsAsync());Assert.Equal(CirclebackErrorKind.Unavailable,e.Kind);Assert.DoesNotContain("sensitive",e.ToString());}
++ sealed class UnboundedContent : HttpContent
++ {
++  protected override bool TryComputeLength(out long length){length=0;return false;}
++  protected override Task SerializeToStreamAsync(Stream stream,TransportContext? context)=>stream.WriteAsync(new byte[100]).AsTask();
++ }
++ [Fact] public async Task Bounds_body_without_content_length(){using var client=Client((r,c)=>Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK){Content=new UnboundedContent()}),32);Assert.Equal(CirclebackErrorKind.ResponseTooLarge,(await Assert.ThrowsAsync<CirclebackException>(()=>client.ListMeetingsAsync())).Kind);}
++ [Fact] public async Task Cancellation_during_send(){using var cts=new CancellationTokenSource();using var client=Client(async(r,c)=>{cts.Cancel();await Task.Delay(Timeout.Infinite,c);return Json("[]");});await Assert.ThrowsAnyAsync<OperationCanceledException>(()=>client.ListMeetingsAsync(cancellationToken:cts.Token));}
++ [Fact] public async Task Revocation_checked_every_request(){int tokens=0,sends=0;using var client=new CirclebackClient(_=>ValueTask.FromResult<string?>(++tokens==1?"fixture":null),new Handler((r,c)=>{sends++;return Task.FromResult(Json("[]"));}));await client.ListMeetingsAsync();await Assert.ThrowsAsync<CirclebackException>(()=>client.ListMeetingsAsync());Assert.Equal(1,sends);Assert.Equal(2,tokens);}
++ [Fact] public async Task Cancellation(){using var client=Client(async(r,c)=>{await Task.Delay(Timeout.Infinite,c);return Json("[]");});using var cts=new CancellationTokenSource();cts.Cancel();await Assert.ThrowsAnyAsync<OperationCanceledException>(()=>client.ListMeetingsAsync(cancellationToken:cts.Token));}
++ [Fact] public async Task Missing_token(){using var client=new CirclebackClient(_=>ValueTask.FromResult<string?>(null),new Handler((r,c)=>throw new Xunit.Sdk.XunitException("No send")));Assert.Equal(CirclebackErrorKind.Revoked,(await Assert.ThrowsAsync<CirclebackException>(()=>client.ListMeetingsAsync())).Kind);}
++ [Theory][InlineData("../x")][InlineData("x/y")][InlineData("x?x")][InlineData("")]
++ public async Task Unsafe_id(string id){using var client=Client((r,c)=>throw new Xunit.Sdk.XunitException("No send"));await Assert.ThrowsAsync<ArgumentException>(()=>client.GetMeetingAsync(id));}
++}

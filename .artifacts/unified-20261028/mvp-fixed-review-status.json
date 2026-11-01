@@ -1,0 +1,8 @@
+{
+  "status": "unavailable",
+  "reviewer": "Z0mgftO7uq2zipvi",
+  "sourceConclusion": null,
+  "reason": "Initial source access denied; reviewer declined the proposed retry. No independent source-review pass is claimed.",
+  "directionModel": "openai-codex/gpt-6-astra",
+  "directionScope": "Supplied mechanical sizing contract and implementation direction only"
+}

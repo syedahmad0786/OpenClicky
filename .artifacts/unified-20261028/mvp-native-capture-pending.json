@@ -1,0 +1,21 @@
+{
+  "observedAt": "2026-10-28T11:38:12.054Z",
+  "existingPid": 16972,
+  "isolatedModeAndExactDllConfirmed": true,
+  "trayIconFoundAndFocusConfirmed": true,
+  "unexpectedInjectedInput": {
+    "physicalMouse": 0,
+    "physicalKeys": 0,
+    "injectedMouse": 0,
+    "injectedKeys": 2,
+    "action": "guard stopped; no toolbar proof accepted"
+  },
+  "latestCaptureAttempt": "fresh idle gate stopped before further UI",
+  "normalHostUntouched": true,
+  "noRecordingControlsUsed": true,
+  "productSourceUnchanged": true,
+  "readinessRoutine": "QLfXzWV4yYkNBlMP",
+  "remaining": "visible toolbar capture and pixel inspection only; canonical lifetime already passed",
+  "resolved": true,
+  "resolution": "Actual saved PNG inspected; toolbar and footer fit; see mvp-fixed-visible-toolbar-result.json"
+}

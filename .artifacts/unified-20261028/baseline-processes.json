@@ -1,0 +1,16 @@
+[
+  {
+    "ProcessName": "HeyClicky",
+    "Id": 13152,
+    "Path": "C:\\Users\\ahmad\\AppData\\Local\\HeyClickyApp\\current\\HeyClicky.exe",
+    "StartTime": "2026-10-27T05:37:05.1032029+05:00",
+    "MainWindowTitle": "HeyClicky Agents"
+  },
+  {
+    "ProcessName": "OpenClicky.Overlay.Smoke",
+    "Id": 25896,
+    "Path": "D:\\OpenClicky\\apps\\windows\\OpenClicky.Overlay.Smoke\\bin\\Release\\net8.0-windows\\OpenClicky.Overlay.Smoke.exe",
+    "StartTime": "2026-10-28T08:47:19.6272887+05:00",
+    "MainWindowTitle": "OpenClicky Ink"
+  }
+]

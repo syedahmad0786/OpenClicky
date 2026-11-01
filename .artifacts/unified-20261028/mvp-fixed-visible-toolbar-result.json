@@ -1,0 +1,182 @@
+{
+  "observedAt": "2026-10-28T16:41:01.2578805+05:00",
+  "header": [
+    {
+      "Name": "OpenClicky browser",
+      "Bounds": "505,539,1200,180",
+      "Type": "ControlType.Pane",
+      "Enabled": true,
+      "Offscreen": false
+    },
+    {
+      "Name": "OpenClicky browser - Web content",
+      "Bounds": "506,539,1200,180",
+      "Type": "ControlType.Pane",
+      "Enabled": true,
+      "Offscreen": false
+    },
+    {
+      "Name": "OpenClicky browser",
+      "Bounds": "506,539,1200,180",
+      "Type": "ControlType.Document",
+      "Enabled": true,
+      "Offscreen": false
+    },
+    {
+      "Name": "Browser controls",
+      "Bounds": "506,539,1200,180",
+      "Type": "ControlType.Group",
+      "Enabled": true,
+      "Offscreen": false
+    },
+    {
+      "Name": "Workspace",
+      "Bounds": "516,546,95,27",
+      "Type": "ControlType.Text",
+      "Enabled": true,
+      "Offscreen": false
+    },
+    {
+      "Name": "Workspace",
+      "Bounds": "518,548,210,48",
+      "Type": "ControlType.ComboBox",
+      "Enabled": true,
+      "Offscreen": false
+    },
+    {
+      "Name": "New workspace",
+      "Bounds": "734,548,48,48",
+      "Type": "ControlType.Button",
+      "Enabled": true,
+      "Offscreen": false
+    },
+    {
+      "Name": "Browser tabs",
+      "Bounds": "788,539,852,66",
+      "Type": "ControlType.Tab",
+      "Enabled": true,
+      "Offscreen": false
+    },
+    {
+      "Name": "Saved tab",
+      "Bounds": "788,548,109,48",
+      "Type": "ControlType.TabItem",
+      "Enabled": true,
+      "Offscreen": false
+    },
+    {
+      "Name": "Close Saved tab",
+      "Bounds": "896,548,49,48",
+      "Type": "ControlType.Button",
+      "Enabled": true,
+      "Offscreen": false
+    },
+    {
+      "Name": "New tab",
+      "Bounds": "1646,548,48,48",
+      "Type": "ControlType.Button",
+      "Enabled": true,
+      "Offscreen": false
+    },
+    {
+      "Name": "Navigation",
+      "Bounds": "506,605,1200,66",
+      "Type": "ControlType.Group",
+      "Enabled": true,
+      "Offscreen": false
+    },
+    {
+      "Name": "Back",
+      "Bounds": "518,614,48,48",
+      "Type": "ControlType.Button",
+      "Enabled": false,
+      "Offscreen": false
+    },
+    {
+      "Name": "Forward",
+      "Bounds": "572,614,48,48",
+      "Type": "ControlType.Button",
+      "Enabled": false,
+      "Offscreen": false
+    },
+    {
+      "Name": "Reload",
+      "Bounds": "626,614,48,48",
+      "Type": "ControlType.Button",
+      "Enabled": false,
+      "Offscreen": false
+    },
+    {
+      "Name": "Address",
+      "Bounds": "680,614,547,48",
+      "Type": "ControlType.Edit",
+      "Enabled": false,
+      "Offscreen": false
+    },
+    {
+      "Name": "Go",
+      "Bounds": "1232,614,51,48",
+      "Type": "ControlType.Button",
+      "Enabled": false,
+      "Offscreen": false
+    },
+    {
+      "Name": "Downloads",
+      "Bounds": "1288,614,124,48",
+      "Type": "ControlType.Button",
+      "Enabled": false,
+      "Offscreen": false
+    },
+    {
+      "Name": "Permissions",
+      "Bounds": "1417,614,127,48",
+      "Type": "ControlType.Button",
+      "Enabled": false,
+      "Offscreen": false
+    },
+    {
+      "Name": "Agent control",
+      "Bounds": "1549,614,145,48",
+      "Type": "ControlType.Button",
+      "Enabled": false,
+      "Offscreen": false
+    },
+    {
+      "Name": "OpenClicky browser. Chrome extension is separate.",
+      "Bounds": "518,683,383,24",
+      "Type": "ControlType.Text",
+      "Enabled": true,
+      "Offscreen": false
+    },
+    {
+      "Name": "Downloads unavailable · Permissions unavailable · Agent control unavailable · External protocols denied · Extension separate",
+      "Bounds": "929,683,765,24",
+      "Type": "ControlType.Text",
+      "Enabled": true,
+      "Offscreen": false
+    }
+  ],
+  "existingCandidateLeftRunning": true,
+  "captureIdleVerified": true,
+  "physicalKeys": 0,
+  "dllSha256": "D6FA3CA7693687FF842CF6AA3B62CAD501317C1F07D903AEC3BE6C1FD331E192",
+  "image": "C:\\Users\\ahmad\\.aside\\u\\0\\sessions\\2026-10-26_Pm2QhgacjOhFyF8i\\tmp\\mvp-fixed-visible-toolbar.png",
+  "physicalMouse": 0,
+  "dpi": 144,
+  "revision": "103138428a66f69a26fb2de494d0a749eb7d16ec",
+  "pid": 16972,
+  "noRecordingAction": true,
+  "normalHostUntouched": true,
+  "status": "passed: saved pixels inspected",
+  "expectedNativeChromeHeight": 180,
+  "ownInjectedContextKeys": 2,
+  "pixelInspection": {
+    "titleAndThreeToolbarRowsVisible": true,
+    "footerFits": true,
+    "nativeChromeHeight": 180,
+    "dpi": 144,
+    "footerBottom": 707,
+    "viewportBottom": 719,
+    "horizontalEllipsis": "existing constrained text layout; no vertical clipping"
+  }
+}

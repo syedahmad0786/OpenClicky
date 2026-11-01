@@ -1,0 +1,1 @@
+import{j as a}from"./types-C4IjYHBS.js";import{c}from"./theme-C8YjmuFG.js";function u({label:t,icon:r,active:o,className:n,type:s="button",...i}){return a.jsx("button",{type:s,"aria-label":t,title:t,"aria-pressed":o,className:c("oc-icon-btn",o&&"is-active",n),...i,children:r})}export{u as I};

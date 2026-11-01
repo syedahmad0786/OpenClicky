@@ -1,0 +1,222 @@
+{
+  "Handle": 268122,
+  "Window": "OpenClicky browser",
+  "Elements": [
+    {
+      "Type": "ControlType.Pane",
+      "Value": null,
+      "Enabled": true,
+      "Bounds": "0,34,3840,120",
+      "Name": "OpenClicky browser",
+      "Offscreen": false
+    },
+    {
+      "Type": "ControlType.Pane",
+      "Value": null,
+      "Enabled": true,
+      "Bounds": "0,35,3840,120",
+      "Name": "OpenClicky browser - Web content",
+      "Offscreen": false
+    },
+    {
+      "Type": "ControlType.Document",
+      "Value": "https://openclicky-browser-ui.local/browser.html",
+      "Enabled": true,
+      "Bounds": "0,35,3840,120",
+      "Name": "OpenClicky browser",
+      "Offscreen": false
+    },
+    {
+      "Type": "ControlType.Group",
+      "Value": null,
+      "Enabled": true,
+      "Bounds": "0,35,3840,180",
+      "Name": "Browser controls",
+      "Offscreen": false
+    },
+    {
+      "Type": "ControlType.Text",
+      "Value": null,
+      "Enabled": true,
+      "Bounds": "10,42,95,27",
+      "Name": "Workspace",
+      "Offscreen": false
+    },
+    {
+      "Type": "ControlType.ComboBox",
+      "Value": "MVP QA 2026-10-28 native",
+      "Enabled": true,
+      "Bounds": "12,44,210,48",
+      "Name": "Workspace",
+      "Offscreen": false
+    },
+    {
+      "Type": "ControlType.Button",
+      "Value": null,
+      "Enabled": true,
+      "Bounds": "228,44,48,48",
+      "Name": "New workspace",
+      "Offscreen": false
+    },
+    {
+      "Type": "ControlType.Tab",
+      "Value": null,
+      "Enabled": true,
+      "Bounds": "282,35,3492,66",
+      "Name": "Browser tabs",
+      "Offscreen": false
+    },
+    {
+      "Type": "ControlType.TabItem",
+      "Value": null,
+      "Enabled": true,
+      "Bounds": "282,44,97,48",
+      "Name": "New tab",
+      "Offscreen": false
+    },
+    {
+      "Type": "ControlType.Button",
+      "Value": null,
+      "Enabled": true,
+      "Bounds": "378,44,49,48",
+      "Name": "Close New tab",
+      "Offscreen": false
+    },
+    {
+      "Type": "ControlType.Button",
+      "Value": null,
+      "Enabled": true,
+      "Bounds": "3780,44,48,48",
+      "Name": "New tab",
+      "Offscreen": false
+    },
+    {
+      "Type": "ControlType.Group",
+      "Value": null,
+      "Enabled": true,
+      "Bounds": "0,101,3840,66",
+      "Name": "Navigation",
+      "Offscreen": false
+    },
+    {
+      "Type": "ControlType.Button",
+      "Value": null,
+      "Enabled": false,
+      "Bounds": "12,110,48,48",
+      "Name": "Back",
+      "Offscreen": false
+    },
+    {
+      "Type": "ControlType.Button",
+      "Value": null,
+      "Enabled": false,
+      "Bounds": "66,110,48,48",
+      "Name": "Forward",
+      "Offscreen": false
+    },
+    {
+      "Type": "ControlType.Button",
+      "Value": null,
+      "Enabled": true,
+      "Bounds": "120,110,48,48",
+      "Name": "Reload",
+      "Offscreen": false
+    },
+    {
+      "Type": "ControlType.Edit",
+      "Value": "about:blank",
+      "Enabled": true,
+      "Bounds": "174,110,3187,48",
+      "Name": "Address",
+      "Offscreen": false
+    },
+    {
+      "Type": "ControlType.Button",
+      "Value": null,
+      "Enabled": true,
+      "Bounds": "3366,110,51,48",
+      "Name": "Go",
+      "Offscreen": false
+    },
+    {
+      "Type": "ControlType.Button",
+      "Value": null,
+      "Enabled": false,
+      "Bounds": "3422,110,124,48",
+      "Name": "Downloads",
+      "Offscreen": false
+    },
+    {
+      "Type": "ControlType.Button",
+      "Value": null,
+      "Enabled": false,
+      "Bounds": "3551,110,127,48",
+      "Name": "Permissions",
+      "Offscreen": false
+    },
+    {
+      "Type": "ControlType.Button",
+      "Value": null,
+      "Enabled": false,
+      "Bounds": "3683,110,145,48",
+      "Name": "Agent control",
+      "Offscreen": false
+    },
+    {
+      "Type": "ControlType.Text",
+      "Value": null,
+      "Enabled": true,
+      "Bounds": "12,179,405,24",
+      "Name": "OpenClicky browser. Chrome extension is separate.",
+      "Offscreen": true
+    },
+    {
+      "Type": "ControlType.Text",
+      "Value": null,
+      "Enabled": true,
+      "Bounds": "2848,179,980,24",
+      "Name": "Downloads unavailable · Permissions unavailable · Agent control unavailable · External protocols denied · Extension separate",
+      "Offscreen": true
+    },
+    {
+      "Type": "ControlType.Group",
+      "Value": null,
+      "Enabled": true,
+      "Bounds": "0,215,3840,72",
+      "Name": "Native browser content area",
+      "Offscreen": true
+    },
+    {
+      "Type": "ControlType.Text",
+      "Value": null,
+      "Enabled": true,
+      "Bounds": "1798,219,244,26",
+      "Name": "Native browser content area",
+      "Offscreen": true
+    },
+    {
+      "Type": "ControlType.Text",
+      "Value": null,
+      "Enabled": true,
+      "Bounds": "1593,257,654,26",
+      "Name": "Web content is displayed by the native host, not embedded in this interface.",
+      "Offscreen": true
+    },
+    {
+      "Type": "ControlType.Pane",
+      "Value": null,
+      "Enabled": true,
+      "Bounds": "0,154,3840,1934",
+      "Name": "about:blank",
+      "Offscreen": false
+    },
+    {
+      "Type": "ControlType.Pane",
+      "Value": null,
+      "Enabled": true,
+      "Bounds": "0,155,3840,1935",
+      "Name": "about:blank - Web content",
+      "Offscreen": false
+    }
+  ]
+}

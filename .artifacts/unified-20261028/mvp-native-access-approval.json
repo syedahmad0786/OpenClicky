@@ -1,0 +1,26 @@
+{
+  "observedAt": "2026-10-28T07:01:39.265Z",
+  "approvedBy": "Ahmad, via Native check access: Allow scoped check",
+  "checkerSession": "fpPXyTEiHgKaEsxm",
+  "routineId": "xMPkwDVqbTBuGIGr",
+  "routineStatus": "paused",
+  "permissionFiles": {
+    "readableRoots": [
+      "D:\\OpenClicky\\.codex-build\\aside-unified-20261028",
+      "C:\\Users\\ahmad\\AppData\\Local\\OpenClicky\\models"
+    ],
+    "writableRoots": [
+      "D:\\OpenClicky\\.artifacts\\unified-20261028",
+      "C:\\Users\\ahmad\\AppData\\Local\\OpenClicky-Unified-MVP"
+    ],
+    "outsideRead": "ask",
+    "outsideWrite": "ask"
+  },
+  "limitations": [
+    "No recording or source selection",
+    "No accounts, credentials, or providers",
+    "No account-wide permission change",
+    "Stop for active user input or meetings"
+  ],
+  "nativeUiAcceptanceComplete": false
+}
