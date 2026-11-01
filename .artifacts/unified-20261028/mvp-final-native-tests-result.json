@@ -1,0 +1,26 @@
+[
+  {
+    "suite": "Core",
+    "exitCode": 0,
+    "revision": "f1b0c94b71603664efc516f0f75328e0c3e8b4e8",
+    "log": "D:\\OpenClicky\\.artifacts\\unified-20261028\\mvp-final-Core-tests.log"
+  },
+  {
+    "suite": "Input",
+    "exitCode": 0,
+    "revision": "f1b0c94b71603664efc516f0f75328e0c3e8b4e8",
+    "log": "D:\\OpenClicky\\.artifacts\\unified-20261028\\mvp-final-Input-tests.log"
+  },
+  {
+    "suite": "Recording",
+    "exitCode": 0,
+    "revision": "f1b0c94b71603664efc516f0f75328e0c3e8b4e8",
+    "log": "D:\\OpenClicky\\.artifacts\\unified-20261028\\mvp-final-Recording-tests.log"
+  },
+  {
+    "suite": "MeetingAudio",
+    "exitCode": 0,
+    "revision": "f1b0c94b71603664efc516f0f75328e0c3e8b4e8",
+    "log": "D:\\OpenClicky\\.artifacts\\unified-20261028\\mvp-final-MeetingAudio-tests.log"
+  }
+]

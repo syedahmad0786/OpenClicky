@@ -1,0 +1,11 @@
+{
+  "routineId": "xMPkwDVqbTBuGIGr",
+  "name": "Finish OpenClicky native UI check when desktop is idle",
+  "status": "scheduled",
+  "minimumIdleMilliseconds": 300000,
+  "maxRuns": 20,
+  "intervalMinutes": 3,
+  "permissionMode": "guard",
+  "appRevision": "f1b0c94b71603664efc516f0f75328e0c3e8b4e8",
+  "visibleNativeUiComplete": false
+}

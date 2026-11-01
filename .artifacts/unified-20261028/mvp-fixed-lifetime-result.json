@@ -1,0 +1,15 @@
+{
+  "revision": "103138428a66f69a26fb2de494d0a749eb7d16ec",
+  "syntheticProfile": true,
+  "exitCode": 0,
+  "status": "executed",
+  "sourceEnumeration": "forbidden before device access",
+  "dllSha256": "D6FA3CA7693687FF842CF6AA3B62CAD501317C1F07D903AEC3BE6C1FD331E192",
+  "safety": {
+    "ObservedAt": "2026-10-28T15:53:25.1461531+05:00",
+    "PhysicalIdleMs": 490563,
+    "ActiveMeetingIndicators": 0,
+    "OwnWindows": []
+  },
+  "capture": "never started"
+}

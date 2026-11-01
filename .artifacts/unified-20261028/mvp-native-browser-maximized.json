@@ -1,0 +1,190 @@
+{
+  "Handle": 268122,
+  "Elements": [
+    {
+      "Value": null,
+      "Offscreen": false,
+      "Name": "OpenClicky browser",
+      "Type": "ControlType.Pane",
+      "Bounds": "0,34,3840,120",
+      "Enabled": true
+    },
+    {
+      "Value": null,
+      "Offscreen": false,
+      "Name": "OpenClicky browser - Web content",
+      "Type": "ControlType.Pane",
+      "Bounds": "0,35,3840,120",
+      "Enabled": true
+    },
+    {
+      "Value": "https://openclicky-browser-ui.local/browser.html",
+      "Offscreen": false,
+      "Name": "OpenClicky browser",
+      "Type": "ControlType.Document",
+      "Bounds": "0,35,3840,120",
+      "Enabled": true
+    },
+    {
+      "Value": null,
+      "Offscreen": false,
+      "Name": "Browser controls",
+      "Type": "ControlType.Group",
+      "Bounds": "0,35,3840,180",
+      "Enabled": true
+    },
+    {
+      "Value": null,
+      "Offscreen": false,
+      "Name": "Workspace",
+      "Type": "ControlType.Text",
+      "Bounds": "10,42,95,27",
+      "Enabled": true
+    },
+    {
+      "Value": "No workspace",
+      "Offscreen": false,
+      "Name": "Workspace",
+      "Type": "ControlType.ComboBox",
+      "Bounds": "12,44,210,48",
+      "Enabled": true
+    },
+    {
+      "Value": null,
+      "Offscreen": false,
+      "Name": "New workspace",
+      "Type": "ControlType.Button",
+      "Bounds": "228,44,48,48",
+      "Enabled": true
+    },
+    {
+      "Value": null,
+      "Offscreen": false,
+      "Name": "Browser tabs",
+      "Type": "ControlType.Tab",
+      "Bounds": "282,35,3492,66",
+      "Enabled": true
+    },
+    {
+      "Value": null,
+      "Offscreen": false,
+      "Name": "New tab",
+      "Type": "ControlType.Button",
+      "Bounds": "3780,44,48,48",
+      "Enabled": false
+    },
+    {
+      "Value": null,
+      "Offscreen": false,
+      "Name": "Navigation",
+      "Type": "ControlType.Group",
+      "Bounds": "0,101,3840,66",
+      "Enabled": true
+    },
+    {
+      "Value": null,
+      "Offscreen": false,
+      "Name": "Back",
+      "Type": "ControlType.Button",
+      "Bounds": "12,110,48,48",
+      "Enabled": false
+    },
+    {
+      "Value": null,
+      "Offscreen": false,
+      "Name": "Forward",
+      "Type": "ControlType.Button",
+      "Bounds": "66,110,48,48",
+      "Enabled": false
+    },
+    {
+      "Value": null,
+      "Offscreen": false,
+      "Name": "Reload",
+      "Type": "ControlType.Button",
+      "Bounds": "120,110,48,48",
+      "Enabled": false
+    },
+    {
+      "Value": "",
+      "Offscreen": false,
+      "Name": "Address",
+      "Type": "ControlType.Edit",
+      "Bounds": "174,110,3187,48",
+      "Enabled": false
+    },
+    {
+      "Value": null,
+      "Offscreen": false,
+      "Name": "Go",
+      "Type": "ControlType.Button",
+      "Bounds": "3366,110,51,48",
+      "Enabled": false
+    },
+    {
+      "Value": null,
+      "Offscreen": false,
+      "Name": "Downloads",
+      "Type": "ControlType.Button",
+      "Bounds": "3422,110,124,48",
+      "Enabled": false
+    },
+    {
+      "Value": null,
+      "Offscreen": false,
+      "Name": "Permissions",
+      "Type": "ControlType.Button",
+      "Bounds": "3551,110,127,48",
+      "Enabled": false
+    },
+    {
+      "Value": null,
+      "Offscreen": false,
+      "Name": "Agent control",
+      "Type": "ControlType.Button",
+      "Bounds": "3683,110,145,48",
+      "Enabled": false
+    },
+    {
+      "Value": null,
+      "Offscreen": true,
+      "Name": "OpenClicky browser. Chrome extension is separate.",
+      "Type": "ControlType.Text",
+      "Bounds": "12,179,405,24",
+      "Enabled": true
+    },
+    {
+      "Value": null,
+      "Offscreen": true,
+      "Name": "Downloads unavailable · Permissions unavailable · Agent control unavailable · External protocols denied · Extension separate",
+      "Type": "ControlType.Text",
+      "Bounds": "2848,179,980,24",
+      "Enabled": true
+    },
+    {
+      "Value": null,
+      "Offscreen": true,
+      "Name": "Native browser content area",
+      "Type": "ControlType.Group",
+      "Bounds": "0,215,3840,72",
+      "Enabled": true
+    },
+    {
+      "Value": null,
+      "Offscreen": true,
+      "Name": "Native browser content area",
+      "Type": "ControlType.Text",
+      "Bounds": "1798,219,244,26",
+      "Enabled": true
+    },
+    {
+      "Value": null,
+      "Offscreen": true,
+      "Name": "Web content is displayed by the native host, not embedded in this interface.",
+      "Type": "ControlType.Text",
+      "Bounds": "1593,257,654,26",
+      "Enabled": true
+    }
+  ],
+  "Window": "OpenClicky browser"
+}

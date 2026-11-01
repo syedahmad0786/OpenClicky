@@ -1,0 +1,17 @@
+[
+  {
+    "exitCode": 0,
+    "revision": "f1b0c94b71603664efc516f0f75328e0c3e8b4e8",
+    "mode": "--owned-browser-e2e-check"
+  },
+  {
+    "exitCode": 0,
+    "revision": "f1b0c94b71603664efc516f0f75328e0c3e8b4e8",
+    "mode": "--meeting-workspace-check"
+  },
+  {
+    "exitCode": 0,
+    "revision": "f1b0c94b71603664efc516f0f75328e0c3e8b4e8",
+    "mode": "--meeting-construction-check"
+  }
+]

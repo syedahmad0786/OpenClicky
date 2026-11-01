@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "shell-dev",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--dir", "apps/companion-workspace", "exec", "vite", "--port", "5179", "--strictPort"],
+      "port": 5179
+    }
+  ]
+}

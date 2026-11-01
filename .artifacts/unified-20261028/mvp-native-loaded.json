@@ -1,0 +1,174 @@
+[
+  {
+    "Handle": 333674,
+    "Elements": [
+      {
+        "Bounds": "87,121,1078,704",
+        "Name": "OpenClicky · Recordings  meetings",
+        "Value": null,
+        "Type": "ControlType.Pane",
+        "Offscreen": false,
+        "Enabled": true
+      },
+      {
+        "Bounds": "87,122,1079,705",
+        "Name": "OpenClicky · Recordings & meetings - Web content",
+        "Value": null,
+        "Type": "ControlType.Pane",
+        "Offscreen": false,
+        "Enabled": true
+      },
+      {
+        "Bounds": "87,122,1079,705",
+        "Name": "OpenClicky · Recordings & meetings",
+        "Value": "https://openclicky-meetings-ui.local/meetings.html",
+        "Type": "ControlType.Document",
+        "Offscreen": false,
+        "Enabled": true
+      },
+      {
+        "Bounds": "85,121,366,29",
+        "Name": "Capture idle. Processing not-requested.",
+        "Value": null,
+        "Type": "ControlType.Text",
+        "Offscreen": true,
+        "Enabled": true
+      },
+      {
+        "Bounds": "123,146,984,50",
+        "Name": "Recordings & meetings",
+        "Value": null,
+        "Type": "ControlType.Text",
+        "Offscreen": false,
+        "Enabled": true
+      },
+      {
+        "Bounds": "123,217,333,29",
+        "Name": "Local library: up to 100 loaded items",
+        "Value": null,
+        "Type": "ControlType.Text",
+        "Offscreen": false,
+        "Enabled": true
+      },
+      {
+        "Bounds": "136,326,77,23",
+        "Name": "Capture: ",
+        "Value": null,
+        "Type": "ControlType.Text",
+        "Offscreen": false,
+        "Enabled": true
+      },
+      {
+        "Bounds": "212,326,32,23",
+        "Name": "idle",
+        "Value": null,
+        "Type": "ControlType.Text",
+        "Offscreen": false,
+        "Enabled": true
+      },
+      {
+        "Bounds": "275,323,110,29",
+        "Name": "Processing: ",
+        "Value": null,
+        "Type": "ControlType.Text",
+        "Offscreen": false,
+        "Enabled": true
+      },
+      {
+        "Bounds": "384,323,134,29",
+        "Name": "not-requested",
+        "Value": null,
+        "Type": "ControlType.Text",
+        "Offscreen": false,
+        "Enabled": true
+      },
+      {
+        "Bounds": "535,305,188,66",
+        "Name": "Stop recording",
+        "Value": null,
+        "Type": "ControlType.Button",
+        "Offscreen": false,
+        "Enabled": false
+      },
+      {
+        "Bounds": "123,415,980,60",
+        "Name": "Closing this workspace hides it, not the recording. Use Stop here or in the native tray. Processing does not confirm capture has stopped.",
+        "Value": null,
+        "Type": "ControlType.Text",
+        "Offscreen": false,
+        "Enabled": true
+      },
+      {
+        "Bounds": "111,557,1007,48",
+        "Name": "Library",
+        "Value": null,
+        "Type": "ControlType.Text",
+        "Offscreen": false,
+        "Enabled": true
+      },
+      {
+        "Bounds": "162,643,938,30",
+        "Name": "Search loaded meetings",
+        "Value": "",
+        "Type": "ControlType.Edit",
+        "Offscreen": false,
+        "Enabled": true
+      },
+      {
+        "Bounds": "111,706,495,29",
+        "Name": "Loaded records only; this is not the complete catalog.",
+        "Value": null,
+        "Type": "ControlType.Text",
+        "Offscreen": false,
+        "Enabled": true
+      },
+      {
+        "Bounds": "111,758,184,67",
+        "Name": "Refresh library",
+        "Value": null,
+        "Type": "ControlType.Button",
+        "Offscreen": false,
+        "Enabled": true
+      },
+      {
+        "Bounds": "294,758,188,67",
+        "Name": "New recording",
+        "Value": null,
+        "Type": "ControlType.Button",
+        "Offscreen": false,
+        "Enabled": true
+      },
+      {
+        "Bounds": "111,846,194,29",
+        "Name": "No meetings loaded.",
+        "Value": null,
+        "Type": "ControlType.Text",
+        "Offscreen": true,
+        "Enabled": true
+      }
+    ],
+    "Window": "Recordings & meetings"
+  },
+  {
+    "Handle": 268122,
+    "Elements": [
+      {
+        "Bounds": "49,83,1200,120",
+        "Name": "OpenClicky browser",
+        "Value": null,
+        "Type": "ControlType.Pane",
+        "Offscreen": false,
+        "Enabled": true
+      },
+      {
+        "Bounds": "50,83,1200,120",
+        "Name": "OpenClicky browser - Web content",
+        "Value": null,
+        "Type": "ControlType.Pane",
+        "Offscreen": false,
+        "Enabled": true
+      }
+    ],
+    "Window": "OpenClicky browser"
+  }
+]

@@ -1,0 +1,29 @@
+{
+  "observedAt": "2026-10-28T03:59:31.598Z",
+  "sites": [
+    {
+      "url": "https://ahmadbukhari.com/",
+      "background": "rgb(236, 232, 223)",
+      "color": "rgb(18, 18, 16)",
+      "font": "\"Schibsted Grotesk\", system-ui, sans-serif",
+      "vars": []
+    },
+    {
+      "url": "https://aixcelsolutions.com/",
+      "background": "rgb(243, 244, 242)",
+      "color": "rgb(11, 11, 12)",
+      "font": "Geist, ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", sans-serif",
+      "vars": [
+        [
+          "--ink-2",
+          "#3E3F44"
+        ],
+        [
+          "--ink",
+          "#0B0B0C"
+        ]
+      ]
+    }
+  ],
+  "status": "Read-only references; no new interface design approved"
+}

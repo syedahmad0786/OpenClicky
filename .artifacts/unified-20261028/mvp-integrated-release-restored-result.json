@@ -1,0 +1,6 @@
+{
+  "revision": "60124cd078814a1e735d9b52ee77493cc86fdccf",
+  "command": "dotnet build OpenClicky.sln -c Release -p:Platform=x64",
+  "exitCode": 0,
+  "finishedAt": "2026-10-28T10:23:01.8428430+05:00"
+}

@@ -1,0 +1,30 @@
+{
+  "Id": "972fc19dc8b14e8aacb042d93c1442c1",
+  "Title": "Synthetic pipeline acceptance",
+  "CreatedAt": "2026-10-28T05:45:39.5377509+00:00",
+  "ExpiresAt": "2026-11-11T05:45:39.5377509+00:00",
+  "State": 2,
+  "Origin": 0,
+  "Revision": 3,
+  "Consent": {
+    "GrantedAt": "2026-10-28T05:45:39.5377509+00:00",
+    "Sources": "{\u0022request\u0022:{\u0022title\u0022:\u0022Synthetic pipeline acceptance\u0022,\u0022sourceRevision\u0022:\u0022synthetic-v1\u0022,\u0022screenId\u0022:null,\u0022microphoneId\u0022:\u0022synthetic-file-only\u0022,\u0022systemAudioId\u0022:null,\u0022participantNoticeAcknowledged\u0022:true,\u0022localProcessingAcknowledged\u0022:true,\u0022retainMedia\u0022:true,\u0022processAfterStop\u0022:true,\u0022retentionDays\u0022:14},\u0022screen\u0022:null,\u0022tracks\u0022:[{\u0022id\u0022:\u0022synthetic-file-only\u0022,\u0022label\u0022:\u0022Synthetic fixture, not a microphone\u0022,\u0022kind\u0022:0}]}"
+  },
+  "Segments": [
+    {
+      "Id": "segment-0",
+      "Start": "00:00:00",
+      "End": "00:00:17.6149999",
+      "Text": "This is a synthetic meeting for a local software test. No real people are present. Decision, we will use blue folders for the imaginary library. Action, Alex will label the blue folders on Friday. This concludes the synthetic meeting."
+    }
+  ],
+  "Notes": [
+    {
+      "Id": "extract-0",
+      "SessionId": "972fc19dc8b14e8aacb042d93c1442c1",
+      "SegmentId": "segment-0",
+      "Text": "This is a synthetic meeting for a local software test. No real people are present. Decision, we will use blue folders for the imaginary library. Action, Alex will label the blue folders on Friday. This concludes the synthetic meeting.",
+      "IsAction": true
+    }
+  ]
+}

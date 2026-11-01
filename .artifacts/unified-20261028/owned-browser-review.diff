@@ -1,0 +1,686 @@
+--- COMMITS ---
+db2fe69 feat: add isolated owned-browser workspace foundation
+--- STAT ---
+ .../OwnedBrowser/OwnedBrowserPolicy.cs             |  33 +++
+ .../OwnedBrowser/OwnedBrowserStore.cs              | 227 +++++++++++++++++++++
+ .../plans/2026-10-28-owned-browser-report.md       |  51 +++++
+ docs/superpowers/plans/2026-10-28-owned-browser.md |  27 +++
+ .../OwnedBrowser/OwnedBrowserTests.cs              | 152 ++++++++++++++
+ tests/OpenClicky.Core.Tests/OwnedBrowser/build.log |  36 ++++
+ .../OwnedBrowser/green-final.log                   |   8 +
+ tests/OpenClicky.Core.Tests/OwnedBrowser/green.log |  23 +++
+ .../OwnedBrowser/red-parser.log                    |  46 +++++
+ tests/OpenClicky.Core.Tests/OwnedBrowser/red.log   |   8 +
+ 10 files changed, 611 insertions(+)
+--- DIFF ---
+diff --git a/apps/windows/OpenClicky.Core/OwnedBrowser/OwnedBrowserPolicy.cs b/apps/windows/OpenClicky.Core/OwnedBrowser/OwnedBrowserPolicy.cs
+new file mode 100644
+index 0000000..fb2aae8
+--- /dev/null
++++ b/apps/windows/OpenClicky.Core/OwnedBrowser/OwnedBrowserPolicy.cs
+@@ -0,0 +1,33 @@
++namespace OpenClicky.Core.OwnedBrowser;
++
++public enum ProfileRemoval { Keep, Delete }
++public sealed record OwnedTab(Guid Id, string Url);
++public sealed record OwnedWorkspace(string Id, string Name, IReadOnlyList<OwnedTab> Tabs);
++
++/// <summary>Admission rules only. The WebView2 host must enforce these on redirects,
++/// new windows, permissions, downloads, messages and external protocol requests too.</summary>
++public static class OwnedBrowserPolicy
++{
++    public const int MaxWorkspaces = 16, MaxTabsPerWorkspace = 32, MaxTotalTabs = 128, MaxStateBytes = 1048576;
++    public static bool AllowsHostObjects => false;
++    public static bool AllowsWebMessages => false;
++    public static bool AllowsDownloads => false;
++    public static bool AllowsExternalLaunch => false;
++    public static bool AllowsPermission(string permission) => false;
++    public static string CanonicalWorkspaceId(string id)
++    {
++        if (id is null || !(Guid.TryParseExact(id, "N", out var value) || Guid.TryParseExact(id, "D", out value)) || value == Guid.Empty)
++            throw new ArgumentException("Workspace identity must be a nonempty GUID.", nameof(id));
++        return value.ToString("N");
++    }
++    public static string AdmitNavigation(string url)
++    {
++        if (string.IsNullOrEmpty(url) || url.Length > 4096 || url.Any(c => char.IsControl(c) || char.IsWhiteSpace(c)) || url.Contains('\\'))
++            throw new ArgumentException("Invalid navigation.", nameof(url));
++        if (url == "about:blank") return url;
++        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || (uri.Scheme != "https" && uri.Scheme != "http") ||
++            string.IsNullOrEmpty(uri.Host) || uri.UserInfo.Length != 0 || !url.StartsWith(uri.Scheme + "://", StringComparison.OrdinalIgnoreCase))
++            throw new ArgumentException("Only HTTP, HTTPS and about:blank are admitted.", nameof(url));
++        return url;
++    }
++}
+diff --git a/apps/windows/OpenClicky.Core/OwnedBrowser/OwnedBrowserStore.cs b/apps/windows/OpenClicky.Core/OwnedBrowser/OwnedBrowserStore.cs
+new file mode 100644
+index 0000000..dd49e19
+--- /dev/null
++++ b/apps/windows/OpenClicky.Core/OwnedBrowser/OwnedBrowserStore.cs
+@@ -0,0 +1,227 @@
++using System.Text.Json;
++using System.Text.Json.Serialization;
++
++namespace OpenClicky.Core.OwnedBrowser;
++
++/// <summary>Single-writer local workspace metadata, not a browser driver or security sandbox.
++/// Supply an application-owned storage parent, never a user browser directory. No profile import is supported.</summary>
++public sealed class OwnedBrowserStore : IDisposable
++{
++    private const string Marker = "OpenClicky.OwnedBrowser/1";
++    private static readonly JsonSerializerOptions JsonOptions = new() { UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow };
++    private readonly string root;
++    private readonly object gate = new();
++    private readonly FileStream lease;
++    private State state;
++    private bool disposed;
++    private sealed record State(int Version, OwnedWorkspace[] Workspaces);
++
++    public OwnedBrowserStore(string storageParent)
++    {
++        if (string.IsNullOrWhiteSpace(storageParent) || !Path.IsPathFullyQualified(storageParent) ||
++            storageParent.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar).Any(p => p is ".." or "."))
++            throw new ArgumentException("An absolute storage parent without traversal is required.", nameof(storageParent));
++        root = Path.Combine(Path.GetFullPath(storageParent), "OwnedBrowser-v1");
++        CheckPath(root);
++        var marker = Path.Combine(root, ".owned-browser");
++        var initialized = File.Exists(marker);
++        if (Directory.Exists(root) && !initialized && Directory.EnumerateFileSystemEntries(root).Any())
++            throw new InvalidOperationException("Refusing a foreign browser root.");
++        Directory.CreateDirectory(root);
++        CheckPath(root);
++        CheckPath(Path.Combine(root,"store.lock"));
++        lease = new FileStream(Path.Combine(root,"store.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
++        try
++        {
++            if (initialized)
++            {
++                CheckMarker(marker, Marker);
++                state = Load();
++            }
++            else
++            {
++                File.WriteAllText(marker, Marker);
++                state = new State(1, []);
++                Persist(state);
++            }
++            CheckPath(Path.Combine(root,"profiles"));
++            Directory.CreateDirectory(Path.Combine(root,"profiles"));
++            foreach (var w in state.Workspaces) VerifyProfile(w.Id);
++        }
++        catch { lease.Dispose(); throw; }
++    }
++
++    public IReadOnlyList<OwnedWorkspace> List()
++    {
++        lock (gate) { Guard(); return Array.AsReadOnly(state.Workspaces.Select(Freeze).ToArray()); }
++    }
++    public OwnedWorkspace CreateWorkspace(string id, string name)
++    {
++        lock(gate)
++        {
++            Guard(); id = OwnedBrowserPolicy.CanonicalWorkspaceId(id);
++            if (string.IsNullOrWhiteSpace(name) || name.Length > 100 || name.Any(char.IsControl)) throw new ArgumentException("Invalid workspace name.",nameof(name));
++            if (state.Workspaces.Any(w=>w.Id==id)) throw new InvalidOperationException("Workspace already exists.");
++            if(state.Workspaces.Length >= OwnedBrowserPolicy.MaxWorkspaces) throw new InvalidOperationException("Workspace limit reached.");
++            var profile=Profile(id); CheckPath(profile);
++            if(Directory.Exists(profile)) VerifyProfile(id);
++            else
++            {
++                Directory.CreateDirectory(profile); CheckPath(profile);
++                File.WriteAllText(Path.Combine(profile,".owned-profile"), Marker + "/" + id);
++            }
++            var workspace=new OwnedWorkspace(id,name,Array.Empty<OwnedTab>());
++            Commit(state with { Workspaces = [..state.Workspaces,workspace] });
++            return Freeze(workspace);
++        }
++    }
++    public string GetProfileDirectory(string workspaceId)
++    {
++        lock(gate) { Guard(); var w=Find(workspaceId); VerifyProfile(w.Id); return Profile(w.Id); }
++    }
++    public OwnedTab OpenTab(string workspaceId, string url)
++    {
++        lock(gate)
++        {
++            Guard(); var w=Find(workspaceId); url=OwnedBrowserPolicy.AdmitNavigation(url);
++            if(w.Tabs.Count >= OwnedBrowserPolicy.MaxTabsPerWorkspace || state.Workspaces.Sum(x=>x.Tabs.Count) >= OwnedBrowserPolicy.MaxTotalTabs)
++                throw new InvalidOperationException("Tab limit reached.");
++            var tab=new OwnedTab(Guid.NewGuid(),url); Replace(w with { Tabs = w.Tabs.Append(tab).ToArray() }); return tab;
++        }
++    }
++    public OwnedTab Navigate(string workspaceId, Guid tabId, string url)
++    {
++        lock(gate)
++        {
++            Guard(); var w=Find(workspaceId); RequireTab(w,tabId); url=OwnedBrowserPolicy.AdmitNavigation(url);
++            var tab=new OwnedTab(tabId,url); Replace(w with { Tabs=w.Tabs.Select(t=>t.Id==tabId?tab:t).ToArray() }); return tab;
++        }
++    }
++    public void CloseTab(string workspaceId, Guid tabId)
++    {
++        lock(gate) { Guard(); var w=Find(workspaceId); RequireTab(w,tabId); Replace(w with { Tabs=w.Tabs.Where(t=>t.Id!=tabId).ToArray() }); }
++    }
++    /// <summary>Call only after the host has disposed all workspace WebView2 environments.
++    /// Metadata removal is atomic; physical deletion is a subsequent operation and can fail leaving an orphan.</summary>
++    public void RemoveWorkspace(string workspaceId, ProfileRemoval profileRemoval)
++    {
++        lock(gate)
++        {
++            Guard(); if(!Enum.IsDefined(profileRemoval)) throw new ArgumentException("Explicit removal choice required.",nameof(profileRemoval));
++            var w=Find(workspaceId); VerifyProfile(w.Id); var profile=Profile(w.Id);
++            if(profileRemoval==ProfileRemoval.Delete) CheckTree(profile);
++            Commit(state with { Workspaces=state.Workspaces.Where(x=>x.Id!=w.Id).ToArray() });
++            if(profileRemoval==ProfileRemoval.Delete) { CheckTree(profile); Directory.Delete(profile,true); }
++        }
++    }
++    public void Dispose() { lock(gate) { if(disposed) return; disposed=true; lease.Dispose(); } }
++    private void Guard()
++    {
++        ObjectDisposedException.ThrowIf(disposed,this); CheckPath(root); CheckMarker(Path.Combine(root,".owned-browser"),Marker);
++    }
++    private string Profile(string id) => Path.Combine(root,"profiles",id);
++    private OwnedWorkspace Find(string id)
++    {
++        id=OwnedBrowserPolicy.CanonicalWorkspaceId(id);
++        return state.Workspaces.SingleOrDefault(w=>w.Id==id) ?? throw new InvalidOperationException("Workspace is not owned by this store.");
++    }
++    private static void RequireTab(OwnedWorkspace w, Guid id)
++    { if(!w.Tabs.Any(t=>t.Id==id)) throw new InvalidOperationException("Tab is not owned by this workspace."); }
++    private static OwnedWorkspace Freeze(OwnedWorkspace w) => w with { Tabs=Array.AsReadOnly(w.Tabs.ToArray()) };
++    private void VerifyProfile(string id)
++    {
++        var p=Profile(id); CheckPath(p);
++        if(!Directory.Exists(p)) throw new InvalidOperationException("Owned profile is missing.");
++        CheckMarker(Path.Combine(p,".owned-profile"),Marker+"/"+id);
++    }
++    private static void CheckMarker(string path,string expected)
++    {
++        CheckPath(path);
++        if(!File.Exists(path) || new FileInfo(path).Length > 128 || File.ReadAllText(path)!=expected)
++            throw new InvalidOperationException("Ownership marker missing or invalid.");
++    }
++    private void Replace(OwnedWorkspace w) => Commit(state with { Workspaces=state.Workspaces.Select(x=>x.Id==w.Id?w:x).ToArray() });
++    private void Commit(State candidate) { Persist(candidate); state=candidate; }
++    private State Load()
++    {
++        var path=Path.Combine(root,"state.json"); CheckPath(path);
++        if(!File.Exists(path)) throw new InvalidDataException("Owned browser state is missing.");
++        using var input=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.Read);
++        if(input.Length > OwnedBrowserPolicy.MaxStateBytes) throw new InvalidDataException("State is oversized.");
++        try
++        {
++            using var document=JsonDocument.Parse(input);
++            RejectDuplicateProperties(document.RootElement);
++            var result=document.RootElement.Deserialize<State>(JsonOptions) ?? throw new InvalidDataException("Null state.");
++            Validate(result); return result;
++        }
++        catch(Exception e) when(e is JsonException or ArgumentException or NullReferenceException)
++        { throw new InvalidDataException("Invalid owned browser state.",e); }
++    }
++    private static void RejectDuplicateProperties(JsonElement element)
++    {
++        if(element.ValueKind==JsonValueKind.Object)
++        {
++            var names=new HashSet<string>(StringComparer.Ordinal);
++            foreach(var property in element.EnumerateObject())
++            {
++                if(!names.Add(property.Name)) throw new InvalidDataException("Duplicate state property.");
++                RejectDuplicateProperties(property.Value);
++            }
++        }
++        else if(element.ValueKind==JsonValueKind.Array)
++            foreach(var child in element.EnumerateArray()) RejectDuplicateProperties(child);
++    }
++    private static void Validate(State value)
++    {
++        if(value.Version!=1 || value.Workspaces is null || value.Workspaces.Length > OwnedBrowserPolicy.MaxWorkspaces) throw new InvalidDataException("Invalid state version or workspaces.");
++        var ids=new HashSet<string>(); var tabs=new HashSet<Guid>();
++        foreach(var w in value.Workspaces)
++        {
++            if(w is null || OwnedBrowserPolicy.CanonicalWorkspaceId(w.Id)!=w.Id || !ids.Add(w.Id) || string.IsNullOrWhiteSpace(w.Name) || w.Name.Length>100 || w.Name.Any(char.IsControl) || w.Tabs is null || w.Tabs.Count>OwnedBrowserPolicy.MaxTabsPerWorkspace)
++                throw new InvalidDataException("Invalid workspace.");
++            foreach(var t in w.Tabs)
++            {
++                if(t is null || t.Id==Guid.Empty || !tabs.Add(t.Id)) throw new InvalidDataException("Invalid tab identity.");
++                OwnedBrowserPolicy.AdmitNavigation(t.Url);
++            }
++        }
++        if(tabs.Count>OwnedBrowserPolicy.MaxTotalTabs) throw new InvalidDataException("Too many tabs.");
++    }
++    private void Persist(State value)
++    {
++        Validate(value); CheckPath(root);
++        var bytes=JsonSerializer.SerializeToUtf8Bytes(value,JsonOptions);
++        if(bytes.Length>OwnedBrowserPolicy.MaxStateBytes) throw new InvalidDataException("State is oversized.");
++        var dest=Path.Combine(root,"state.json"); CheckPath(dest);
++        var tmp=Path.Combine(root,Guid.NewGuid().ToString("N")+".tmp");
++        try
++        {
++            using(var output=new FileStream(tmp,FileMode.CreateNew,FileAccess.Write,FileShare.None)) { output.Write(bytes); output.Flush(true); }
++            CheckPath(dest); File.Move(tmp,dest,true);
++        }
++        finally { if(File.Exists(tmp)) File.Delete(tmp); }
++    }
++    private static void CheckPath(string path)
++    {
++        for(string? p=Path.GetFullPath(path); p is not null; p=Path.GetDirectoryName(p))
++        {
++            try { if((File.GetAttributes(p)&FileAttributes.ReparsePoint)!=0) throw new IOException("Reparse points are not permitted in owned browser paths."); }
++            catch(FileNotFoundException) { } catch(DirectoryNotFoundException) { }
++        }
++    }
++    private static void CheckTree(string path)
++    {
++        var pending=new Stack<string>(); pending.Push(path); var count=0;
++        while(pending.TryPop(out var dir))
++        {
++            CheckPath(dir);
++            foreach(var entry in Directory.EnumerateFileSystemEntries(dir))
++            {
++                if(++count>100000) throw new IOException("Profile deletion entry limit reached.");
++                CheckPath(entry);
++                if(Directory.Exists(entry)) pending.Push(entry);
++            }
++        }
++    }
++}
+diff --git a/docs/superpowers/plans/2026-10-28-owned-browser-report.md b/docs/superpowers/plans/2026-10-28-owned-browser-report.md
+new file mode 100644
+index 0000000..df9ac91
+--- /dev/null
++++ b/docs/superpowers/plans/2026-10-28-owned-browser-report.md
+@@ -0,0 +1,51 @@
++# Task 3 owned-browser implementation report
++
++## Scope and status
++Implemented only new OwnedBrowser Core/test paths and the exact owned-browser subplan/report. Base c769b53bb084b0109f023f7b5f64bea7d38d3060, branch aside/owned-browser-20261028. No shared project references or existing code changed. No UI, WebView2 host, extension, shell, account reads, browser launch, live settings or root-checkout writes. Existing CreateBrowserSession remains unchanged.
++
++## Exact public contract
++Namespace `OpenClicky.Core.OwnedBrowser`:
++```csharp
++public enum ProfileRemoval { Keep, Delete }
++public sealed record OwnedTab(Guid Id, string Url);
++public sealed record OwnedWorkspace(string Id, string Name, IReadOnlyList<OwnedTab> Tabs);
++public static class OwnedBrowserPolicy {
++    public const int MaxWorkspaces = 16, MaxTabsPerWorkspace = 32,
++        MaxTotalTabs = 128, MaxStateBytes = 1048576;
++    public static bool AllowsHostObjects { get; }
++    public static bool AllowsWebMessages { get; }
++    public static bool AllowsDownloads { get; }
++    public static bool AllowsExternalLaunch { get; }
++    public static bool AllowsPermission(string permission);
++    public static string CanonicalWorkspaceId(string id);
++    public static string AdmitNavigation(string url);
++}
++public sealed class OwnedBrowserStore : IDisposable {
++    public OwnedBrowserStore(string storageParent);
++    public IReadOnlyList<OwnedWorkspace> List();
++    public OwnedWorkspace CreateWorkspace(string id, string name);
++    public string GetProfileDirectory(string workspaceId);
++    public OwnedTab OpenTab(string workspaceId, string url);
++    public OwnedTab Navigate(string workspaceId, Guid tabId, string url);
++    public void CloseTab(string workspaceId, Guid tabId);
++    public void RemoveWorkspace(string workspaceId, ProfileRemoval profileRemoval);
++    public void Dispose();
++}
++```
++All policy booleans and permission requests deny. Profiles derive only from nonempty GUID N/D identities, canonicalized to lowercase N, under `storageParent/OwnedBrowser-v1/profiles/{id}`. No external profile input/import exists. Names limited to 100 characters; URLs to 4096. Snapshot collections are read-only. Default JSON is PascalCase, version 1; unknown/duplicate fields, invalid identities/URLs, duplicate tab IDs, excess caps, missing/null/oversized/corrupt state fail closed. No automatic recovery/reset.
++
++## Verification and retained evidence
++- `red.log`: first focused command exited 1 because OwnedBrowser namespace/API did not exist (compile RED, not an executed assertion RED).
++- `green.log`: first implementation executed 27 cases, 26 passed and one failed because Windows replacement denial was UnauthorizedAccessException rather than IOException. Test corrected to accept both documented filesystem failures; state-preservation assertions retained.
++- `red-parser.log`: executed 31 cases, 29 passed and two duplicate-JSON-field cases failed because parser accepted duplicates. Parser then hardened. These failing constructor assertions also caused fixture cleanup failures since unexpected successful constructors held leases; test process exit released them.
++- `green-final.log`: `dotnet test tests/OpenClicky.Core.Tests/OpenClicky.Core.Tests.csproj -c Release --no-restore --filter FullyQualifiedName~OwnedBrowser`; exit 0, **31 passed, 0 failed, 0 skipped**, duration 2 seconds. Includes traversal, canonical IDs, profile separation, URL admission/default deny, workspace/tab ownership, per-workspace/global caps, durable reopen/close/navigation, exclusive lease, disposed guards, corrupt/oversized/missing/duplicate-property state, foreign-root/profile refusal, Keep/Delete, nested junction deletion refusal, invalid inputs and actual denied atomic replacement with unchanged disk/in-memory state.
++- `build.log`: `dotnet build OpenClicky.sln -c Release`; exit 0, **0 warnings, 0 errors**.
++- `git diff --check`: exit 0 before commit.
++- Complete existing Core test suite not run: parent owns integration and native fixture gates. This worker ran only the disposable OwnedBrowser fixtures. A synthetic Windows junction fixture invokes `cmd /c mklink /J` to create its throwaway junction; no browser or desktop application is launched.
++
++## Limits / integration obligations
++This is browser domain foundation, not a completed owned Chromium browser. Parent must connect a WebView2 host after permitted Opus UI direction; pass the exact owned profile directory, disable host objects and web messages, deny permissions/downloads/external launch and intercept redirects, frames and new windows as well as initial navigation. HTTP(S) admission is not a malicious-site/content or network sandbox. It does not replace existing job access snapshots or approval boundaries.
++
++The store holds an exclusive file lease and serializes callers within an instance. Profile deletion requires caller-chosen Keep/Delete and disposal of WebView2 environments first. Keep retains owned data and permits reopening the same owned ID. Delete refuses missing/foreign markers and any recursive reparse point; it never takes an external user-profile path. Metadata removal is committed before physical deletion, so deletion failure can leave an orphan, not a fully transactional rollback. Failed workspace creation persistence can similarly leave an owned empty profile. State replacement uses a same-directory unique temp file, Flush(true), File.Move(overwrite), cleanup; atomic file replacement is not a multi-file or power-loss transaction. No backup recovery is claimed.
++
++Path/marker checks assume application-owned storage with appropriate OS ACLs. They reject observed reparse points, including ancestors and nested deletion entries, but managed check-then-use is not resistant to a hostile same-user concurrent filesystem swap or forged ownership markers. Disk use by Chromium and retained profiles is not quota-managed; metadata/workspace/tab counts and deletion traversal (100,000 entries) are bounded. The host must enforce disk/process lifetime limits. No browser readiness or release claim is made.
+diff --git a/docs/superpowers/plans/2026-10-28-owned-browser.md b/docs/superpowers/plans/2026-10-28-owned-browser.md
+new file mode 100644
+index 0000000..59a57c5
+--- /dev/null
++++ b/docs/superpowers/plans/2026-10-28-owned-browser.md
+@@ -0,0 +1,27 @@
++# Owned Chromium workspace Implementation Plan
++
++> **For agentic workers:** Use Superpowers test-driven-development. This is the assigned Task 3 only.
++
++**Goal:** Persistent, isolated nonvisual workspace/tab policy for a later WebView2 host.
++**Architecture:** A single exclusive store owns a dedicated `OwnedBrowser-v1` child directory beneath a caller-selected storage parent. Profiles are derived from canonical GUID IDs, never supplied or imported. Mutations validate a candidate, atomically persist it, then replace in-memory state.
++**Tech Stack:** .NET 8, System.Text.Json, xUnit; no new dependencies.
++
++## Global constraints
++No UI, Chromium launch, accounts, settings, coordinator, external-browser sessions or CDP server. No traversal/reparse points. Only HTTP/HTTPS/about:blank navigation. Untrusted pages receive no host objects, privileged messages, downloads, permission grants or external launch authority. Single-process exclusive file lease; explicit removal choice; only owned profiles may be deleted. Tests use disposable directories.
++
++## Exact public API (namespace OpenClicky.Core.OwnedBrowser)
++- `enum ProfileRemoval { Keep, Delete }`
++- `record OwnedTab(Guid Id, string Url)`
++- `record OwnedWorkspace(string Id, string Name, IReadOnlyList<OwnedTab> Tabs)`
++- `static class OwnedBrowserPolicy`: `string CanonicalWorkspaceId(string id)`, `string AdmitNavigation(string url)`, `bool AllowsPermission(string permission)`, `bool AllowsHostObjects`, `bool AllowsWebMessages`, `bool AllowsDownloads`, `bool AllowsExternalLaunch`; constants `MaxWorkspaces=16`, `MaxTabsPerWorkspace=32`, `MaxTotalTabs=128`, `MaxStateBytes=1048576`.
++- `sealed class OwnedBrowserStore : IDisposable`: constructor `(string storageParent)`; `IReadOnlyList<OwnedWorkspace> List()`; `OwnedWorkspace CreateWorkspace(string id, string name)`; `string GetProfileDirectory(string workspaceId)`; `OwnedTab OpenTab(string workspaceId, string url)`; `OwnedTab Navigate(string workspaceId, Guid tabId, string url)`; `void CloseTab(string workspaceId, Guid tabId)`; `void RemoveWorkspace(string workspaceId, ProfileRemoval profileRemoval)`; `void Dispose()`.
++- ArgumentException: invalid ID, name, URL or removal choice. InvalidOperationException: cap, duplicate, ownership, foreign directory or concurrent store. InvalidDataException: corrupt/oversized persisted state. IOException/UnauthorizedAccessException: unsafe paths or filesystem failure. ObjectDisposedException after disposal.
++
++## Files and steps
++- [x] Create `tests/OpenClicky.Core.Tests/OwnedBrowser/OwnedBrowserTests.cs`: canonical IDs/traversal, dedicated roots, bad URLs, tab ownership, caps, reopen, corruption, exclusive lease, removal choice, link refusal, atomic failure preservation.
++- [x] Run `dotnet test tests/OpenClicky.Core.Tests/OpenClicky.Core.Tests.csproj -c Release --filter FullyQualifiedName~OwnedBrowser`; retain RED log and exact exit.
++- [x] Create `apps/windows/OpenClicky.Core/OwnedBrowser/OwnedBrowserPolicy.cs` (IDs/navigation/default-deny policy and immutable records) and `OwnedBrowserStore.cs` (bounded persistence, ownership and lifecycle).
++- [x] Repeat focused test command to GREEN and run Release build. Complete Core tests are deferred to parent integration because this worker is prohibited from native launches and the existing suite contains process/native smoke fixtures. Retain logs/exits in the report. Inspect diff and commit only these paths plus this subplan and `docs/superpowers/plans/2026-10-28-owned-browser-report.md`.
++
++## Acceptance details
++Validation on load rejects bad version, duplicate identities/tab IDs, malformed URLs, null data and caps. State file reads are bounded. FileStream.Flush(true) and same-directory File.Move overwrite provide atomic replacement, not a multi-file transaction. Existing nonempty foreign roots/profiles and all traversed reparse points are refused. Removal requires the enum with no default; Keep leaves profile data in place. Delete validates ownership markers and recursively checks for links before deletion. Caller must dispose WebView2 environments before removal; no host exists here. Local hostile concurrent filesystem replacement is outside the managed path-check boundary and must be addressed with OS ACLs by integration.
+diff --git a/tests/OpenClicky.Core.Tests/OwnedBrowser/OwnedBrowserTests.cs b/tests/OpenClicky.Core.Tests/OwnedBrowser/OwnedBrowserTests.cs
+new file mode 100644
+index 0000000..83838cc
+--- /dev/null
++++ b/tests/OpenClicky.Core.Tests/OwnedBrowser/OwnedBrowserTests.cs
+@@ -0,0 +1,152 @@
++using OpenClicky.Core.OwnedBrowser;
++
++namespace OpenClicky.Core.Tests.OwnedBrowser;
++
++public sealed class OwnedBrowserTests : IDisposable
++{
++    private readonly string root = Path.Combine(Path.GetTempPath(), "OpenClicky-OwnedTests-" + Guid.NewGuid().ToString("N"));
++    private static string Id() => Guid.NewGuid().ToString("N");
++    public void Dispose() { if (Directory.Exists(root)) Directory.Delete(root, true); }
++
++    [Fact] public void CanonicalIdentity()
++    {
++        var id = Guid.NewGuid();
++        Assert.Equal(id.ToString("N"), OwnedBrowserPolicy.CanonicalWorkspaceId(id.ToString("D").ToUpperInvariant()));
++        Assert.Throws<ArgumentException>(() => OwnedBrowserPolicy.CanonicalWorkspaceId("../Default"));
++        Assert.Throws<ArgumentException>(() => OwnedBrowserPolicy.CanonicalWorkspaceId(Guid.Empty.ToString()));
++    }
++    [Theory]
++    [InlineData("file:///C:/secret")][InlineData("javascript:alert(1)")][InlineData("data:text/html,x")]
++    [InlineData("ms-settings:privacy")][InlineData("about:config")][InlineData("https://user:pass@example.com")]
++    [InlineData(" https://example.com")][InlineData("https://example.com\n")][InlineData("//example.com")]
++    public void RejectUnsafeNavigation(string url) => Assert.Throws<ArgumentException>(() => OwnedBrowserPolicy.AdmitNavigation(url));
++    [Theory][InlineData("https://example.com/a?q=1")][InlineData("http://localhost:8080/")][InlineData("about:blank")]
++    public void AdmitLimitedNavigation(string url) => Assert.Equal(url, OwnedBrowserPolicy.AdmitNavigation(url));
++    [Fact] public void PageAuthorityDenied()
++    {
++        Assert.False(OwnedBrowserPolicy.AllowsPermission("camera"));
++        Assert.False(OwnedBrowserPolicy.AllowsPermission("unknown"));
++        Assert.False(OwnedBrowserPolicy.AllowsHostObjects); Assert.False(OwnedBrowserPolicy.AllowsWebMessages);
++        Assert.False(OwnedBrowserPolicy.AllowsDownloads); Assert.False(OwnedBrowserPolicy.AllowsExternalLaunch);
++    }
++    [Fact] public void ProfilesAndTabsAreIsolatedAndDurable()
++    {
++        var a = Id(); var b = Id(); Guid tab;
++        using (var store = new OwnedBrowserStore(root))
++        {
++            store.CreateWorkspace(a, "Work"); store.CreateWorkspace(b, "Personal");
++            Assert.NotEqual(store.GetProfileDirectory(a), store.GetProfileDirectory(b));
++            Assert.StartsWith(Path.Combine(root, "OwnedBrowser-v1"), store.GetProfileDirectory(a));
++            tab = store.OpenTab(a, "https://example.com").Id;
++            Assert.Throws<InvalidOperationException>(() => store.Navigate(b, tab, "about:blank"));
++            Assert.Throws<InvalidOperationException>(() => store.CloseTab(b, tab));
++            store.Navigate(a, tab, "https://example.org");
++        }
++        using var reopened = new OwnedBrowserStore(root);
++        Assert.Equal("https://example.org", reopened.List().Single(w => w.Id == a).Tabs.Single().Url);
++        Assert.Empty(reopened.List().Single(w => w.Id == b).Tabs);
++        reopened.CloseTab(a, tab); Assert.Empty(reopened.List().Single(w => w.Id == a).Tabs);
++    }
++    [Fact] public void CapsAndDuplicateIdentity()
++    {
++        using var store = new OwnedBrowserStore(root); var id = Id(); store.CreateWorkspace(id, "W");
++        Assert.Throws<InvalidOperationException>(() => store.CreateWorkspace(id, "Again"));
++        for (var i = 0; i < OwnedBrowserPolicy.MaxTabsPerWorkspace; i++) store.OpenTab(id, "about:blank");
++        Assert.Throws<InvalidOperationException>(() => store.OpenTab(id, "about:blank"));
++        for (var i = 1; i < OwnedBrowserPolicy.MaxWorkspaces; i++) store.CreateWorkspace(Id(), "W");
++        Assert.Throws<InvalidOperationException>(() => store.CreateWorkspace(Id(), "W"));
++    }
++    [Fact] public void TotalTabCap()
++    {
++        using var store = new OwnedBrowserStore(root);
++        for(var i=0;i<4;i++) { var id=Id(); store.CreateWorkspace(id,"W"); for(var j=0;j<32;j++) store.OpenTab(id,"about:blank"); }
++        var extra=Id(); store.CreateWorkspace(extra,"W");
++        Assert.Throws<InvalidOperationException>(()=>store.OpenTab(extra,"about:blank"));
++    }
++    [Fact] public void ExclusiveLeaseAndDisposedGuard()
++    {
++        var store = new OwnedBrowserStore(root);
++        Assert.ThrowsAny<IOException>(() => new OwnedBrowserStore(root));
++        store.Dispose(); Assert.Throws<ObjectDisposedException>(()=>store.List());
++        using var next = new OwnedBrowserStore(root); Assert.Empty(next.List());
++    }
++    [Theory][InlineData("{")][InlineData("null")][InlineData("{\"Version\":99,\"Workspaces\":[]}")]
++    public void CorruptionFailsClosed(string value)
++    {
++        using(var store = new OwnedBrowserStore(root)) store.CreateWorkspace(Id(),"W");
++        var state=Path.Combine(root,"OwnedBrowser-v1","state.json"); File.WriteAllText(state,value);
++        Assert.Throws<InvalidDataException>(()=>new OwnedBrowserStore(root)); Assert.Equal(value,File.ReadAllText(state));
++    }
++    [Fact] public void OversizedStateFailsClosed()
++    {
++        using(var store=new OwnedBrowserStore(root)) { }
++        File.WriteAllText(Path.Combine(root,"OwnedBrowser-v1","state.json"),new string('x',OwnedBrowserPolicy.MaxStateBytes+1));
++        Assert.Throws<InvalidDataException>(()=>new OwnedBrowserStore(root));
++    }
++    [Fact] public void RemovalRequiresExplicitChoiceAndPreservesRetainedProfile()
++    {
++        using var store=new OwnedBrowserStore(root); var a=Id(); store.CreateWorkspace(a,"W");
++        var profile=store.GetProfileDirectory(a); File.WriteAllText(Path.Combine(profile,"cookie-fixture"),"synthetic");
++        Assert.Throws<ArgumentException>(()=>store.RemoveWorkspace(a,(ProfileRemoval)42));
++        store.RemoveWorkspace(a,ProfileRemoval.Keep); Assert.True(Directory.Exists(profile));
++        store.CreateWorkspace(a,"Restored"); store.RemoveWorkspace(a,ProfileRemoval.Delete); Assert.False(Directory.Exists(profile));
++    }
++    [Fact] public void ForeignProfileIsNeverAdoptedOrDeleted()
++    {
++        using var store=new OwnedBrowserStore(root); var id=Id();
++        var foreign=Path.Combine(root,"OwnedBrowser-v1","profiles",id); Directory.CreateDirectory(foreign);
++        var sentinel=Path.Combine(foreign,"user-data"); File.WriteAllText(sentinel,"keep");
++        Assert.Throws<InvalidOperationException>(()=>store.CreateWorkspace(id,"W")); Assert.Equal("keep",File.ReadAllText(sentinel));
++    }
++    [Fact] public void TraversalStorageAndForeignRootRejected()
++    {
++        Directory.CreateDirectory(root); var foreign=Path.Combine(root,"OwnedBrowser-v1"); Directory.CreateDirectory(foreign); File.WriteAllText(Path.Combine(foreign,"foreign"),"keep");
++        Assert.Throws<InvalidOperationException>(()=>new OwnedBrowserStore(root));
++        Assert.Throws<ArgumentException>(()=>new OwnedBrowserStore(Path.Combine(root,"..","escape")));
++    }
++    [Fact] public void JunctionInProfileCannotDeleteOutsideData()
++    {
++        using var store=new OwnedBrowserStore(root); var id=Id(); store.CreateWorkspace(id,"W");
++        var outside=Path.Combine(root,"outside"); Directory.CreateDirectory(outside); var sentinel=Path.Combine(outside,"keep"); File.WriteAllText(sentinel,"keep");
++        var link=Path.Combine(store.GetProfileDirectory(id),"linked");
++        if(OperatingSystem.IsWindows())
++        {
++            var p=System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("cmd.exe",$"/c mklink /J \"{link}\" \"{outside}\""){CreateNoWindow=true,UseShellExecute=false,RedirectStandardOutput=true,RedirectStandardError=true})!;
++            p.WaitForExit(); Assert.Equal(0,p.ExitCode);
++        }
++        else Directory.CreateSymbolicLink(link,outside);
++        try { Assert.ThrowsAny<IOException>(()=>store.RemoveWorkspace(id,ProfileRemoval.Delete)); Assert.True(File.Exists(sentinel)); Assert.Single(store.List()); }
++        finally { Directory.Delete(link); }
++    }
++    [Theory]
++    [InlineData("{\"Version\":99,\"Version\":1,\"Workspaces\":[]}")]
++    [InlineData("{\"Version\":1,\"Workspaces\":[],\"Workspaces\":[]}")]
++    public void DuplicateJsonPropertiesFailClosed(string value)
++    {
++        using(var store=new OwnedBrowserStore(root)) { }
++        var path=Path.Combine(root,"OwnedBrowser-v1","state.json"); File.WriteAllText(path,value);
++        Assert.Throws<InvalidDataException>(()=>new OwnedBrowserStore(root)); Assert.Equal(value,File.ReadAllText(path));
++    }
++    [Fact] public void MissingStateIsNotSilentlyReset()
++    {
++        using(var store=new OwnedBrowserStore(root)) store.CreateWorkspace(Id(),"W");
++        File.Delete(Path.Combine(root,"OwnedBrowser-v1","state.json"));
++        Assert.Throws<InvalidDataException>(()=>new OwnedBrowserStore(root));
++    }
++    [Fact] public void InvalidInputsDoNotChangeState()
++    {
++        using var store=new OwnedBrowserStore(root); var id=Id(); store.CreateWorkspace(id,"W");
++        Assert.Throws<ArgumentException>(()=>store.CreateWorkspace(Id(),new string('x',101)));
++        Assert.Throws<ArgumentException>(()=>store.OpenTab(id,"javascript:void(0)"));
++        Assert.Throws<ArgumentException>(()=>store.OpenTab(id,"https://example.com/"+new string('x',4096)));
++        Assert.Single(store.List()); Assert.Empty(store.List().Single().Tabs);
++    }
++    [Fact] public void FailedPersistenceDoesNotPublishMutation()
++    {
++        using var store=new OwnedBrowserStore(root); var a=Id(); store.CreateWorkspace(a,"W");
++        var state=Path.Combine(root,"OwnedBrowser-v1","state.json"); var before=File.ReadAllText(state);
++        using(var held=new FileStream(state,FileMode.Open,FileAccess.Read,FileShare.Read))
++            Assert.True(Record.Exception(()=>store.OpenTab(a,"about:blank")) is IOException or UnauthorizedAccessException);
++        Assert.Empty(store.List().Single().Tabs); Assert.Equal(before,File.ReadAllText(state));
++    }
++}
+diff --git a/tests/OpenClicky.Core.Tests/OwnedBrowser/build.log b/tests/OpenClicky.Core.Tests/OwnedBrowser/build.log
+new file mode 100644
+index 0000000..7a28032
+--- /dev/null
++++ b/tests/OpenClicky.Core.Tests/OwnedBrowser/build.log
+@@ -0,0 +1,36 @@
++  Determining projects to restore...
++  Restored D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.Sandbox\OpenClicky.Sandbox.csproj (in 435 ms).
++  Restored D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.Agent\OpenClicky.Agent.csproj (in 479 ms).
++  Restored D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.Overlay\OpenClicky.Overlay.csproj (in 479 ms).
++  Restored D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.Agent.Smoke\OpenClicky.Agent.Smoke.csproj (in 479 ms).
++  Restored D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.Overlay.Smoke\OpenClicky.Overlay.Smoke.csproj (in 479 ms).
++  Restored D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.Input\OpenClicky.Input.csproj (in 981 ms).
++  Restored D:\OpenClicky\.codex-build\aside-owned-browser-20261028\tests\OpenClicky.Input.Tests\OpenClicky.Input.Tests.csproj (in 993 ms).
++  Restored D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.Capture\OpenClicky.Capture.csproj (in 1.09 sec).
++  Restored D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.Capture.Smoke\OpenClicky.Capture.Smoke.csproj (in 1.1 sec).
++  Restored D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.App.SecretStore.Smoke\OpenClicky.App.SecretStore.Smoke.csproj (in 1.52 sec).
++  Restored D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.App\OpenClicky.App.csproj (in 1.52 sec).
++  Restored D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.Surface.Smoke\OpenClicky.Surface.Smoke.csproj (in 1.52 sec).
++  3 of 15 projects are up-to-date for restore.
++  OpenClicky.Core -> D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.Core\bin\Release\net8.0\OpenClicky.Core.dll
++  OpenClicky.Providers -> D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.Providers\bin\Release\net8.0\OpenClicky.Providers.dll
++  OpenClicky.Core.Tests -> D:\OpenClicky\.codex-build\aside-owned-browser-20261028\tests\OpenClicky.Core.Tests\bin\Release\net8.0\OpenClicky.Core.Tests.dll
++  OpenClicky.Sandbox -> D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.Sandbox\bin\Release\net8.0-windows\OpenClicky.Sandbox.dll
++  OpenClicky.Overlay -> D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.Overlay\bin\Release\net8.0-windows\OpenClicky.Overlay.dll
++  OpenClicky.Agent -> D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.Agent\bin\Release\net8.0-windows\OpenClicky.Agent.dll
++  OpenClicky.Input -> D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.Input\bin\Release\net8.0-windows\OpenClicky.Input.dll
++  OpenClicky.Capture -> D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.Capture\bin\Release\net8.0-windows10.0.19041.0\OpenClicky.Capture.dll
++  OpenClicky.Overlay.Smoke -> D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.Overlay.Smoke\bin\Release\net8.0-windows\OpenClicky.Overlay.Smoke.dll
++  OpenClicky.Agent.Smoke -> D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.Agent.Smoke\bin\Release\net8.0-windows\OpenClicky.Agent.Smoke.dll
++  OpenClicky.Input.Tests -> D:\OpenClicky\.codex-build\aside-owned-browser-20261028\tests\OpenClicky.Input.Tests\bin\Release\net8.0-windows\OpenClicky.Input.Tests.dll
++  OpenClicky.Capture.Smoke -> D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.Capture.Smoke\bin\Release\net8.0-windows10.0.19041.0\OpenClicky.Capture.Smoke.dll
++  OpenClicky.App -> D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.App\bin\x64\Release\net8.0-windows10.0.19041.0\OpenClicky.App.dll
++  OpenClicky.Surface.Smoke -> D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.Surface.Smoke\bin\Release\net8.0-windows10.0.19041.0\OpenClicky.Surface.Smoke.dll
++  OpenClicky.App.SecretStore.Smoke -> D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.App.SecretStore.Smoke\bin\Release\net8.0-windows10.0.19041.0\OpenClicky.App.SecretStore.Smoke.dll
++
++Build succeeded.
++    0 Warning(s)
++    0 Error(s)
++
++Time Elapsed 00:00:16.70
++EXIT=0
+diff --git a/tests/OpenClicky.Core.Tests/OwnedBrowser/green-final.log b/tests/OpenClicky.Core.Tests/OwnedBrowser/green-final.log
+new file mode 100644
+index 0000000..e2475c0
+--- /dev/null
++++ b/tests/OpenClicky.Core.Tests/OwnedBrowser/green-final.log
+@@ -0,0 +1,8 @@
++  OpenClicky.Core -> D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.Core\bin\Release\net8.0\OpenClicky.Core.dll
++  OpenClicky.Providers -> D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.Providers\bin\Release\net8.0\OpenClicky.Providers.dll
++  OpenClicky.Core.Tests -> D:\OpenClicky\.codex-build\aside-owned-browser-20261028\tests\OpenClicky.Core.Tests\bin\Release\net8.0\OpenClicky.Core.Tests.dll
++Test run for D:\OpenClicky\.codex-build\aside-owned-browser-20261028\tests\OpenClicky.Core.Tests\bin\Release\net8.0\OpenClicky.Core.Tests.dll (.NETCoreApp,Version=v8.0)
++A total of 1 test files matched the specified pattern.
++
++Passed!  - Failed:     0, Passed:    31, Skipped:     0, Total:    31, Duration: 2 s - OpenClicky.Core.Tests.dll (net8.0)
++EXIT=0
+diff --git a/tests/OpenClicky.Core.Tests/OwnedBrowser/green.log b/tests/OpenClicky.Core.Tests/OwnedBrowser/green.log
+new file mode 100644
+index 0000000..37ab282
+--- /dev/null
++++ b/tests/OpenClicky.Core.Tests/OwnedBrowser/green.log
+@@ -0,0 +1,23 @@
++  OpenClicky.Core -> D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.Core\bin\Release\net8.0\OpenClicky.Core.dll
++  OpenClicky.Providers -> D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.Providers\bin\Release\net8.0\OpenClicky.Providers.dll
++  OpenClicky.Core.Tests -> D:\OpenClicky\.codex-build\aside-owned-browser-20261028\tests\OpenClicky.Core.Tests\bin\Release\net8.0\OpenClicky.Core.Tests.dll
++Test run for D:\OpenClicky\.codex-build\aside-owned-browser-20261028\tests\OpenClicky.Core.Tests\bin\Release\net8.0\OpenClicky.Core.Tests.dll (.NETCoreApp,Version=v8.0)
++A total of 1 test files matched the specified pattern.
++[xUnit.net 00:00:05.76]     OpenClicky.Core.Tests.OwnedBrowser.OwnedBrowserTests.FailedPersistenceDoesNotPublishMutation [FAIL]
++  Failed OpenClicky.Core.Tests.OwnedBrowser.OwnedBrowserTests.FailedPersistenceDoesNotPublishMutation [98 ms]
++  Error Message:
++   Assert.ThrowsAny() Failure: Exception type was not compatible
++Expected: typeof(System.IO.IOException)
++Actual:   typeof(System.UnauthorizedAccessException)
++---- System.UnauthorizedAccessException : Access to the path is denied.
++  Stack Trace:
++     at OpenClicky.Core.Tests.OwnedBrowser.OwnedBrowserTests.FailedPersistenceDoesNotPublishMutation() in D:\OpenClicky\.codex-build\aside-owned-browser-20261028\tests\OpenClicky.Core.Tests\OwnedBrowser\OwnedBrowserTests.cs:line 126
++   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
++   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)
++----- Inner Stack Trace -----
++   at OpenClicky.Core.OwnedBrowser.OwnedBrowserStore.Persist(State value) in D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.Core\OwnedBrowser\OwnedBrowserStore.cs:line 185
++   at OpenClicky.Core.OwnedBrowser.OwnedBrowserStore.OpenTab(String workspaceId, String url) in D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.Core\OwnedBrowser\OwnedBrowserStore.cs:line 89
++   at OpenClicky.Core.Tests.OwnedBrowser.OwnedBrowserTests.<>c__DisplayClass17_0.<FailedPersistenceDoesNotPublishMutation>b__0() in D:\OpenClicky\.codex-build\aside-owned-browser-20261028\tests\OpenClicky.Core.Tests\OwnedBrowser\OwnedBrowserTests.cs:line 126
++
++Failed!  - Failed:     1, Passed:    26, Skipped:     0, Total:    27, Duration: 4 s - OpenClicky.Core.Tests.dll (net8.0)
++EXIT=1
+diff --git a/tests/OpenClicky.Core.Tests/OwnedBrowser/red-parser.log b/tests/OpenClicky.Core.Tests/OwnedBrowser/red-parser.log
+new file mode 100644
+index 0000000..6017975
+--- /dev/null
++++ b/tests/OpenClicky.Core.Tests/OwnedBrowser/red-parser.log
+@@ -0,0 +1,46 @@
++  OpenClicky.Core -> D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.Core\bin\Release\net8.0\OpenClicky.Core.dll
++  OpenClicky.Providers -> D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.Providers\bin\Release\net8.0\OpenClicky.Providers.dll
++  OpenClicky.Core.Tests -> D:\OpenClicky\.codex-build\aside-owned-browser-20261028\tests\OpenClicky.Core.Tests\bin\Release\net8.0\OpenClicky.Core.Tests.dll
++Test run for D:\OpenClicky\.codex-build\aside-owned-browser-20261028\tests\OpenClicky.Core.Tests\bin\Release\net8.0\OpenClicky.Core.Tests.dll (.NETCoreApp,Version=v8.0)
++A total of 1 test files matched the specified pattern.
++[xUnit.net 00:00:02.10]     OpenClicky.Core.Tests.OwnedBrowser.OwnedBrowserTests.DuplicateJsonPropertiesFailClosed(value: "{\"Version\":99,\"Version\":1,\"Workspaces\":[]}") [FAIL]
++[xUnit.net 00:00:02.28]     OpenClicky.Core.Tests.OwnedBrowser.OwnedBrowserTests.DuplicateJsonPropertiesFailClosed(value: "{\"Version\":1,\"Workspaces\":[],\"Workspaces\":[]"┬╖┬╖┬╖) [FAIL]
++  Failed OpenClicky.Core.Tests.OwnedBrowser.OwnedBrowserTests.DuplicateJsonPropertiesFailClosed(value: "{\"Version\":99,\"Version\":1,\"Workspaces\":[]}") [106 ms]
++  Error Message:
++   System.AggregateException : One or more errors occurred. (Assert.Throws() Failure: No exception was thrown
++Expected: typeof(System.IO.InvalidDataException)) (The process cannot access the file 'store.lock' because it is being used by another process.)
++---- Assert.Throws() Failure: No exception was thrown
++Expected: typeof(System.IO.InvalidDataException)
++---- System.IO.IOException : The process cannot access the file 'store.lock' because it is being used by another process.
++  Stack Trace:
++
++----- Inner Stack Trace #1 (Xunit.Sdk.ThrowsException) -----
++   at OpenClicky.Core.Tests.OwnedBrowser.OwnedBrowserTests.DuplicateJsonPropertiesFailClosed(String value) in D:\OpenClicky\.codex-build\aside-owned-browser-20261028\tests\OpenClicky.Core.Tests\OwnedBrowser\OwnedBrowserTests.cs:line 128
++   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
++   at System.Reflection.MethodBaseInvoker.InvokeDirectByRefWithFewArgs(Object obj, Span`1 copyOfArgs, BindingFlags invokeAttr)
++----- Inner Stack Trace #2 (System.IO.IOException) -----
++   at System.IO.FileSystem.RemoveDirectoryRecursive(String fullPath, WIN32_FIND_DATA& findData, Boolean topLevel)
++   at System.IO.FileSystem.RemoveDirectory(String fullPath, Boolean recursive)
++   at OpenClicky.Core.Tests.OwnedBrowser.OwnedBrowserTests.Dispose() in D:\OpenClicky\.codex-build\aside-owned-browser-20261028\tests\OpenClicky.Core.Tests\OwnedBrowser\OwnedBrowserTests.cs:line 9
++   at ReflectionAbstractionExtensions.DisposeTestClass(ITest test, Object testClass, IMessageBus messageBus, ExecutionTimer timer, CancellationTokenSource cancellationTokenSource) in /_/src/xunit.execution/Extensions/ReflectionAbstractionExtensions.cs:line 79
++  Failed OpenClicky.Core.Tests.OwnedBrowser.OwnedBrowserTests.DuplicateJsonPropertiesFailClosed(value: "{\"Version\":1,\"Workspaces\":[],\"Workspaces\":[]"┬╖┬╖┬╖) [179 ms]
++  Error Message:
++   System.AggregateException : One or more errors occurred. (Assert.Throws() Failure: No exception was thrown
++Expected: typeof(System.IO.InvalidDataException)) (The process cannot access the file 'store.lock' because it is being used by another process.)
++---- Assert.Throws() Failure: No exception was thrown
++Expected: typeof(System.IO.InvalidDataException)
++---- System.IO.IOException : The process cannot access the file 'store.lock' because it is being used by another process.
++  Stack Trace:
++
++----- Inner Stack Trace #1 (Xunit.Sdk.ThrowsException) -----
++   at OpenClicky.Core.Tests.OwnedBrowser.OwnedBrowserTests.DuplicateJsonPropertiesFailClosed(String value) in D:\OpenClicky\.codex-build\aside-owned-browser-20261028\tests\OpenClicky.Core.Tests\OwnedBrowser\OwnedBrowserTests.cs:line 128
++   at InvokeStub_OwnedBrowserTests.DuplicateJsonPropertiesFailClosed(Object, Span`1)
++   at System.Reflection.MethodBaseInvoker.InvokeWithOneArg(Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
++----- Inner Stack Trace #2 (System.IO.IOException) -----
++   at System.IO.FileSystem.RemoveDirectoryRecursive(String fullPath, WIN32_FIND_DATA& findData, Boolean topLevel)
++   at System.IO.FileSystem.RemoveDirectory(String fullPath, Boolean recursive)
++   at OpenClicky.Core.Tests.OwnedBrowser.OwnedBrowserTests.Dispose() in D:\OpenClicky\.codex-build\aside-owned-browser-20261028\tests\OpenClicky.Core.Tests\OwnedBrowser\OwnedBrowserTests.cs:line 9
++   at ReflectionAbstractionExtensions.DisposeTestClass(ITest test, Object testClass, IMessageBus messageBus, ExecutionTimer timer, CancellationTokenSource cancellationTokenSource) in /_/src/xunit.execution/Extensions/ReflectionAbstractionExtensions.cs:line 79
++
++Failed!  - Failed:     2, Passed:    29, Skipped:     0, Total:    31, Duration: 4 s - OpenClicky.Core.Tests.dll (net8.0)
++EXIT=1
+diff --git a/tests/OpenClicky.Core.Tests/OwnedBrowser/red.log b/tests/OpenClicky.Core.Tests/OwnedBrowser/red.log
+new file mode 100644
+index 0000000..7ec5fff
+--- /dev/null
++++ b/tests/OpenClicky.Core.Tests/OwnedBrowser/red.log
+@@ -0,0 +1,8 @@
++  Determining projects to restore...
++  Restored D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.Providers\OpenClicky.Providers.csproj (in 518 ms).
++  Restored D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.Core\OpenClicky.Core.csproj (in 518 ms).
++  Restored D:\OpenClicky\.codex-build\aside-owned-browser-20261028\tests\OpenClicky.Core.Tests\OpenClicky.Core.Tests.csproj (in 532 ms).
++  OpenClicky.Core -> D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.Core\bin\Release\net8.0\OpenClicky.Core.dll
++  OpenClicky.Providers -> D:\OpenClicky\.codex-build\aside-owned-browser-20261028\apps\windows\OpenClicky.Providers\bin\Release\net8.0\OpenClicky.Providers.dll
++D:\OpenClicky\.codex-build\aside-owned-browser-20261028\tests\OpenClicky.Core.Tests\OwnedBrowser\OwnedBrowserTests.cs(1,23): error CS0234: The type or namespace name 'OwnedBrowser' does not exist in the namespace 'OpenClicky.Core' (are you missing an assembly reference?) [D:\OpenClicky\.codex-build\aside-owned-browser-20261028\tests\OpenClicky.Core.Tests\OpenClicky.Core.Tests.csproj]
++EXIT=1

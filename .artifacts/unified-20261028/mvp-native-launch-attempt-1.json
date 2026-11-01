@@ -1,0 +1,10 @@
+{
+  "startedAt": "2026-10-28T12:42:49.0615117+05:00",
+  "executable": "D:\\OpenClicky\\.artifacts\\unified-20261028\\MVP\\OpenClicky.App.exe",
+  "dllSha256": "72ABF9C830CB3BBDCC9BCABD1EB641BF1C98D67ECDD5C6286A151E5ECCF988EB",
+  "mode": "--unified-mvp",
+  "scope": "no devices/accounts/providers",
+  "revision": "f1b0c94b71603664efc516f0f75328e0c3e8b4e8",
+  "inputIdle": true,
+  "pid": 46268
+}

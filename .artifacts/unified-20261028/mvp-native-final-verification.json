@@ -1,0 +1,23 @@
+{
+  "revision": "103138428a66f69a26fb2de494d0a749eb7d16ec",
+  "dllSha256": "D6FA3CA7693687FF842CF6AA3B62CAD501317C1F07D903AEC3BE6C1FD331E192",
+  "formalTestsPassed": 3081,
+  "releaseBuildExit": 0,
+  "exactStagedSpeechExit": 0,
+  "nativeLifetimeExit": 0,
+  "toolbarPixelInspection": "passed",
+  "dpi": 144,
+  "nativeChromeHeight": 180,
+  "proof": "C:\\Users\\ahmad\\.aside\\u\\0\\sessions\\2026-10-26_Pm2QhgacjOhFyF8i\\tmp\\mvp-fixed-visible-toolbar.png",
+  "physicalInputEvents": 0,
+  "recordingControlsUsed": false,
+  "normalHostTouched": false,
+  "existingCandidateLeftRunning": true,
+  "followupRoutineDeleted": "QLfXzWV4yYkNBlMP",
+  "independentSourceReview": "unavailable",
+  "fullFeatureAcceptance": false,
+  "verificationDocumentationRevision": "2ade76d6df45e3337b8846cee8e21d6792e94df5",
+  "activeNativeReadinessMonitors": 0,
+  "nativeFollowupCompleted": true,
+  "productRebuiltForDocumentation": false
+}

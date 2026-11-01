@@ -1,0 +1,14 @@
+[
+  {
+    "check": "chrome-layout",
+    "exitCode": 0
+  },
+  {
+    "check": "owned-e2e",
+    "exitCode": 0
+  },
+  {
+    "check": "meetings-workspace",
+    "exitCode": 0
+  }
+]

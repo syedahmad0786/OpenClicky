@@ -1,0 +1,87 @@
+{
+  "observedAt": "2026-10-28T08:15:30.229Z",
+  "complete": true,
+  "meaningOfComplete": "Bounded native verification run completed, not full product or release acceptance",
+  "acceptance": "functional native journey passed; browser toolbar layout finding remains",
+  "fullFeatureAcceptance": false,
+  "sourceRevision": "f1b0c94b71603664efc516f0f75328e0c3e8b4e8",
+  "pid": 36900,
+  "mode": "--unified-mvp",
+  "executable": "D:\\OpenClicky\\.artifacts\\unified-20261028\\MVP\\OpenClicky.App.exe",
+  "sourceEdits": false,
+  "meeting": {
+    "trustedDocument": "https://openclicky-meetings-ui.local/meetings.html",
+    "captureIdle": true,
+    "processingNotRequested": true,
+    "startEnabled": false,
+    "stopEnabled": false,
+    "consent": "Both required notices visually unchecked in inspected native screen; no consent checkbox changed",
+    "toggleApi": "Separate TogglePattern probe did not find the root; checkbox state evidence is visual, not that failed probe",
+    "sources": "None selected; source refresh was not invoked; no source enumeration or device recording was requested",
+    "circleback": "No configuration, read or import action performed"
+  },
+  "browser": {
+    "trustedDocument": "https://openclicky-browser-ui.local/browser.html",
+    "workspace": "MVP QA 2026-10-28 native",
+    "workspaceCreatedAndReadBack": true,
+    "blankTabCreated": true,
+    "address": "about:blank",
+    "nativeBlankContentVisible": true,
+    "publicOrAccountNavigation": false
+  },
+  "finding": {
+    "id": "native-browser-toolbar-clipping",
+    "status": "open",
+    "nativeChromeBounds": "0,35,3840,120",
+    "controlsBounds": "0,35,3840,180",
+    "statusRows": [
+      {
+        "name": "OpenClicky browser. Chrome extension is separate.",
+        "offscreen": true,
+        "bounds": "12,179,405,24"
+      },
+      {
+        "name": "Downloads unavailable · Permissions unavailable · Agent control unavailable · External protocols denied · Extension separate",
+        "offscreen": true,
+        "bounds": "2848,179,980,24"
+      }
+    ],
+    "observation": "Native chrome viewport is 120 physical pixels high while rendered controls are 180 pixels high. The status row is offscreen, with native content starting before that row.",
+    "blocked": "Source is read-only under the approved verification scope; a source fix and rebuild need approval."
+  },
+  "launchEvidence": {
+    "initialAttempt": "Non-persistent launch ended before the follow-up read. Exact exit code unavailable; no matching application-error event found.",
+    "successfulAttempt": "Persistent held launch host rendered both trusted UIs and kept the isolated process running."
+  },
+  "safety": {
+    "guardModeVisuallyConfirmed": true,
+    "scopedNativeFolderGrantVerified": true,
+    "staleHooksNotAcceptedAsSafe": true,
+    "finalMethod": "Three fresh OS idle samples over four seconds, all over five minutes with zero meeting indicators; rechecked immediately before each remaining native UI action."
+  },
+  "screenshots": {
+    "browser": "C:\\Users\\ahmad\\.aside\\u\\0\\sessions\\2026-10-26_Pm2QhgacjOhFyF8i\\tmp\\mvp-browser-toolbar-proof.png",
+    "meeting": "C:\\Users\\ahmad\\.aside\\u\\0\\sessions\\2026-10-26_Pm2QhgacjOhFyF8i\\tmp\\mvp-meeting-consent-proof.png"
+  },
+  "remainingGates": [
+    "Browser toolbar layout acceptance",
+    "Real hardware or screen capture not tested or authorized here",
+    "Provider/account and production browser-profile acceptance not performed",
+    "E-S5 unsupported by current provider API; E-S8 how-to list/edit remains deferred",
+    "This does not accept all 99 requested feature IDs",
+    "Persistent standalone launch / safe shutdown not accepted: test PID absent at final observation, with no retained exit receipt."
+  ],
+  "recordingIncident": "Historical unintended recording-launch incident remains disclosed; this no-device check does not erase it.",
+  "finalProcessObservation": {
+    "exitCause": "Unverified; no retained exit receipt. Do not claim the app remains open.",
+    "temporaryOwnMonitorStopped": false,
+    "testedBuildUnchanged": true,
+    "temporaryMonitorPresent": false,
+    "observedAt": "2026-10-28T13:23:41.5239993+05:00",
+    "isolatedAppRunningNow": false,
+    "dllSha256": "72ABF9C830CB3BBDCC9BCABD1EB641BF1C98D67ECDD5C6286A151E5ECCF988EB",
+    "nativeExitReceipt": null,
+    "originalAppStillPresent": true
+  },
+  "desktopCleanup": "Both test windows were minimized after screenshots. An extra empty folder-picker cancellation was requested but closure was not confirmed; no unrelated app was closed."
+}

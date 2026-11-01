@@ -1,0 +1,11 @@
+{
+  "dllSha256": "72ABF9C830CB3BBDCC9BCABD1EB641BF1C98D67ECDD5C6286A151E5ECCF988EB",
+  "startedAt": "2026-10-28T12:48:07.2949833+05:00",
+  "executable": "D:\\OpenClicky\\.artifacts\\unified-20261028\\MVP\\OpenClicky.App.exe",
+  "mode": "--unified-mvp",
+  "scope": "No devices, sources, accounts, providers, or original process changes",
+  "pid": 36900,
+  "inputIdle": true,
+  "revision": "f1b0c94b71603664efc516f0f75328e0c3e8b4e8",
+  "hostLifetime": "Persistent launch command waits for app exit"
+}

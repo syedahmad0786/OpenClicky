@@ -1,0 +1,458 @@
+--- COMMITS ---
+5dadbcc test: retain recording red and green execution logs
+c149ece feat: add explicit-source bounded local recording engine
+--- STAT ---
+ apps/windows/OpenClicky.Recording/Contract.cs      |   6 +
+ .../windows/OpenClicky.Recording/FfmpegRecorder.cs |  56 ++++++++++
+ .../OpenClicky.Recording.csproj                    |   1 +
+ .../OpenClicky.Recording/RecordingSession.cs       |  43 +++++++
+ .../plans/2026-10-28-recording-engine-report.md    |  11 ++
+ .../plans/2026-10-28-recording-engine.md           |  24 ++++
+ .../OpenClicky.Recording.Tests.csproj              |   1 +
+ tests/OpenClicky.Recording.Tests/RecorderTests.cs  |  28 +++++
+ .../OpenClicky.Recording.Tests/evidence/final.exit |   1 +
+ .../OpenClicky.Recording.Tests/evidence/final.log  |   8 ++
+ .../OpenClicky.Recording.Tests/evidence/green.exit |   1 +
+ .../OpenClicky.Recording.Tests/evidence/green.log  |   8 ++
+ .../evidence/red-contract.exit                     |   1 +
+ .../evidence/red-contract.log                      | 123 +++++++++++++++++++++
+ .../evidence/red-subparser.log                     |  14 +++
+ tests/OpenClicky.Recording.Tests/evidence/red.exit |   1 +
+ tests/OpenClicky.Recording.Tests/evidence/red.log  |   6 +
+ 17 files changed, 333 insertions(+)
+--- DIFF ---
+diff --git a/apps/windows/OpenClicky.Recording/Contract.cs b/apps/windows/OpenClicky.Recording/Contract.cs
+new file mode 100644
+index 0000000..2a09e56
+--- /dev/null
++++ b/apps/windows/OpenClicky.Recording/Contract.cs
+@@ -0,0 +1,6 @@
++namespace OpenClicky.Recording;
++public sealed record ScreenRectangle(int X,int Y,int Width,int Height);
++/// <summary>Device names are exact DirectShow audio endpoint names, not WASAPI IDs. No default-device lookup.</summary>
++public sealed record RecordingRequest(bool Consent,ScreenRectangle? Screen,string? MicrophoneDevice,string? SystemAudioDevice,bool Synthetic,TimeSpan MaxDuration,long MaxBytes);
++public enum RecordingStatus { Completed, Cancelled, Failed, LimitExceeded }
++public sealed record RecordingResult(RecordingStatus Status,int ExitCode,string? MediaPath,RecordingRequest Sources,string Diagnostic);
+diff --git a/apps/windows/OpenClicky.Recording/FfmpegRecorder.cs b/apps/windows/OpenClicky.Recording/FfmpegRecorder.cs
+new file mode 100644
+index 0000000..118a6a2
+--- /dev/null
++++ b/apps/windows/OpenClicky.Recording/FfmpegRecorder.cs
+@@ -0,0 +1,56 @@
++using System.Diagnostics;
++using System.Globalization;
++namespace OpenClicky.Recording;
++public sealed class FfmpegRecorder
++{
++ readonly string _ffmpeg; readonly string _root;
++ public FfmpegRecorder(string ffmpegPath,string outputRoot)
++ {
++  if(!Path.IsPathFullyQualified(ffmpegPath))throw new ArgumentException("Supply absolute ffmpeg executable path.");
++  ValidateRoot(outputRoot); _ffmpeg=ffmpegPath;_root=Path.GetFullPath(outputRoot);
++ }
++ static void ValidateRoot(string root)
++ {
++  if(!Path.IsPathFullyQualified(root)||root.StartsWith(@"\\")||root.IndexOf(':',2)>=0||root.IndexOfAny(new[]{'\0','\r','\n'})>=0)throw new ArgumentException("Output must be an absolute local path without streams.");
++  if(OperatingSystem.IsWindows()&&new DriveInfo(Path.GetPathRoot(root)!).DriveType!=DriveType.Fixed)throw new ArgumentException("Output requires a fixed local drive.");
++  for(var dir=new DirectoryInfo(root);dir!=null;dir=dir.Parent)if(dir.Exists&&(dir.Attributes&FileAttributes.ReparsePoint)!=0)throw new ArgumentException("Reparse output directories not supported.");
++ }
++ static void Validate(RecordingRequest r)
++ {
++  if(!r.Consent)throw new ArgumentException("Explicit capture consent required.");
++  if(r.MaxDuration<TimeSpan.FromSeconds(1)||r.MaxDuration>TimeSpan.FromHours(2)||r.MaxBytes<65536||r.MaxBytes>2_000_000_000)throw new ArgumentException("Duration 1s..2h and size 64KiB..2GB required.");
++  if(r.Synthetic&&(r.Screen!=null||r.MicrophoneDevice!=null||r.SystemAudioDevice!=null))throw new ArgumentException("Synthetic mode cannot select hardware.");
++  if(!r.Synthetic&&r.Screen==null)throw new ArgumentException("Explicit screen rectangle required; no fallback.");
++  if(r.Screen is {} s&&(s.Width<2||s.Height<2||s.Width>7680||s.Height>4320||s.Width%2!=0||s.Height%2!=0||(long)s.X+s.Width>int.MaxValue||(long)s.Y+s.Height>int.MaxValue))throw new ArgumentException("Invalid explicit rectangle; even dimensions required.");
++  foreach(var device in new[]{r.MicrophoneDevice,r.SystemAudioDevice})if(device!=null&&(string.IsNullOrWhiteSpace(device)||device.Length>512||device.Any(char.IsControl)||device.Contains((char)58)||device.Contains((char)34)||device.Contains((char)92)))throw new ArgumentException("Invalid selected audio endpoint.");
++ }
++ public static IReadOnlyList<string> BuildArguments(RecordingRequest request,string outputPath)
++ {
++  Validate(request);
++  var a=new List<string>{"-hide_banner","-loglevel","error","-n"};
++  if(request.Synthetic)a.AddRange(new[]{"-re","-f","lavfi","-i","testsrc=size=320x240:rate=15","-re","-f","lavfi","-i","sine=frequency=440:sample_rate=48000"});
++  else
++  {
++   var s=request.Screen!;a.AddRange(new[]{"-f","gdigrab","-framerate","15","-offset_x",s.X.ToString(CultureInfo.InvariantCulture),"-offset_y",s.Y.ToString(CultureInfo.InvariantCulture),"-video_size",$"{s.Width}x{s.Height}","-i","desktop"});
++   foreach(var device in new[]{request.MicrophoneDevice,request.SystemAudioDevice})if(device!=null)a.AddRange(new[]{"-thread_queue_size","512","-f","dshow","-i","audio="+device});
++  }
++  a.AddRange(new[]{"-map","0:v:0"});
++  var audioCount=request.Synthetic?1:(request.MicrophoneDevice!=null?1:0)+(request.SystemAudioDevice!=null?1:0);
++  if(audioCount==1)a.AddRange(new[]{"-map","1:a:0"});
++  if(audioCount==2)a.AddRange(new[]{"-filter_complex","[1:a][2:a]amix=inputs=2:duration=longest[a]","-map","[a]"});
++  a.AddRange(new[]{"-c:v","libx264","-preset","ultrafast","-pix_fmt","yuv420p","-c:a","aac","-t",request.MaxDuration.TotalSeconds.ToString(CultureInfo.InvariantCulture),"-fs",Math.Max(32768,request.MaxBytes-32768).ToString(CultureInfo.InvariantCulture),"-movflags","frag_keyframe+empty_moov","-f","mp4",outputPath});return a.AsReadOnly();
++ }
++ public Task<RecordingSession> StartAsync(RecordingRequest request,CancellationToken cancellationToken=default)
++ {
++  cancellationToken.ThrowIfCancellationRequested();Validate(request);ValidateRoot(_root);
++  if(!File.Exists(_ffmpeg))throw new FileNotFoundException("Caller supplied ffmpeg not found.",_ffmpeg);
++  if(!request.Synthetic&&!OperatingSystem.IsWindows())throw new PlatformNotSupportedException("Hardware capture requires Windows.");
++  Directory.CreateDirectory(_root);ValidateRoot(_root);
++  var file=Path.Combine(_root,Guid.NewGuid().ToString("N")+".partial.mp4");
++  var info=new ProcessStartInfo(_ffmpeg){UseShellExecute=false,CreateNoWindow=true,RedirectStandardInput=true,RedirectStandardError=true};
++  foreach(var arg in BuildArguments(request,file))info.ArgumentList.Add(arg);
++  var process=new Process{StartInfo=info};try{process.Start();return Task.FromResult(new RecordingSession(process,file,request,cancellationToken));}catch{process.Dispose();throw;}
++ }
++}
++
++
+diff --git a/apps/windows/OpenClicky.Recording/OpenClicky.Recording.csproj b/apps/windows/OpenClicky.Recording/OpenClicky.Recording.csproj
+new file mode 100644
+index 0000000..66b389c
+--- /dev/null
++++ b/apps/windows/OpenClicky.Recording/OpenClicky.Recording.csproj
+@@ -0,0 +1 @@
++<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup></Project>
+diff --git a/apps/windows/OpenClicky.Recording/RecordingSession.cs b/apps/windows/OpenClicky.Recording/RecordingSession.cs
+new file mode 100644
+index 0000000..0cf81c4
+--- /dev/null
++++ b/apps/windows/OpenClicky.Recording/RecordingSession.cs
+@@ -0,0 +1,43 @@
++using System.Diagnostics;
++using System.Text;
++namespace OpenClicky.Recording;
++public sealed class RecordingSession:IAsyncDisposable
++{
++ readonly Process _process;readonly string _partial;readonly RecordingRequest _request; readonly object _gate=new();readonly StringBuilder _diagnostic=new();readonly CancellationTokenRegistration _registration;
++ int _cancel;int _limit;readonly Task _drain;
++ public Task<RecordingResult> Completion{get;}
++ internal RecordingSession(Process process,string partial,RecordingRequest request,CancellationToken token)
++ {
++  _process=process;_partial=partial;_request=request;_drain=DrainAsync();
++  Completion=ObserveAsync();_registration=token.Register(()=>{Interlocked.Exchange(ref _cancel,1);Kill();});
++ }
++ async Task DrainAsync()
++ {
++  var buffer=new char[1024];int count;while((count=await _process.StandardError.ReadAsync(buffer))>0)lock(_gate){var remaining=8192-_diagnostic.Length;if(remaining>0)_diagnostic.Append(buffer,0,Math.Min(count,remaining));}
++ }
++ void Kill(){try{if(!_process.HasExited)_process.Kill(true);}catch(InvalidOperationException){} }
++ async Task<RecordingResult> ObserveAsync()
++ {
++  var deadline=Stopwatch.StartNew();
++  while(!_process.HasExited)
++  {
++   if(deadline.Elapsed>_request.MaxDuration+TimeSpan.FromSeconds(10)){Interlocked.Exchange(ref _limit,1);Kill();}
++   try{if(File.Exists(_partial)&&new FileInfo(_partial).Length>_request.MaxBytes){Interlocked.Exchange(ref _limit,1);Kill();}}catch(IOException){}
++   await Task.WhenAny(_process.WaitForExitAsync(),Task.Delay(100));
++  }
++  await _process.WaitForExitAsync();await _drain;
++  var status=Volatile.Read(ref _cancel)!=0?RecordingStatus.Cancelled:Volatile.Read(ref _limit)!=0?RecordingStatus.LimitExceeded:_process.ExitCode==0?RecordingStatus.Completed:RecordingStatus.Failed;
++  string? media=null;
++  if(status==RecordingStatus.Completed&&File.Exists(_partial)&&new FileInfo(_partial).Length>0&&new FileInfo(_partial).Length<=_request.MaxBytes){media=_partial.Replace(".partial.mp4",".mp4",StringComparison.Ordinal);File.Move(_partial,media);}
++  else{if(status==RecordingStatus.Completed)status=RecordingStatus.Failed;File.Delete(_partial);}
++  string diagnostic;lock(_gate)diagnostic=_diagnostic.ToString();return new(status,_process.ExitCode,media,_request,diagnostic);
++ }
++ public async Task StopAsync()
++ {
++  if(Completion.IsCompleted){await Completion;return;}
++  try{await _process.StandardInput.WriteLineAsync("q");await _process.StandardInput.FlushAsync();}catch(IOException){}catch(InvalidOperationException){}
++  if(await Task.WhenAny(Completion,Task.Delay(TimeSpan.FromSeconds(5)))!=Completion){Interlocked.Exchange(ref _limit,1);Kill();}await Completion;
++ }
++ public async Task CancelAsync(){Interlocked.Exchange(ref _cancel,1);Kill();await Completion;}
++ public async ValueTask DisposeAsync(){if(!Completion.IsCompleted)await CancelAsync();_registration.Dispose();_process.Dispose();}
++}
+diff --git a/docs/superpowers/plans/2026-10-28-recording-engine-report.md b/docs/superpowers/plans/2026-10-28-recording-engine-report.md
+new file mode 100644
+index 0000000..7d98b1f
+--- /dev/null
++++ b/docs/superpowers/plans/2026-10-28-recording-engine-report.md
+@@ -0,0 +1,11 @@
++# Task 2 recording-engine report
++
++API: FfmpegRecorder(ffmpegPath, outputRoot).StartAsync(RecordingRequest, cancellationToken); RecordingSession.Completion, StopAsync, CancelAsync, DisposeAsync. RecordingResult carries status, exit code, local final media path, immutable source request and capped diagnostic. Constructors never launch capture.
++
++Implementation: shell-free ArgumentList, gdigrab explicit even-sized rectangle; explicit DirectShow mic and/or exposed system-loopback audio, amix when both. No default-device fallback. Synthetic mode exclusively uses lavfi testsrc/sine. ffmpeg libx264/AAC fragmented MP4, maximum 1s..2h, 64KiB..2GB. Generated filenames, absolute fixed-local output roots, reparse ancestor rejection, no overwrite. Partial files are never published on crash/cancel, q stop with 5s kill fallback, wall-clock and byte watchdog, final byte verification and 8192-char diagnostics. Source metadata returned, not automatically persisted/uploaded. App integration remains parent-owned.
++
++Prerequisites: caller supplies installed ffmpeg supporting gdigrab/dshow/lavfi/libx264/AAC; tests currently explicitly use supplied local ffmpeg 8.1 and adjacent ffprobe. No added package or third-party copied code. Existing push-to-talk uses NAudio but is intentionally independent. DirectShow endpoint names differ from existing WASAPI IDs. System audio is unsupported unless an explicit loopback endpoint is installed/exposed; no native WASAPI bridge implemented. No UI or device discovery. Hardware acceptance remains unverified. File size can transiently overshoot encoder cap before host catches it, but oversize output is never returned. Reparse checks are not a defense against malicious concurrent filesystem replacement. Parent process termination can leave fragmented .partial.mp4; no auto-resume, auto-publish or automatic recovery scan.
++
++Safety incident during red regression: the original subparser-injection test called StartAsync with a rectangle and invalid DirectShow endpoint before the grammar guard existed, unintentionally attempting a real hardware process launch. It failed rather than publishing media; no ffmpeg process remained at final inspection. Cannot claim zero attempted hardware capture. Replaced that regression with BuildArguments-only validation, added colon/quote/backslash rejection. No deliberate personal capture was performed; the attempt is an acceptance/safety gap requiring parent review.
++
++Verification: evidence/red-contract.log records expected NotImplementedException test failures; red-subparser.log records missing grammar guard failure; final.log/final.exit hold focused full recording project test results. Synthetic test probes actual MP4 stream types using ffprobe and verifies exit 0 and byte bound. Other cases cover explicit consent/source requirements, unsafe paths, cancellation, stop, crashing wrong executable and no missing-tool fallback. No full solution run or native acceptance by this worker.
+diff --git a/docs/superpowers/plans/2026-10-28-recording-engine.md b/docs/superpowers/plans/2026-10-28-recording-engine.md
+new file mode 100644
+index 0000000..80c2686
+--- /dev/null
++++ b/docs/superpowers/plans/2026-10-28-recording-engine.md
+@@ -0,0 +1,24 @@
++# Local recording engine implementation plan
++
++> Execute only Task 2 using TDD; parent owns integration.
++
++**Goal:** Nonvisual bounded local recorder, no constructor capture.
++**Architecture:** Immutable explicit source request, safe argument-list ffmpeg launch, async session lifecycle. Separate from existing push-to-talk recorder.
++**Tech:** .NET 8, installed caller-supplied ffmpeg; no new dependencies.
++**Spec:** ../specs/2026-10-28-unified-capabilities-design.md
++
++## API and files
++- RecordingRequest.cs: ScreenRectangle(int X,int Y,int Width,int Height); RecordingRequest(bool Consent, ScreenRectangle? Screen, string? MicrophoneDevice, string? SystemAudioDevice, bool Synthetic, TimeSpan MaxDuration, long MaxBytes).
++- FfmpegRecorder.cs: FfmpegRecorder(string ffmpegPath,string outputRoot); StartAsync(RecordingRequest,CancellationToken) -> Task<RecordingSession>.
++- RecordingSession.cs: Completion Task<RecordingResult>; StopAsync(); CancelAsync(); IAsyncDisposable. Result includes status, exit code, local media path only on success, source request, bounded diagnostic text. Cancellation deletes partial media; crash leaves no published final file. Stop sends q then bounded wait/kill. Duration and output size enforced by ffmpeg and host watchdog.
++- tests/OpenClicky.Recording.Tests: validation, arguments, lifecycle, synthetic encode and ffprobe tests. Evidence in evidence/.
++
++## Constraints and review focus
++No paid/network calls, uploads, hardware tests or UI. Output root must be absolute local fixed-drive directory without reparse ancestors. Generated child names only; no arbitrary output file. No fallback sources. Hardware requires explicit rectangle; audio devices explicitly named DirectShow endpoints. System audio requires an installed exposed loopback endpoint, not arbitrary WASAPI support. Installed ffmpeg reports gdigrab/dshow/lavfi, no WASAPI. No copied code/dependency.
++
++## Steps
++- [ ] Tests first for consent, explicit sources, invalid rectangles/limits, path safety and injection-safe tokenization; observe red.
++- [ ] Implement validation and argument construction; rerun.
++- [ ] Tests first for real synthetic encode/ffprobe, stop, cancellation, crash, byte cap and missing executable.
++- [ ] Implement lifecycle with fragment MP4 recovery-friendly temporary output and bounded diagnostics; rerun focused full recording suite and retain exact exits.
++- [ ] Commit owned paths only; report prerequisites and hardware acceptance gap.
+diff --git a/tests/OpenClicky.Recording.Tests/OpenClicky.Recording.Tests.csproj b/tests/OpenClicky.Recording.Tests/OpenClicky.Recording.Tests.csproj
+new file mode 100644
+index 0000000..2819f7d
+--- /dev/null
++++ b/tests/OpenClicky.Recording.Tests/OpenClicky.Recording.Tests.csproj
+@@ -0,0 +1 @@
++<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net8.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><IsPackable>false</IsPackable></PropertyGroup><ItemGroup><PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1"/><PackageReference Include="xunit" Version="2.9.3"/><PackageReference Include="xunit.runner.visualstudio" Version="2.8.2"/></ItemGroup><ItemGroup><ProjectReference Include="../../apps/windows/OpenClicky.Recording/OpenClicky.Recording.csproj"/></ItemGroup></Project>
+diff --git a/tests/OpenClicky.Recording.Tests/RecorderTests.cs b/tests/OpenClicky.Recording.Tests/RecorderTests.cs
+new file mode 100644
+index 0000000..6f3b80b
+--- /dev/null
++++ b/tests/OpenClicky.Recording.Tests/RecorderTests.cs
+@@ -0,0 +1,28 @@
++using System.Diagnostics;
++using System.Text.Json;
++using OpenClicky.Recording;
++using Xunit;
++public class RecorderTests
++{
++ static readonly string Ff = @"C:\Users\ahmad\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\ffmpeg-8.1-full_build\bin\ffmpeg.exe";
++ static string Root()=>Path.Combine(Path.GetTempPath(),"open-clicky-recording-tests",Guid.NewGuid().ToString("N"));
++ static RecordingRequest Fixture(int seconds=1)=>new(true,null,null,null,true,TimeSpan.FromSeconds(seconds),4_000_000);
++ [Fact] public async Task ConsentAndExplicitSourcesRequired(){var r=new FfmpegRecorder(Ff,Root()); await Assert.ThrowsAsync<ArgumentException>(()=>r.StartAsync(Fixture() with{Consent=false}));await Assert.ThrowsAsync<ArgumentException>(()=>r.StartAsync(Fixture() with{Synthetic=false}));}
++ [Fact] public async Task RejectInvalidRectangleAndLimits(){var r=new FfmpegRecorder(Ff,Root());await Assert.ThrowsAsync<ArgumentException>(()=>r.StartAsync(Fixture() with{Synthetic=false,Screen=new(0,0,0,100)}));await Assert.ThrowsAsync<ArgumentException>(()=>r.StartAsync(Fixture() with{MaxDuration=TimeSpan.Zero}));await Assert.ThrowsAsync<ArgumentException>(()=>r.StartAsync(Fixture() with{MaxBytes=1}));}
++ [Theory][InlineData("relative")][InlineData(@"\\server\share")][InlineData(@"C:\bad:stream")]
++ public void UnsafeOutputRootsRejected(string root)=>Assert.ThrowsAny<ArgumentException>(()=>new FfmpegRecorder(Ff,root));
++ [Fact] public void DeviceIsOneArgumentNoShell(){var request=Fixture() with{Synthetic=false,Screen=new(10,20,320,240),MicrophoneDevice="mic -i hacked & calc"}; var args=FfmpegRecorder.BuildArguments(request,@"C:\safe\recording.partial.mp4");Assert.Contains("audio=mic -i hacked & calc",args); Assert.Equal(2,args.Count(a=>a=="-i"));Assert.DoesNotContain("cmd.exe",args);}
++ [Fact] public async Task PrecancelDoesNotCreateOutput(){var root=Root();var r=new FfmpegRecorder(Ff,root);await Assert.ThrowsAnyAsync<OperationCanceledException>(()=>r.StartAsync(Fixture(),new CancellationToken(true)));Assert.False(Directory.Exists(root));}
++ [Fact] public async Task SyntheticEncodeContainsVideoAndAudio(){await using var s=await new FfmpegRecorder(Ff,Root()).StartAsync(Fixture());var result=await s.Completion;Assert.Equal(RecordingStatus.Completed,result.Status);Assert.NotNull(result.MediaPath);var p=new Process{StartInfo=new(Path.Combine(Path.GetDirectoryName(Ff)!,"ffprobe.exe")){UseShellExecute=false,RedirectStandardOutput=true,RedirectStandardError=true,CreateNoWindow=true}};foreach(var a in new[]{"-v","error","-show_streams","-show_format","-of","json",result.MediaPath!})p.StartInfo.ArgumentList.Add(a);p.Start();var json=await p.StandardOutput.ReadToEndAsync();await p.WaitForExitAsync();Assert.Equal(0,p.ExitCode);using var doc=JsonDocument.Parse(json);var streams=doc.RootElement.GetProperty("streams").EnumerateArray().Select(x=>x.GetProperty("codec_type").GetString()).ToArray();Assert.Contains("video",streams);Assert.Contains("audio",streams);Assert.InRange(new FileInfo(result.MediaPath!).Length,1,Fixture().MaxBytes);File.Delete(result.MediaPath!);}
++ [Fact] public async Task CancelDeletesPartialAndIsIdempotent(){await using var s=await new FfmpegRecorder(Ff,Root()).StartAsync(Fixture(30));await s.CancelAsync();await s.CancelAsync();var result=await s.Completion;Assert.Equal(RecordingStatus.Cancelled,result.Status);Assert.Null(result.MediaPath);}
++ [Fact] public async Task StopProducesPlayableLocalOutput(){await using var s=await new FfmpegRecorder(Ff,Root()).StartAsync(Fixture(30));await Task.Delay(800);await s.StopAsync();var result=await s.Completion;Assert.Equal(RecordingStatus.Completed,result.Status);Assert.True(File.Exists(result.MediaPath));File.Delete(result.MediaPath!);}
++ [Fact] public void DeviceSubparserInjectionRejected(){Assert.Throws<ArgumentException>(()=>FfmpegRecorder.BuildArguments(Fixture() with{Synthetic=false,Screen=new(0,0,320,240),MicrophoneDevice="mic:video=other"},@"C:\safe\recording.partial.mp4"));}
++ [Fact] public async Task SyntheticCannotFallBackToHardware(){await Assert.ThrowsAsync<ArgumentException>(()=>new FfmpegRecorder(Ff,Root()).StartAsync(Fixture() with{MicrophoneDevice="selected"}));}
++ [Fact] public async Task ByteBoundNeverPublishesOversize(){await using var s=await new FfmpegRecorder(Ff,Root()).StartAsync(Fixture(3) with{MaxBytes=65536});var r=await s.Completion;Assert.True(r.MediaPath==null||new FileInfo(r.MediaPath).Length<=65536);if(r.MediaPath!=null)File.Delete(r.MediaPath);}
++ [Fact] public async Task MissingExecutableDoesNotFallback(){await Assert.ThrowsAnyAsync<Exception>(()=>new FfmpegRecorder(@"C:\missing-ffmpeg.exe",Root()).StartAsync(Fixture()));}
++ [Fact] public async Task InvalidExecutableFailsWithoutPublishing(){await using var s=await new FfmpegRecorder(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),"where.exe"),Root()).StartAsync(Fixture());var result=await s.Completion;Assert.Equal(RecordingStatus.Failed,result.Status);Assert.Null(result.MediaPath);Assert.InRange(result.Diagnostic.Length,0,8192);}
++ [Fact] public async Task RuntimeCancellationStopsProcess(){using var cts=new CancellationTokenSource();await using var s=await new FfmpegRecorder(Ff,Root()).StartAsync(Fixture(30),cts.Token);cts.Cancel();Assert.Equal(RecordingStatus.Cancelled,(await s.Completion).Status);}
++}
++
++
++
+diff --git a/tests/OpenClicky.Recording.Tests/evidence/final.exit b/tests/OpenClicky.Recording.Tests/evidence/final.exit
+new file mode 100644
+index 0000000..9200c2a
+--- /dev/null
++++ b/tests/OpenClicky.Recording.Tests/evidence/final.exit
+@@ -0,0 +1 @@
++exit=0
+diff --git a/tests/OpenClicky.Recording.Tests/evidence/final.log b/tests/OpenClicky.Recording.Tests/evidence/final.log
+new file mode 100644
+index 0000000..bcb921a
+--- /dev/null
++++ b/tests/OpenClicky.Recording.Tests/evidence/final.log
+@@ -0,0 +1,8 @@
++  Determining projects to restore...
++  All projects are up-to-date for restore.
++  OpenClicky.Recording -> D:\OpenClicky\.codex-build\aside-recording-engine-20261028\apps\windows\OpenClicky.Recording\bin\Release\net8.0\OpenClicky.Recording.dll
++  OpenClicky.Recording.Tests -> D:\OpenClicky\.codex-build\aside-recording-engine-20261028\tests\OpenClicky.Recording.Tests\bin\Release\net8.0\OpenClicky.Recording.Tests.dll
++Test run for D:\OpenClicky\.codex-build\aside-recording-engine-20261028\tests\OpenClicky.Recording.Tests\bin\Release\net8.0\OpenClicky.Recording.Tests.dll (.NETCoreApp,Version=v8.0)
++A total of 1 test files matched the specified pattern.
++
++Passed!  - Failed:     0, Passed:    16, Skipped:     0, Total:    16, Duration: 4 s - OpenClicky.Recording.Tests.dll (net8.0)
+diff --git a/tests/OpenClicky.Recording.Tests/evidence/green.exit b/tests/OpenClicky.Recording.Tests/evidence/green.exit
+new file mode 100644
+index 0000000..9200c2a
+--- /dev/null
++++ b/tests/OpenClicky.Recording.Tests/evidence/green.exit
+@@ -0,0 +1 @@
++exit=0
+diff --git a/tests/OpenClicky.Recording.Tests/evidence/green.log b/tests/OpenClicky.Recording.Tests/evidence/green.log
+new file mode 100644
+index 0000000..a2e12d3
+--- /dev/null
++++ b/tests/OpenClicky.Recording.Tests/evidence/green.log
+@@ -0,0 +1,8 @@
++  Determining projects to restore...
++  All projects are up-to-date for restore.
++  OpenClicky.Recording -> D:\OpenClicky\.codex-build\aside-recording-engine-20261028\apps\windows\OpenClicky.Recording\bin\Release\net8.0\OpenClicky.Recording.dll
++  OpenClicky.Recording.Tests -> D:\OpenClicky\.codex-build\aside-recording-engine-20261028\tests\OpenClicky.Recording.Tests\bin\Release\net8.0\OpenClicky.Recording.Tests.dll
++Test run for D:\OpenClicky\.codex-build\aside-recording-engine-20261028\tests\OpenClicky.Recording.Tests\bin\Release\net8.0\OpenClicky.Recording.Tests.dll (.NETCoreApp,Version=v8.0)
++A total of 1 test files matched the specified pattern.
++
++Passed!  - Failed:     0, Passed:    13, Skipped:     0, Total:    13, Duration: 3 s - OpenClicky.Recording.Tests.dll (net8.0)
+diff --git a/tests/OpenClicky.Recording.Tests/evidence/red-contract.exit b/tests/OpenClicky.Recording.Tests/evidence/red-contract.exit
+new file mode 100644
+index 0000000..828296e
+--- /dev/null
++++ b/tests/OpenClicky.Recording.Tests/evidence/red-contract.exit
+@@ -0,0 +1 @@
++exit=1
+diff --git a/tests/OpenClicky.Recording.Tests/evidence/red-contract.log b/tests/OpenClicky.Recording.Tests/evidence/red-contract.log
+new file mode 100644
+index 0000000..d43fa49
+--- /dev/null
++++ b/tests/OpenClicky.Recording.Tests/evidence/red-contract.log
+@@ -0,0 +1,123 @@
++  Determining projects to restore...
++  All projects are up-to-date for restore.
++  OpenClicky.Recording -> D:\OpenClicky\.codex-build\aside-recording-engine-20261028\apps\windows\OpenClicky.Recording\bin\Release\net8.0\OpenClicky.Recording.dll
++  OpenClicky.Recording.Tests -> D:\OpenClicky\.codex-build\aside-recording-engine-20261028\tests\OpenClicky.Recording.Tests\bin\Release\net8.0\OpenClicky.Recording.Tests.dll
++Test run for D:\OpenClicky\.codex-build\aside-recording-engine-20261028\tests\OpenClicky.Recording.Tests\bin\Release\net8.0\OpenClicky.Recording.Tests.dll (.NETCoreApp,Version=v8.0)
++A total of 1 test files matched the specified pattern.
++[xUnit.net 00:00:01.03]     RecorderTests.PrecancelDoesNotCreateOutput [FAIL]
++[xUnit.net 00:00:01.04]     RecorderTests.DeviceIsOneArgumentNoShell [FAIL]
++[xUnit.net 00:00:01.04]     RecorderTests.UnsafeOutputRootsRejected(root: "C:\\bad:stream") [FAIL]
++[xUnit.net 00:00:01.04]     RecorderTests.UnsafeOutputRootsRejected(root: "relative") [FAIL]
++[xUnit.net 00:00:01.04]     RecorderTests.UnsafeOutputRootsRejected(root: "\\\\server\\share") [FAIL]
++[xUnit.net 00:00:01.05]     RecorderTests.RejectInvalidRectangleAndLimits [FAIL]
++[xUnit.net 00:00:01.05]     RecorderTests.InvalidExecutableFailsWithoutPublishing [FAIL]
++[xUnit.net 00:00:01.05]     RecorderTests.CancelDeletesPartialAndIsIdempotent [FAIL]
++  Failed RecorderTests.PrecancelDoesNotCreateOutput [141 ms]
++  Error Message:
++   Assert.ThrowsAny() Failure: Exception type was not compatible
++Expected: typeof(System.OperationCanceledException)
++Actual:   typeof(System.NotImplementedException)
++---- System.NotImplementedException : The method or operation is not implemented.
++  Stack Trace:
++     at RecorderTests.PrecancelDoesNotCreateOutput() in D:\OpenClicky\.codex-build\aside-recording-engine-20261028\tests\OpenClicky.Recording.Tests\RecorderTests.cs:line 15
++--- End of stack trace from previous location ---
++----- Inner Stack Trace -----
++   at OpenClicky.Recording.FfmpegRecorder.StartAsync(RecordingRequest request, CancellationToken cancellationToken) in D:\OpenClicky\.codex-build\aside-recording-engine-20261028\apps\windows\OpenClicky.Recording\Contract.cs:line 9
++   at RecorderTests.<>c__DisplayClass7_0.<PrecancelDoesNotCreateOutput>b__0() in D:\OpenClicky\.codex-build\aside-recording-engine-20261028\tests\OpenClicky.Recording.Tests\RecorderTests.cs:line 15
++  Failed RecorderTests.DeviceIsOneArgumentNoShell [2 ms]
++  Error Message:
++   System.NotImplementedException : The method or operation is not implemented.
++  Stack Trace:
++     at OpenClicky.Recording.FfmpegRecorder.BuildArguments(RecordingRequest request, String outputPath) in D:\OpenClicky\.codex-build\aside-recording-engine-20261028\apps\windows\OpenClicky.Recording\Contract.cs:line 10
++   at RecorderTests.DeviceIsOneArgumentNoShell() in D:\OpenClicky\.codex-build\aside-recording-engine-20261028\tests\OpenClicky.Recording.Tests\RecorderTests.cs:line 14
++   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
++   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)
++  Failed RecorderTests.UnsafeOutputRootsRejected(root: "C:\\bad:stream") [< 1 ms]
++  Error Message:
++   Assert.ThrowsAny() Failure: No exception was thrown
++Expected: typeof(System.ArgumentException)
++  Stack Trace:
++     at RecorderTests.UnsafeOutputRootsRejected(String root) in D:\OpenClicky\.codex-build\aside-recording-engine-20261028\tests\OpenClicky.Recording.Tests\RecorderTests.cs:line 13
++   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)
++   at System.Reflection.MethodBaseInvoker.InvokeDirectByRefWithFewArgs(Object obj, Span`1 copyOfArgs, BindingFlags invokeAttr)
++  Failed RecorderTests.UnsafeOutputRootsRejected(root: "relative") [< 1 ms]
++  Error Message:
++   Assert.ThrowsAny() Failure: No exception was thrown
++Expected: typeof(System.ArgumentException)
++  Stack Trace:
++     at RecorderTests.UnsafeOutputRootsRejected(String root) in D:\OpenClicky\.codex-build\aside-recording-engine-20261028\tests\OpenClicky.Recording.Tests\RecorderTests.cs:line 13
++   at InvokeStub_RecorderTests.UnsafeOutputRootsRejected(Object, Span`1)
++   at System.Reflection.MethodBaseInvoker.InvokeWithOneArg(Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
++  Failed RecorderTests.UnsafeOutputRootsRejected(root: "\\\\server\\share") [< 1 ms]
++  Error Message:
++   Assert.ThrowsAny() Failure: No exception was thrown
++Expected: typeof(System.ArgumentException)
++  Stack Trace:
++     at RecorderTests.UnsafeOutputRootsRejected(String root) in D:\OpenClicky\.codex-build\aside-recording-engine-20261028\tests\OpenClicky.Recording.Tests\RecorderTests.cs:line 13
++   at InvokeStub_RecorderTests.UnsafeOutputRootsRejected(Object, Span`1)
++   at System.Reflection.MethodBaseInvoker.InvokeWithOneArg(Object obj, BindingFlags invokeAttr, Binder binder, Object[] parameters, CultureInfo culture)
++  Failed RecorderTests.RejectInvalidRectangleAndLimits [2 ms]
++  Error Message:
++   Assert.Throws() Failure: Exception type was not an exact match
++Expected: typeof(System.ArgumentException)
++Actual:   typeof(System.NotImplementedException)
++---- System.NotImplementedException : The method or operation is not implemented.
++  Stack Trace:
++     at RecorderTests.RejectInvalidRectangleAndLimits() in D:\OpenClicky\.codex-build\aside-recording-engine-20261028\tests\OpenClicky.Recording.Tests\RecorderTests.cs:line 11
++--- End of stack trace from previous location ---
++----- Inner Stack Trace -----
++   at OpenClicky.Recording.FfmpegRecorder.StartAsync(RecordingRequest request, CancellationToken cancellationToken) in D:\OpenClicky\.codex-build\aside-recording-engine-20261028\apps\windows\OpenClicky.Recording\Contract.cs:line 9
++   at RecorderTests.<>c__DisplayClass4_0.<RejectInvalidRectangleAndLimits>b__0() in D:\OpenClicky\.codex-build\aside-recording-engine-20261028\tests\OpenClicky.Recording.Tests\RecorderTests.cs:line 11
++  Failed RecorderTests.InvalidExecutableFailsWithoutPublishing [1 ms]
++  Error Message:
++   System.NotImplementedException : The method or operation is not implemented.
++  Stack Trace:
++     at OpenClicky.Recording.FfmpegRecorder.StartAsync(RecordingRequest request, CancellationToken cancellationToken) in D:\OpenClicky\.codex-build\aside-recording-engine-20261028\apps\windows\OpenClicky.Recording\Contract.cs:line 9
++   at RecorderTests.InvalidExecutableFailsWithoutPublishing() in D:\OpenClicky\.codex-build\aside-recording-engine-20261028\tests\OpenClicky.Recording.Tests\RecorderTests.cs:line 20
++--- End of stack trace from previous location ---
++  Failed RecorderTests.CancelDeletesPartialAndIsIdempotent [< 1 ms]
++  Error Message:
++   System.NotImplementedException : The method or operation is not implemented.
++  Stack Trace:
++     at OpenClicky.Recording.FfmpegRecorder.StartAsync(RecordingRequest request, CancellationToken cancellationToken) in D:\OpenClicky\.codex-build\aside-recording-engine-20261028\apps\windows\OpenClicky.Recording\Contract.cs:line 9
++   at RecorderTests.CancelDeletesPartialAndIsIdempotent() in D:\OpenClicky\.codex-build\aside-recording-engine-20261028\tests\OpenClicky.Recording.Tests\RecorderTests.cs:line 17
++--- End of stack trace from previous location ---
++[xUnit.net 00:00:01.09]     RecorderTests.SyntheticEncodeContainsVideoAndAudio [FAIL]
++[xUnit.net 00:00:01.09]     RecorderTests.StopProducesPlayableLocalOutput [FAIL]
++[xUnit.net 00:00:01.09]     RecorderTests.ConsentAndExplicitSourcesRequired [FAIL]
++[xUnit.net 00:00:01.09]     RecorderTests.RuntimeCancellationStopsProcess [FAIL]
++  Failed RecorderTests.SyntheticEncodeContainsVideoAndAudio [2 ms]
++  Error Message:
++   System.NotImplementedException : The method or operation is not implemented.
++  Stack Trace:
++     at OpenClicky.Recording.FfmpegRecorder.StartAsync(RecordingRequest request, CancellationToken cancellationToken) in D:\OpenClicky\.codex-build\aside-recording-engine-20261028\apps\windows\OpenClicky.Recording\Contract.cs:line 9
++   at RecorderTests.SyntheticEncodeContainsVideoAndAudio() in D:\OpenClicky\.codex-build\aside-recording-engine-20261028\tests\OpenClicky.Recording.Tests\RecorderTests.cs:line 16
++--- End of stack trace from previous location ---
++  Failed RecorderTests.StopProducesPlayableLocalOutput [1 ms]
++  Error Message:
++   System.NotImplementedException : The method or operation is not implemented.
++  Stack Trace:
++     at OpenClicky.Recording.FfmpegRecorder.StartAsync(RecordingRequest request, CancellationToken cancellationToken) in D:\OpenClicky\.codex-build\aside-recording-engine-20261028\apps\windows\OpenClicky.Recording\Contract.cs:line 9
++   at RecorderTests.StopProducesPlayableLocalOutput() in D:\OpenClicky\.codex-build\aside-recording-engine-20261028\tests\OpenClicky.Recording.Tests\RecorderTests.cs:line 18
++--- End of stack trace from previous location ---
++  Failed RecorderTests.ConsentAndExplicitSourcesRequired [< 1 ms]
++  Error Message:
++   Assert.Throws() Failure: Exception type was not an exact match
++Expected: typeof(System.ArgumentException)
++Actual:   typeof(System.NotImplementedException)
++---- System.NotImplementedException : The method or operation is not implemented.
++  Stack Trace:
++     at RecorderTests.ConsentAndExplicitSourcesRequired() in D:\OpenClicky\.codex-build\aside-recording-engine-20261028\tests\OpenClicky.Recording.Tests\RecorderTests.cs:line 10
++--- End of stack trace from previous location ---
++----- Inner Stack Trace -----
++   at OpenClicky.Recording.FfmpegRecorder.StartAsync(RecordingRequest request, CancellationToken cancellationToken) in D:\OpenClicky\.codex-build\aside-recording-engine-20261028\apps\windows\OpenClicky.Recording\Contract.cs:line 9
++   at RecorderTests.<>c__DisplayClass3_0.<ConsentAndExplicitSourcesRequired>b__0() in D:\OpenClicky\.codex-build\aside-recording-engine-20261028\tests\OpenClicky.Recording.Tests\RecorderTests.cs:line 10
++  Failed RecorderTests.RuntimeCancellationStopsProcess [< 1 ms]
++  Error Message:
++   System.NotImplementedException : The method or operation is not implemented.
++  Stack Trace:
++     at OpenClicky.Recording.FfmpegRecorder.StartAsync(RecordingRequest request, CancellationToken cancellationToken) in D:\OpenClicky\.codex-build\aside-recording-engine-20261028\apps\windows\OpenClicky.Recording\Contract.cs:line 9
++   at RecorderTests.RuntimeCancellationStopsProcess() in D:\OpenClicky\.codex-build\aside-recording-engine-20261028\tests\OpenClicky.Recording.Tests\RecorderTests.cs:line 21
++--- End of stack trace from previous location ---
++
++Failed!  - Failed:    12, Passed:     1, Skipped:     0, Total:    13, Duration: 193 ms - OpenClicky.Recording.Tests.dll (net8.0)
+diff --git a/tests/OpenClicky.Recording.Tests/evidence/red-subparser.log b/tests/OpenClicky.Recording.Tests/evidence/red-subparser.log
+new file mode 100644
+index 0000000..2ad8c9a
+--- /dev/null
++++ b/tests/OpenClicky.Recording.Tests/evidence/red-subparser.log
+@@ -0,0 +1,14 @@
++  Determining projects to restore...
++  All projects are up-to-date for restore.
++  OpenClicky.Recording -> D:\OpenClicky\.codex-build\aside-recording-engine-20261028\apps\windows\OpenClicky.Recording\bin\Release\net8.0\OpenClicky.Recording.dll
++  OpenClicky.Recording.Tests -> D:\OpenClicky\.codex-build\aside-recording-engine-20261028\tests\OpenClicky.Recording.Tests\bin\Release\net8.0\OpenClicky.Recording.Tests.dll
++Test run for D:\OpenClicky\.codex-build\aside-recording-engine-20261028\tests\OpenClicky.Recording.Tests\bin\Release\net8.0\OpenClicky.Recording.Tests.dll (.NETCoreApp,Version=v8.0)
++A total of 1 test files matched the specified pattern.
++[xUnit.net 00:00:00.53]     RecorderTests.DeviceSubparserInjectionRejected [FAIL]
++  Failed RecorderTests.DeviceSubparserInjectionRejected [80 ms]
++  Error Message:
++   Assert.Throws() Failure: No exception was thrown
++Expected: typeof(System.ArgumentException)
++  Stack Trace:
++     at RecorderTests.DeviceSubparserInjectionRejected() in D:\OpenClicky\.codex-build\aside-recording-engine-20261028\tests\OpenClicky.Recording.Tests\RecorderTests.cs:line 19
++--- End of stack trace from previous location ---
+diff --git a/tests/OpenClicky.Recording.Tests/evidence/red.exit b/tests/OpenClicky.Recording.Tests/evidence/red.exit
+new file mode 100644
+index 0000000..828296e
+--- /dev/null
++++ b/tests/OpenClicky.Recording.Tests/evidence/red.exit
+@@ -0,0 +1 @@
++exit=1
+diff --git a/tests/OpenClicky.Recording.Tests/evidence/red.log b/tests/OpenClicky.Recording.Tests/evidence/red.log
+new file mode 100644
+index 0000000..c9cbe0e
+--- /dev/null
++++ b/tests/OpenClicky.Recording.Tests/evidence/red.log
+@@ -0,0 +1,6 @@
++  Determining projects to restore...
++  Restored D:\OpenClicky\.codex-build\aside-recording-engine-20261028\apps\windows\OpenClicky.Recording\OpenClicky.Recording.csproj (in 285 ms).
++  Restored D:\OpenClicky\.codex-build\aside-recording-engine-20261028\tests\OpenClicky.Recording.Tests\OpenClicky.Recording.Tests.csproj (in 361 ms).
++  OpenClicky.Recording -> D:\OpenClicky\.codex-build\aside-recording-engine-20261028\apps\windows\OpenClicky.Recording\bin\Release\net8.0\OpenClicky.Recording.dll
++D:\OpenClicky\.codex-build\aside-recording-engine-20261028\tests\OpenClicky.Recording.Tests\RecorderTests.cs(3,7): error CS0246: The type or namespace name 'OpenClicky' could not be found (are you missing a using directive or an assembly reference?) [D:\OpenClicky\.codex-build\aside-recording-engine-20261028\tests\OpenClicky.Recording.Tests\OpenClicky.Recording.Tests.csproj]
++D:\OpenClicky\.codex-build\aside-recording-engine-20261028\tests\OpenClicky.Recording.Tests\RecorderTests.cs(9,9): error CS0246: The type or namespace name 'RecordingRequest' could not be found (are you missing a using directive or an assembly reference?) [D:\OpenClicky\.codex-build\aside-recording-engine-20261028\tests\OpenClicky.Recording.Tests\OpenClicky.Recording.Tests.csproj]

@@ -1,0 +1,470 @@
+{
+  "Window": "Recordings & meetings",
+  "Elements": [
+    {
+      "Type": "ControlType.Pane",
+      "Name": "OpenClicky · Recordings  meetings",
+      "Bounds": "0,34,3840,2054",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Pane",
+      "Name": "OpenClicky · Recordings & meetings - Web content",
+      "Bounds": "0,35,3840,2055",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Document",
+      "Name": "OpenClicky · Recordings & meetings",
+      "Bounds": "0,35,3840,2055",
+      "Offscreen": false,
+      "Value": "https://openclicky-meetings-ui.local/meetings.html",
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Text",
+      "Name": "Capture idle. Processing not-requested.",
+      "Bounds": "-2,34,366,29",
+      "Offscreen": true,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Text",
+      "Name": "Recordings & meetings",
+      "Bounds": "36,59,362,50",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Text",
+      "Name": "Local library: up to 100 loaded items",
+      "Bounds": "36,130,333,29",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Text",
+      "Name": "Capture: ",
+      "Bounds": "3194,109,77,23",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Text",
+      "Name": "idle",
+      "Bounds": "3270,109,33,23",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Text",
+      "Name": "Processing: ",
+      "Bounds": "3333,105,111,29",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Text",
+      "Name": "not-requested",
+      "Bounds": "3443,105,133,29",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Button",
+      "Name": "Stop recording",
+      "Bounds": "3593,87,188,67",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": false
+    },
+    {
+      "Type": "ControlType.Text",
+      "Name": "Closing this workspace hides it, not the recording. Use Stop here or in the native tray. Processing does not confirm capture has stopped.",
+      "Bounds": "36,226,1256,28",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Text",
+      "Name": "Library",
+      "Bounds": "24,336,371,48",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Edit",
+      "Name": "Search loaded meetings",
+      "Bounds": "75,422,302,30",
+      "Offscreen": false,
+      "Value": "",
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Text",
+      "Name": "Loaded records only; this is not the complete catalog.",
+      "Bounds": "24,486,325,60",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Button",
+      "Name": "Refresh library",
+      "Bounds": "24,569,184,67",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Button",
+      "Name": "New recording",
+      "Bounds": "207,569,188,67",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Text",
+      "Name": "No meetings loaded.",
+      "Bounds": "24,657,194,29",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Text",
+      "Name": "Prepare a recording",
+      "Bounds": "456,310,3325,48",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Text",
+      "Name": "RECORDING SOURCES & CONSENT",
+      "Bounds": "462,420,299,18",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Text",
+      "Name": "Recording title",
+      "Bounds": "480,474,136,29",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Edit",
+      "Name": "Recording title",
+      "Bounds": "480,516,3277,67",
+      "Offscreen": false,
+      "Value": "New recording",
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Text",
+      "Name": "Screen",
+      "Bounds": "480,601,63,29",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.ComboBox",
+      "Name": "Screen Screen unavailable from host.",
+      "Bounds": "480,644,1077,67",
+      "Offscreen": false,
+      "Value": "None",
+      "Enabled": false
+    },
+    {
+      "Type": "ControlType.Text",
+      "Name": "Screen unavailable from host.",
+      "Bounds": "480,723,228,24",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Text",
+      "Name": "Microphone",
+      "Bounds": "1580,601,113,29",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.ComboBox",
+      "Name": "Microphone Microphone unavailable from host.",
+      "Bounds": "1580,644,1077,67",
+      "Offscreen": false,
+      "Value": "None",
+      "Enabled": false
+    },
+    {
+      "Type": "ControlType.Text",
+      "Name": "Microphone unavailable from host.",
+      "Bounds": "1580,723,270,24",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Text",
+      "Name": "System audio",
+      "Bounds": "2680,601,125,29",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.ComboBox",
+      "Name": "System audio System audio unavailable from host.",
+      "Bounds": "2680,644,1077,67",
+      "Offscreen": false,
+      "Value": "None",
+      "Enabled": false
+    },
+    {
+      "Type": "ControlType.Text",
+      "Name": "System audio unavailable from host.",
+      "Bounds": "2680,723,280,24",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Text",
+      "Name": "System audio captures the whole render device, not just the selected meeting or window.",
+      "Bounds": "480,788,825,29",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Button",
+      "Name": "Refresh sources",
+      "Bounds": "480,858,3277,66",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.CheckBox",
+      "Name": "Retain media for 14 days",
+      "Bounds": "486,946,20,20",
+      "Offscreen": false,
+      "Value": "",
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.CheckBox",
+      "Name": "Process locally after Stop",
+      "Bounds": "486,996,20,20",
+      "Offscreen": false,
+      "Value": "",
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Text",
+      "Name": "14-day retention policy is recorded with this session. Media, transcript and notes are separate artifacts; deletion requires native confirmation and is not secure erasure.",
+      "Bounds": "480,1063,1533,28",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.CheckBox",
+      "Name": "I have notified participants and obtained required permission for these exact sources.",
+      "Bounds": "486,1137,20,20",
+      "Offscreen": false,
+      "Value": "",
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.CheckBox",
+      "Name": "I acknowledge local processing and the selected retention settings.",
+      "Bounds": "486,1186,20,20",
+      "Offscreen": false,
+      "Value": "",
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Button",
+      "Name": "Start recording",
+      "Bounds": "480,1231,3277,67",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": false
+    },
+    {
+      "Type": "ControlType.Text",
+      "Name": "Select an available source and acknowledge both notices. Start remains blocked until the host confirms capture is safe.",
+      "Bounds": "480,1337,1094,29",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Text",
+      "Name": "MEETING CONTENT",
+      "Bounds": "462,1476,170,17",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Text",
+      "Name": "Select a meeting to view its transcript and source-linked extracts.",
+      "Bounds": "456,1526,600,29",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Text",
+      "Name": "Processing: not-requested",
+      "Bounds": "480,1611,250,29",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Button",
+      "Name": "Cancel processing",
+      "Bounds": "3542,1593,215,66",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": false
+    },
+    {
+      "Type": "ControlType.Text",
+      "Name": "CIRCLEBACK · READ-ONLY",
+      "Bounds": "462,1737,226,17",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Text",
+      "Name": "disconnected",
+      "Bounds": "480,1781,127,29",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Text",
+      "Name": "Not configured",
+      "Bounds": "480,1816,122,24",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Text",
+      "Name": "No confirmed account",
+      "Bounds": "480,1903,208,28",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Text",
+      "Name": " · Last read: ",
+      "Bounds": "687,1903,111,28",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Text",
+      "Name": "Never",
+      "Bounds": "797,1903,56,28",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Button",
+      "Name": "Configure Circleback…",
+      "Bounds": "480,1972,3277,67",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Text",
+      "Name": "Configuration opens native secret entry. A saved key does not establish a connection. No media is uploaded.",
+      "Bounds": "480,2078,1004,29",
+      "Offscreen": false,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.CheckBox",
+      "Name": "I consent to this explicit Circleback read or import.",
+      "Bounds": "486,2152,20,20",
+      "Offscreen": true,
+      "Value": "",
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Button",
+      "Name": "Read Circleback",
+      "Bounds": "480,2197,3277,67",
+      "Offscreen": true,
+      "Value": null,
+      "Enabled": false
+    },
+    {
+      "Type": "ControlType.Text",
+      "Name": "Provider reading is unavailable until the native host permits it.",
+      "Bounds": "480,2303,572,29",
+      "Offscreen": true,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Text",
+      "Name": "Circleback meeting ID",
+      "Bounds": "480,2374,203,28",
+      "Offscreen": true,
+      "Value": null,
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Edit",
+      "Name": "Circleback meeting ID",
+      "Bounds": "480,2416,3277,67",
+      "Offscreen": true,
+      "Value": "",
+      "Enabled": true
+    },
+    {
+      "Type": "ControlType.Button",
+      "Name": "Import selected ID",
+      "Bounds": "480,2500,3277,67",
+      "Offscreen": true,
+      "Value": null,
+      "Enabled": false
+    }
+  ],
+  "Handle": 333674
+}

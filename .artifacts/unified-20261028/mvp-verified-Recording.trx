@@ -1,0 +1,440 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="42c92f38-307e-4ca3-a304-8e72c8124c7a" name="@BUKHARI-LAPTOP 2026-10-28 15:37:06" runUser="BUKHARI-LAPTOP\ahmad" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Times creation="2026-10-28T15:37:06.6506368+05:00" queuing="2026-10-28T15:37:06.6506373+05:00" start="2026-10-28T15:37:05.9518220+05:00" finish="2026-10-28T15:37:09.5141365+05:00" />
+  <TestSettings name="default" id="c1758a0a-af2b-465f-a993-20824a8fce11">
+    <Deployment runDeploymentRoot="_BUKHARI-LAPTOP_2026-10-28_15_37_06" />
+  </TestSettings>
+  <Results>
+    <UnitTestResult executionId="c013eabd-8988-4ec7-bbe4-445ebd43b5b1" testId="cd00701b-c47a-1ec3-9cff-a66edda0c7db" testName="FaultTests.FaultsAreBoundedAndReported(stdin: True, kill: False, stderr: False)" computerName="BUKHARI-LAPTOP" duration="00:00:00.0676820" startTime="2026-10-28T15:37:06.8203645+05:00" endTime="2026-10-28T15:37:06.8203648+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="c013eabd-8988-4ec7-bbe4-445ebd43b5b1" />
+    <UnitTestResult executionId="093c3e02-94a0-4810-83a5-03ee3654f7b1" testId="7008c317-3997-65c9-6a34-69bb6986339b" testName="FaultTests.UnsafeExecutableRejected(path: &quot;C:\\bad:stream&quot;)" computerName="BUKHARI-LAPTOP" duration="00:00:00.0016255" startTime="2026-10-28T15:37:06.5380123+05:00" endTime="2026-10-28T15:37:06.5380126+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="093c3e02-94a0-4810-83a5-03ee3654f7b1" />
+    <UnitTestResult executionId="9f474d56-274e-4582-afe4-f79174dc5075" testId="6b0c3587-a594-a00f-74ba-946bc0edca3c" testName="FaultTests.FailureExitAndOversizeRemovePartial" computerName="BUKHARI-LAPTOP" duration="00:00:00.0060510" startTime="2026-10-28T15:37:06.9106690+05:00" endTime="2026-10-28T15:37:06.9106692+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="9f474d56-274e-4582-afe4-f79174dc5075" />
+    <UnitTestResult executionId="d4dad278-56d8-47a0-aacc-d3984bafb243" testId="dfd64a12-04db-9f83-8f08-52fd7fcea476" testName="FaultTests.FilesystemFaultsNeverPublish(rename: True, delete: False)" computerName="BUKHARI-LAPTOP" duration="00:00:00.0047677" startTime="2026-10-28T15:37:06.8254845+05:00" endTime="2026-10-28T15:37:06.8254846+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="d4dad278-56d8-47a0-aacc-d3984bafb243" />
+    <UnitTestResult executionId="37454cf4-244b-4e2f-9f97-e048dcc263d1" testId="61720140-e72c-d5a4-2898-da86ff9189b5" testName="FaultTests.UnsafeExecutableRejected(path: &quot;relative&quot;)" computerName="BUKHARI-LAPTOP" duration="00:00:00.0007166" startTime="2026-10-28T15:37:06.5395987+05:00" endTime="2026-10-28T15:37:06.5395988+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="37454cf4-244b-4e2f-9f97-e048dcc263d1" />
+    <UnitTestResult executionId="b4472794-433a-4ac8-a193-d7fcd0ea3975" testId="041c250b-dfe3-8704-57f3-bd83d31bc3d6" testName="FaultTests.UnsafeExecutableRejected(path: &quot;\\\\server\\share\\ffmpeg.exe&quot;)" computerName="BUKHARI-LAPTOP" duration="00:00:00.0006235" startTime="2026-10-28T15:37:06.5387912+05:00" endTime="2026-10-28T15:37:06.5387913+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="b4472794-433a-4ac8-a193-d7fcd0ea3975" />
+    <UnitTestResult executionId="3c2c74d4-ca38-40b7-a2d8-17158162ebcb" testId="e516e6f9-f973-0da6-edcc-a5e9887eb11a" testName="RecorderTests.FakeLauncherIsTheOnlyLifecycleBoundary" computerName="BUKHARI-LAPTOP" duration="00:00:00.0201698" startTime="2026-10-28T15:37:06.5353957+05:00" endTime="2026-10-28T15:37:06.5353959+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="3c2c74d4-ca38-40b7-a2d8-17158162ebcb" />
+    <UnitTestResult executionId="14c38e1f-9630-4e65-905d-5b96490f99aa" testId="bc339ffd-a316-b37d-aa26-d2529cff1660" testName="FaultTests.CancellationBeforeCommitWinsAgainstStop" computerName="BUKHARI-LAPTOP" duration="00:00:00.0732622" startTime="2026-10-28T15:37:06.9028196+05:00" endTime="2026-10-28T15:37:06.9028202+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="14c38e1f-9630-4e65-905d-5b96490f99aa" />
+    <UnitTestResult executionId="a31ad4e3-881e-4274-8e88-07872dee5032" testId="6060f99a-ee7c-da83-434b-70d445b1822f" testName="TerminationRegressionTests.RetainedOwnershipSupportsRetryOrLateExit(lateExit: False)" computerName="BUKHARI-LAPTOP" duration="00:00:00.1397144" startTime="2026-10-28T15:37:06.6518182+05:00" endTime="2026-10-28T15:37:06.6518189+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="a31ad4e3-881e-4274-8e88-07872dee5032" />
+    <UnitTestResult executionId="5112238a-a371-4993-833d-91bfb8a20bfb" testId="04f37f1d-94c2-7bb1-ead4-0e5b08c9a058" testName="FaultTests.PrecancelAndValidationNeverReachLauncher" computerName="BUKHARI-LAPTOP" duration="00:00:00.0028841" startTime="2026-10-28T15:37:06.9173045+05:00" endTime="2026-10-28T15:37:06.9173047+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="5112238a-a371-4993-833d-91bfb8a20bfb" />
+    <UnitTestResult executionId="b8a5a515-7d9b-4463-969f-59d23b810e2a" testId="9393a482-402a-78ad-cad5-5c73a0cfdc8e" testName="TerminationRegressionTests.CompletedDisposeCannotDeadlockCancellationWaitingForGate" computerName="BUKHARI-LAPTOP" duration="00:00:00.0146642" startTime="2026-10-28T15:37:06.7833289+05:00" endTime="2026-10-28T15:37:06.7833296+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="b8a5a515-7d9b-4463-969f-59d23b810e2a" />
+    <UnitTestResult executionId="535e59d9-2a05-411a-a222-267baec7323b" testId="1e79baf3-d75d-2751-8fac-55a66f886387" testName="FaultTests.FaultsAreBoundedAndReported(stdin: False, kill: True, stderr: False)" computerName="BUKHARI-LAPTOP" duration="00:00:00.1450507" startTime="2026-10-28T15:37:06.7522368+05:00" endTime="2026-10-28T15:37:06.7522370+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="535e59d9-2a05-411a-a222-267baec7323b" />
+    <UnitTestResult executionId="4dd6083d-4a0f-4464-aefc-9888e1247727" testId="26179411-442e-dc0e-12a6-2eceba153ff8" testName="FaultTests.ArgumentGrammarAndNoDefaultSources" computerName="BUKHARI-LAPTOP" duration="00:00:00.0011954" startTime="2026-10-28T15:37:06.9057938+05:00" endTime="2026-10-28T15:37:06.9057939+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="4dd6083d-4a0f-4464-aefc-9888e1247727" />
+    <UnitTestResult executionId="1fc230b0-abbf-41a9-bbef-6664a9e04155" testId="0570a795-5cf9-ee45-3cf0-fe55ca78294d" testName="FaultTests.CancellationAfterPublicationDoesNotUndoTerminalCommit" computerName="BUKHARI-LAPTOP" duration="00:00:00.0203919" startTime="2026-10-28T15:37:06.5357412+05:00" endTime="2026-10-28T15:37:06.5357413+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="1fc230b0-abbf-41a9-bbef-6664a9e04155" />
+    <UnitTestResult executionId="dae5937e-fef1-4f6a-8a98-daae579b0194" testId="90b76588-33bd-c139-56cf-26d836542f4e" testName="FaultTests.CancelAndConcurrentDisposeRemoveAllFiles" computerName="BUKHARI-LAPTOP" duration="00:00:00.0032820" startTime="2026-10-28T15:37:06.9143363+05:00" endTime="2026-10-28T15:37:06.9143365+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="dae5937e-fef1-4f6a-8a98-daae579b0194" />
+    <UnitTestResult executionId="7f8aaeec-ce14-410b-b216-6806a5e591c8" testId="81a1a105-2a81-0b9d-2494-2df6613b5d6e" testName="FaultTests.FilesystemFaultsNeverPublish(rename: False, delete: True)" computerName="BUKHARI-LAPTOP" duration="00:00:00.0031508" startTime="2026-10-28T15:37:06.8289558+05:00" endTime="2026-10-28T15:37:06.8289559+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="7f8aaeec-ce14-410b-b216-6806a5e591c8" />
+    <UnitTestResult executionId="504a66aa-626d-4b4f-83f1-412e4d38778f" testId="f87c780b-2ca5-621a-b16d-8edc9fa6f8e8" testName="TerminationRegressionTests.HungKillIsNotDuplicatedOrDisposedAndRetryIsBounded" computerName="BUKHARI-LAPTOP" duration="00:00:00.2001423" startTime="2026-10-28T15:37:06.9839655+05:00" endTime="2026-10-28T15:37:06.9839658+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="504a66aa-626d-4b4f-83f1-412e4d38778f" />
+    <UnitTestResult executionId="e5f32e56-1c7f-489c-a0f8-e04982db23ea" testId="982c47c0-a22a-9b15-cd38-78b3df1e41be" testName="TerminationRegressionTests.RetainedOwnershipSupportsRetryOrLateExit(lateExit: True)" computerName="BUKHARI-LAPTOP" duration="00:00:00.1157829" startTime="2026-10-28T15:37:06.7680914+05:00" endTime="2026-10-28T15:37:06.7680917+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="e5f32e56-1c7f-489c-a0f8-e04982db23ea" />
+    <UnitTestResult executionId="3650e424-a857-4a7c-b5f3-6d529565e239" testId="adea136c-83cc-6063-a2a8-ade5488f4782" testName="SyntheticTests.IndependentGuardRejectsHardwareEvenIfProductionValidationRegresses" computerName="BUKHARI-LAPTOP" duration="00:00:00.0005143" startTime="2026-10-28T15:37:09.4514362+05:00" endTime="2026-10-28T15:37:09.4514364+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="3650e424-a857-4a7c-b5f3-6d529565e239" />
+    <UnitTestResult executionId="e024b135-86c0-46c0-9ec4-983a72095f8c" testId="68b38af8-085b-6949-380c-0a5fb3060b8a" testName="SyntheticTests.IndependentlyAllowlistedEncodeAndStopDecode(stop: True)" computerName="BUKHARI-LAPTOP" duration="00:00:02.1824273" startTime="2026-10-28T15:37:08.6945007+05:00" endTime="2026-10-28T15:37:08.6945010+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="e024b135-86c0-46c0-9ec4-983a72095f8c" />
+    <UnitTestResult executionId="89297b21-9a87-4719-937e-43bb51f0e28c" testId="98d49ba2-ccd1-4b91-1e2c-8d8adbe77280" testName="TerminationRegressionTests.FailedKillMustNotReportCancellationOrDisposeLiveProcess" computerName="BUKHARI-LAPTOP" duration="00:00:00.0762603" startTime="2026-10-28T15:37:07.0607996+05:00" endTime="2026-10-28T15:37:07.0608002+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="89297b21-9a87-4719-937e-43bb51f0e28c" />
+    <UnitTestResult executionId="baf3d33d-8775-4b05-9a9d-80b6fe234806" testId="68a7515c-0c5c-b5ef-da28-5ff75c5c7625" testName="SyntheticTests.IndependentlyAllowlistedEncodeAndStopDecode(stop: False)" computerName="BUKHARI-LAPTOP" duration="00:00:00.7557680" startTime="2026-10-28T15:37:09.4508142+05:00" endTime="2026-10-28T15:37:09.4508149+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="baf3d33d-8775-4b05-9a9d-80b6fe234806" />
+    <UnitTestResult executionId="3ce9474f-d8d4-42a4-b109-cbe49850ef0b" testId="7750d309-606d-e7ee-3672-b963f44a6113" testName="PendingPublicationTests.CompletionIsInitializedDuringSynchronousCleanupAndEntryRemoved" computerName="BUKHARI-LAPTOP" duration="00:00:00.0085915" startTime="2026-10-28T15:37:06.5228338+05:00" endTime="2026-10-28T15:37:06.5228487+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="3ce9474f-d8d4-42a4-b109-cbe49850ef0b" />
+    <UnitTestResult executionId="4b6016d7-c34f-4f62-8979-763856780fa0" testId="5b3a01e3-2838-49c9-87cc-733c53e9c63f" testName="FaultTests.FaultsAreBoundedAndReported(stdin: False, kill: False, stderr: True)" computerName="BUKHARI-LAPTOP" duration="00:00:00.0668561" startTime="2026-10-28T15:37:06.6067756+05:00" endTime="2026-10-28T15:37:06.6067765+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="4b6016d7-c34f-4f62-8979-763856780fa0" />
+  </Results>
+  <TestDefinitions>
+    <UnitTest name="TerminationRegressionTests.CompletedDisposeCannotDeadlockCancellationWaitingForGate" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.recording.tests\bin\release\net8.0\openclicky.recording.tests.dll" id="9393a482-402a-78ad-cad5-5c73a0cfdc8e">
+      <Execution id="b8a5a515-7d9b-4463-969f-59d23b810e2a" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.Recording.Tests\bin\Release\net8.0\OpenClicky.Recording.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="TerminationRegressionTests" name="CompletedDisposeCannotDeadlockCancellationWaitingForGate" />
+    </UnitTest>
+    <UnitTest name="SyntheticTests.IndependentlyAllowlistedEncodeAndStopDecode(stop: True)" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.recording.tests\bin\release\net8.0\openclicky.recording.tests.dll" id="68b38af8-085b-6949-380c-0a5fb3060b8a">
+      <Execution id="e024b135-86c0-46c0-9ec4-983a72095f8c" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.Recording.Tests\bin\Release\net8.0\OpenClicky.Recording.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="SyntheticTests" name="IndependentlyAllowlistedEncodeAndStopDecode" />
+    </UnitTest>
+    <UnitTest name="TerminationRegressionTests.RetainedOwnershipSupportsRetryOrLateExit(lateExit: True)" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.recording.tests\bin\release\net8.0\openclicky.recording.tests.dll" id="982c47c0-a22a-9b15-cd38-78b3df1e41be">
+      <Execution id="e5f32e56-1c7f-489c-a0f8-e04982db23ea" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.Recording.Tests\bin\Release\net8.0\OpenClicky.Recording.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="TerminationRegressionTests" name="RetainedOwnershipSupportsRetryOrLateExit" />
+    </UnitTest>
+    <UnitTest name="SyntheticTests.IndependentGuardRejectsHardwareEvenIfProductionValidationRegresses" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.recording.tests\bin\release\net8.0\openclicky.recording.tests.dll" id="adea136c-83cc-6063-a2a8-ade5488f4782">
+      <Execution id="3650e424-a857-4a7c-b5f3-6d529565e239" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.Recording.Tests\bin\Release\net8.0\OpenClicky.Recording.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="SyntheticTests" name="IndependentGuardRejectsHardwareEvenIfProductionValidationRegresses" />
+    </UnitTest>
+    <UnitTest name="FaultTests.FaultsAreBoundedAndReported(stdin: False, kill: True, stderr: False)" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.recording.tests\bin\release\net8.0\openclicky.recording.tests.dll" id="1e79baf3-d75d-2751-8fac-55a66f886387">
+      <Execution id="535e59d9-2a05-411a-a222-267baec7323b" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.Recording.Tests\bin\Release\net8.0\OpenClicky.Recording.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="FaultTests" name="FaultsAreBoundedAndReported" />
+    </UnitTest>
+    <UnitTest name="TerminationRegressionTests.RetainedOwnershipSupportsRetryOrLateExit(lateExit: False)" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.recording.tests\bin\release\net8.0\openclicky.recording.tests.dll" id="6060f99a-ee7c-da83-434b-70d445b1822f">
+      <Execution id="a31ad4e3-881e-4274-8e88-07872dee5032" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.Recording.Tests\bin\Release\net8.0\OpenClicky.Recording.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="TerminationRegressionTests" name="RetainedOwnershipSupportsRetryOrLateExit" />
+    </UnitTest>
+    <UnitTest name="FaultTests.CancellationAfterPublicationDoesNotUndoTerminalCommit" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.recording.tests\bin\release\net8.0\openclicky.recording.tests.dll" id="0570a795-5cf9-ee45-3cf0-fe55ca78294d">
+      <Execution id="1fc230b0-abbf-41a9-bbef-6664a9e04155" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.Recording.Tests\bin\Release\net8.0\OpenClicky.Recording.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="FaultTests" name="CancellationAfterPublicationDoesNotUndoTerminalCommit" />
+    </UnitTest>
+    <UnitTest name="FaultTests.PrecancelAndValidationNeverReachLauncher" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.recording.tests\bin\release\net8.0\openclicky.recording.tests.dll" id="04f37f1d-94c2-7bb1-ead4-0e5b08c9a058">
+      <Execution id="5112238a-a371-4993-833d-91bfb8a20bfb" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.Recording.Tests\bin\Release\net8.0\OpenClicky.Recording.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="FaultTests" name="PrecancelAndValidationNeverReachLauncher" />
+    </UnitTest>
+    <UnitTest name="PendingPublicationTests.CompletionIsInitializedDuringSynchronousCleanupAndEntryRemoved" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.recording.tests\bin\release\net8.0\openclicky.recording.tests.dll" id="7750d309-606d-e7ee-3672-b963f44a6113">
+      <Execution id="3ce9474f-d8d4-42a4-b109-cbe49850ef0b" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.Recording.Tests\bin\Release\net8.0\OpenClicky.Recording.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="PendingPublicationTests" name="CompletionIsInitializedDuringSynchronousCleanupAndEntryRemoved" />
+    </UnitTest>
+    <UnitTest name="FaultTests.FilesystemFaultsNeverPublish(rename: False, delete: True)" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.recording.tests\bin\release\net8.0\openclicky.recording.tests.dll" id="81a1a105-2a81-0b9d-2494-2df6613b5d6e">
+      <Execution id="7f8aaeec-ce14-410b-b216-6806a5e591c8" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.Recording.Tests\bin\Release\net8.0\OpenClicky.Recording.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="FaultTests" name="FilesystemFaultsNeverPublish" />
+    </UnitTest>
+    <UnitTest name="RecorderTests.FakeLauncherIsTheOnlyLifecycleBoundary" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.recording.tests\bin\release\net8.0\openclicky.recording.tests.dll" id="e516e6f9-f973-0da6-edcc-a5e9887eb11a">
+      <Execution id="3c2c74d4-ca38-40b7-a2d8-17158162ebcb" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.Recording.Tests\bin\Release\net8.0\OpenClicky.Recording.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="RecorderTests" name="FakeLauncherIsTheOnlyLifecycleBoundary" />
+    </UnitTest>
+    <UnitTest name="FaultTests.UnsafeExecutableRejected(path: &quot;C:\\bad:stream&quot;)" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.recording.tests\bin\release\net8.0\openclicky.recording.tests.dll" id="7008c317-3997-65c9-6a34-69bb6986339b">
+      <Execution id="093c3e02-94a0-4810-83a5-03ee3654f7b1" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.Recording.Tests\bin\Release\net8.0\OpenClicky.Recording.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="FaultTests" name="UnsafeExecutableRejected" />
+    </UnitTest>
+    <UnitTest name="FaultTests.UnsafeExecutableRejected(path: &quot;\\\\server\\share\\ffmpeg.exe&quot;)" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.recording.tests\bin\release\net8.0\openclicky.recording.tests.dll" id="041c250b-dfe3-8704-57f3-bd83d31bc3d6">
+      <Execution id="b4472794-433a-4ac8-a193-d7fcd0ea3975" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.Recording.Tests\bin\Release\net8.0\OpenClicky.Recording.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="FaultTests" name="UnsafeExecutableRejected" />
+    </UnitTest>
+    <UnitTest name="FaultTests.CancelAndConcurrentDisposeRemoveAllFiles" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.recording.tests\bin\release\net8.0\openclicky.recording.tests.dll" id="90b76588-33bd-c139-56cf-26d836542f4e">
+      <Execution id="dae5937e-fef1-4f6a-8a98-daae579b0194" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.Recording.Tests\bin\Release\net8.0\OpenClicky.Recording.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="FaultTests" name="CancelAndConcurrentDisposeRemoveAllFiles" />
+    </UnitTest>
+    <UnitTest name="FaultTests.FilesystemFaultsNeverPublish(rename: True, delete: False)" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.recording.tests\bin\release\net8.0\openclicky.recording.tests.dll" id="dfd64a12-04db-9f83-8f08-52fd7fcea476">
+      <Execution id="d4dad278-56d8-47a0-aacc-d3984bafb243" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.Recording.Tests\bin\Release\net8.0\OpenClicky.Recording.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="FaultTests" name="FilesystemFaultsNeverPublish" />
+    </UnitTest>
+    <UnitTest name="FaultTests.FaultsAreBoundedAndReported(stdin: True, kill: False, stderr: False)" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.recording.tests\bin\release\net8.0\openclicky.recording.tests.dll" id="cd00701b-c47a-1ec3-9cff-a66edda0c7db">
+      <Execution id="c013eabd-8988-4ec7-bbe4-445ebd43b5b1" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.Recording.Tests\bin\Release\net8.0\OpenClicky.Recording.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="FaultTests" name="FaultsAreBoundedAndReported" />
+    </UnitTest>
+    <UnitTest name="FaultTests.ArgumentGrammarAndNoDefaultSources" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.recording.tests\bin\release\net8.0\openclicky.recording.tests.dll" id="26179411-442e-dc0e-12a6-2eceba153ff8">
+      <Execution id="4dd6083d-4a0f-4464-aefc-9888e1247727" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.Recording.Tests\bin\Release\net8.0\OpenClicky.Recording.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="FaultTests" name="ArgumentGrammarAndNoDefaultSources" />
+    </UnitTest>
+    <UnitTest name="FaultTests.UnsafeExecutableRejected(path: &quot;relative&quot;)" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.recording.tests\bin\release\net8.0\openclicky.recording.tests.dll" id="61720140-e72c-d5a4-2898-da86ff9189b5">
+      <Execution id="37454cf4-244b-4e2f-9f97-e048dcc263d1" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.Recording.Tests\bin\Release\net8.0\OpenClicky.Recording.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="FaultTests" name="UnsafeExecutableRejected" />
+    </UnitTest>
+    <UnitTest name="FaultTests.FaultsAreBoundedAndReported(stdin: False, kill: False, stderr: True)" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.recording.tests\bin\release\net8.0\openclicky.recording.tests.dll" id="5b3a01e3-2838-49c9-87cc-733c53e9c63f">
+      <Execution id="4b6016d7-c34f-4f62-8979-763856780fa0" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.Recording.Tests\bin\Release\net8.0\OpenClicky.Recording.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="FaultTests" name="FaultsAreBoundedAndReported" />
+    </UnitTest>
+    <UnitTest name="FaultTests.CancellationBeforeCommitWinsAgainstStop" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.recording.tests\bin\release\net8.0\openclicky.recording.tests.dll" id="bc339ffd-a316-b37d-aa26-d2529cff1660">
+      <Execution id="14c38e1f-9630-4e65-905d-5b96490f99aa" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.Recording.Tests\bin\Release\net8.0\OpenClicky.Recording.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="FaultTests" name="CancellationBeforeCommitWinsAgainstStop" />
+    </UnitTest>
+    <UnitTest name="TerminationRegressionTests.HungKillIsNotDuplicatedOrDisposedAndRetryIsBounded" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.recording.tests\bin\release\net8.0\openclicky.recording.tests.dll" id="f87c780b-2ca5-621a-b16d-8edc9fa6f8e8">
+      <Execution id="504a66aa-626d-4b4f-83f1-412e4d38778f" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.Recording.Tests\bin\Release\net8.0\OpenClicky.Recording.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="TerminationRegressionTests" name="HungKillIsNotDuplicatedOrDisposedAndRetryIsBounded" />
+    </UnitTest>
+    <UnitTest name="FaultTests.FailureExitAndOversizeRemovePartial" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.recording.tests\bin\release\net8.0\openclicky.recording.tests.dll" id="6b0c3587-a594-a00f-74ba-946bc0edca3c">
+      <Execution id="9f474d56-274e-4582-afe4-f79174dc5075" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.Recording.Tests\bin\Release\net8.0\OpenClicky.Recording.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="FaultTests" name="FailureExitAndOversizeRemovePartial" />
+    </UnitTest>
+    <UnitTest name="TerminationRegressionTests.FailedKillMustNotReportCancellationOrDisposeLiveProcess" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.recording.tests\bin\release\net8.0\openclicky.recording.tests.dll" id="98d49ba2-ccd1-4b91-1e2c-8d8adbe77280">
+      <Execution id="89297b21-9a87-4719-937e-43bb51f0e28c" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.Recording.Tests\bin\Release\net8.0\OpenClicky.Recording.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="TerminationRegressionTests" name="FailedKillMustNotReportCancellationOrDisposeLiveProcess" />
+    </UnitTest>
+    <UnitTest name="SyntheticTests.IndependentlyAllowlistedEncodeAndStopDecode(stop: False)" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.recording.tests\bin\release\net8.0\openclicky.recording.tests.dll" id="68a7515c-0c5c-b5ef-da28-5ff75c5c7625">
+      <Execution id="baf3d33d-8775-4b05-9a9d-80b6fe234806" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.Recording.Tests\bin\Release\net8.0\OpenClicky.Recording.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="SyntheticTests" name="IndependentlyAllowlistedEncodeAndStopDecode" />
+    </UnitTest>
+  </TestDefinitions>
+  <TestEntries>
+    <TestEntry testId="cd00701b-c47a-1ec3-9cff-a66edda0c7db" executionId="c013eabd-8988-4ec7-bbe4-445ebd43b5b1" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="7008c317-3997-65c9-6a34-69bb6986339b" executionId="093c3e02-94a0-4810-83a5-03ee3654f7b1" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="6b0c3587-a594-a00f-74ba-946bc0edca3c" executionId="9f474d56-274e-4582-afe4-f79174dc5075" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="dfd64a12-04db-9f83-8f08-52fd7fcea476" executionId="d4dad278-56d8-47a0-aacc-d3984bafb243" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="61720140-e72c-d5a4-2898-da86ff9189b5" executionId="37454cf4-244b-4e2f-9f97-e048dcc263d1" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="041c250b-dfe3-8704-57f3-bd83d31bc3d6" executionId="b4472794-433a-4ac8-a193-d7fcd0ea3975" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="e516e6f9-f973-0da6-edcc-a5e9887eb11a" executionId="3c2c74d4-ca38-40b7-a2d8-17158162ebcb" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="bc339ffd-a316-b37d-aa26-d2529cff1660" executionId="14c38e1f-9630-4e65-905d-5b96490f99aa" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="6060f99a-ee7c-da83-434b-70d445b1822f" executionId="a31ad4e3-881e-4274-8e88-07872dee5032" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="04f37f1d-94c2-7bb1-ead4-0e5b08c9a058" executionId="5112238a-a371-4993-833d-91bfb8a20bfb" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="9393a482-402a-78ad-cad5-5c73a0cfdc8e" executionId="b8a5a515-7d9b-4463-969f-59d23b810e2a" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="1e79baf3-d75d-2751-8fac-55a66f886387" executionId="535e59d9-2a05-411a-a222-267baec7323b" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="26179411-442e-dc0e-12a6-2eceba153ff8" executionId="4dd6083d-4a0f-4464-aefc-9888e1247727" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="0570a795-5cf9-ee45-3cf0-fe55ca78294d" executionId="1fc230b0-abbf-41a9-bbef-6664a9e04155" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="90b76588-33bd-c139-56cf-26d836542f4e" executionId="dae5937e-fef1-4f6a-8a98-daae579b0194" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="81a1a105-2a81-0b9d-2494-2df6613b5d6e" executionId="7f8aaeec-ce14-410b-b216-6806a5e591c8" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="f87c780b-2ca5-621a-b16d-8edc9fa6f8e8" executionId="504a66aa-626d-4b4f-83f1-412e4d38778f" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="982c47c0-a22a-9b15-cd38-78b3df1e41be" executionId="e5f32e56-1c7f-489c-a0f8-e04982db23ea" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="adea136c-83cc-6063-a2a8-ade5488f4782" executionId="3650e424-a857-4a7c-b5f3-6d529565e239" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="68b38af8-085b-6949-380c-0a5fb3060b8a" executionId="e024b135-86c0-46c0-9ec4-983a72095f8c" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="98d49ba2-ccd1-4b91-1e2c-8d8adbe77280" executionId="89297b21-9a87-4719-937e-43bb51f0e28c" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="68a7515c-0c5c-b5ef-da28-5ff75c5c7625" executionId="baf3d33d-8775-4b05-9a9d-80b6fe234806" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="7750d309-606d-e7ee-3672-b963f44a6113" executionId="3ce9474f-d8d4-42a4-b109-cbe49850ef0b" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="5b3a01e3-2838-49c9-87cc-733c53e9c63f" executionId="4b6016d7-c34f-4f62-8979-763856780fa0" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+  </TestEntries>
+  <TestLists>
+    <TestList name="Results Not in a List" id="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestList name="All Loaded Results" id="19431567-8539-422a-85d7-44ee4e166bda" />
+  </TestLists>
+  <ResultSummary outcome="Completed">
+    <Counters total="24" executed="24" passed="24" failed="0" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+    <Output>
+      <StdOut>[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v2.8.2+699d445a1a (64-bit .NET 8.0.14)&#xD;
+[xUnit.net 00:00:00.14]   Discovering: OpenClicky.Recording.Tests&#xD;
+[xUnit.net 00:00:00.18]   Discovered:  OpenClicky.Recording.Tests&#xD;
+[xUnit.net 00:00:00.18]   Starting:    OpenClicky.Recording.Tests&#xD;
+SYNTHETIC RECEIPT stop=True file=C:\Users\ahmad\.aside\runtime\tmp\recording-review.partial.mp4\cc13aec28d2d45ad8c24d15340f55f14\4851f2bde9614bbaa1b707caf00a83b6.mp4 bytes=47867 sources=lavfi:testsrc+lavfi:sine probe={&#xD;
+    "streams": [&#xD;
+        {&#xD;
+            "index": 0,&#xD;
+            "codec_name": "h264",&#xD;
+            "codec_long_name": "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10",&#xD;
+            "profile": "Constrained Baseline",&#xD;
+            "codec_type": "video",&#xD;
+            "codec_tag_string": "avc1",&#xD;
+            "codec_tag": "0x31637661",&#xD;
+            "mime_codec_string": "avc1.42c00c",&#xD;
+            "width": 320,&#xD;
+            "height": 240,&#xD;
+            "coded_width": 320,&#xD;
+            "coded_height": 240,&#xD;
+            "has_b_frames": 0,&#xD;
+            "sample_aspect_ratio": "1:1",&#xD;
+            "display_aspect_ratio": "4:3",&#xD;
+            "pix_fmt": "yuv420p",&#xD;
+            "level": 12,&#xD;
+            "chroma_location": "left",&#xD;
+            "field_order": "progressive",&#xD;
+            "is_avc": "true",&#xD;
+            "nal_length_size": "4",&#xD;
+            "id": "0x1",&#xD;
+            "r_frame_rate": "15/1",&#xD;
+            "avg_frame_rate": "59520/4009",&#xD;
+            "time_base": "1/15360",&#xD;
+            "start_pts": 0,&#xD;
+            "start_time": "0.000000",&#xD;
+            "duration_ts": 32072,&#xD;
+            "duration": "2.088021",&#xD;
+            "bit_rate": "109259",&#xD;
+            "bits_per_raw_sample": "8",&#xD;
+            "extradata_size": 37,&#xD;
+            "disposition": {&#xD;
+                "default": 1,&#xD;
+                "dub": 0,&#xD;
+                "original": 0,&#xD;
+                "comment": 0,&#xD;
+                "lyrics": 0,&#xD;
+                "karaoke": 0,&#xD;
+                "forced": 0,&#xD;
+                "hearing_impaired": 0,&#xD;
+                "visual_impaired": 0,&#xD;
+                "clean_effects": 0,&#xD;
+                "attached_pic": 0,&#xD;
+                "timed_thumbnails": 0,&#xD;
+                "non_diegetic": 0,&#xD;
+                "captions": 0,&#xD;
+                "descriptions": 0,&#xD;
+                "metadata": 0,&#xD;
+                "dependent": 0,&#xD;
+                "still_image": 0,&#xD;
+                "multilayer": 0&#xD;
+            },&#xD;
+            "tags": {&#xD;
+                "language": "und",&#xD;
+                "handler_name": "VideoHandler",&#xD;
+                "encoder": "Lavc62.28.100 libx264"&#xD;
+            }&#xD;
+        },&#xD;
+        {&#xD;
+            "index": 1,&#xD;
+            "codec_name": "aac",&#xD;
+            "codec_long_name": "AAC (Advanced Audio Coding)",&#xD;
+            "profile": "LC",&#xD;
+            "codec_type": "audio",&#xD;
+            "codec_tag_string": "mp4a",&#xD;
+            "codec_tag": "0x6134706d",&#xD;
+            "mime_codec_string": "mp4a.40.2",&#xD;
+            "sample_fmt": "fltp",&#xD;
+            "sample_rate": "48000",&#xD;
+            "channels": 1,&#xD;
+            "channel_layout": "mono",&#xD;
+            "bits_per_sample": 0,&#xD;
+            "initial_padding": 0,&#xD;
+            "id": "0x2",&#xD;
+            "r_frame_rate": "0/0",&#xD;
+            "avg_frame_rate": "0/0",&#xD;
+            "time_base": "1/48000",&#xD;
+            "start_pts": 0,&#xD;
+            "start_time": "0.000000",&#xD;
+            "duration_ts": 94208,&#xD;
+            "duration": "1.962667",&#xD;
+            "bit_rate": "69958",&#xD;
+            "extradata_size": 5,&#xD;
+            "disposition": {&#xD;
+                "default": 1,&#xD;
+                "dub": 0,&#xD;
+                "original": 0,&#xD;
+                "comment": 0,&#xD;
+                "lyrics": 0,&#xD;
+                "karaoke": 0,&#xD;
+                "forced": 0,&#xD;
+                "hearing_impaired": 0,&#xD;
+                "visual_impaired": 0,&#xD;
+                "clean_effects": 0,&#xD;
+                "attached_pic": 0,&#xD;
+                "timed_thumbnails": 0,&#xD;
+                "non_diegetic": 0,&#xD;
+                "captions": 0,&#xD;
+                "descriptions": 0,&#xD;
+                "metadata": 0,&#xD;
+                "dependent": 0,&#xD;
+                "still_image": 0,&#xD;
+                "multilayer": 0&#xD;
+            },&#xD;
+            "tags": {&#xD;
+                "language": "und",&#xD;
+                "handler_name": "SoundHandler"&#xD;
+            }&#xD;
+        }&#xD;
+    ],&#xD;
+    "format": {&#xD;
+        "filename": "C:\\Users\\ahmad\\.aside\\runtime\\tmp\\recording-review.partial.mp4\\cc13aec28d2d45ad8c24d15340f55f14\\4851f2bde9614bbaa1b707caf00a83b6.mp4",&#xD;
+        "nb_streams": 2,&#xD;
+        "nb_programs": 0,&#xD;
+        "nb_stream_groups": 0,&#xD;
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",&#xD;
+        "format_long_name": "QuickTime / MOV",&#xD;
+        "start_time": "0.000000",&#xD;
+        "duration": "2.088021",&#xD;
+        "size": "47867",&#xD;
+        "bit_rate": "183396",&#xD;
+        "probe_score": 100,&#xD;
+        "tags": {&#xD;
+            "major_brand": "isom",&#xD;
+            "minor_version": "512",&#xD;
+            "compatible_brands": "isomiso6iso2avc1mp41",&#xD;
+            "encoder": "Lavf62.12.100"&#xD;
+        }&#xD;
+    }&#xD;
+}&#xD;
+SYNTHETIC RECEIPT stop=False file=C:\Users\ahmad\.aside\runtime\tmp\recording-review.partial.mp4\619a70a3606d40f18d9e708c26d53698\2b03b1c62b9b4967a9731da611bb6c26.mp4 bytes=28011 sources=lavfi:testsrc+lavfi:sine probe={&#xD;
+    "streams": [&#xD;
+        {&#xD;
+            "index": 0,&#xD;
+            "codec_name": "h264",&#xD;
+            "codec_long_name": "H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10",&#xD;
+            "profile": "Constrained Baseline",&#xD;
+            "codec_type": "video",&#xD;
+            "codec_tag_string": "avc1",&#xD;
+            "codec_tag": "0x31637661",&#xD;
+            "mime_codec_string": "avc1.42c00c",&#xD;
+            "width": 320,&#xD;
+            "height": 240,&#xD;
+            "coded_width": 320,&#xD;
+            "coded_height": 240,&#xD;
+            "has_b_frames": 0,&#xD;
+            "sample_aspect_ratio": "1:1",&#xD;
+            "display_aspect_ratio": "4:3",&#xD;
+            "pix_fmt": "yuv420p",&#xD;
+            "level": 12,&#xD;
+            "chroma_location": "left",&#xD;
+            "field_order": "progressive",&#xD;
+            "is_avc": "true",&#xD;
+            "nal_length_size": "4",&#xD;
+            "id": "0x1",&#xD;
+            "r_frame_rate": "15/1",&#xD;
+            "avg_frame_rate": "28800/1961",&#xD;
+            "time_base": "1/15360",&#xD;
+            "start_pts": 0,&#xD;
+            "start_time": "0.000000",&#xD;
+            "duration_ts": 15688,&#xD;
+            "duration": "1.021354",&#xD;
+            "bit_rate": "132694",&#xD;
+            "bits_per_raw_sample": "8",&#xD;
+            "extradata_size": 37,&#xD;
+            "disposition": {&#xD;
+                "default": 1,&#xD;
+                "dub": 0,&#xD;
+                "original": 0,&#xD;
+                "comment": 0,&#xD;
+                "lyrics": 0,&#xD;
+                "karaoke": 0,&#xD;
+                "forced": 0,&#xD;
+                "hearing_impaired": 0,&#xD;
+                "visual_impaired": 0,&#xD;
+                "clean_effects": 0,&#xD;
+                "attached_pic": 0,&#xD;
+                "timed_thumbnails": 0,&#xD;
+                "non_diegetic": 0,&#xD;
+                "captions": 0,&#xD;
+                "descriptions": 0,&#xD;
+                "metadata": 0,&#xD;
+                "dependent": 0,&#xD;
+                "still_image": 0,&#xD;
+                "multilayer": 0&#xD;
+            },&#xD;
+            "tags": {&#xD;
+                "language": "und",&#xD;
+                "handler_name": "VideoHandler",&#xD;
+                "encoder": "Lavc62.28.100 libx264"&#xD;
+            }&#xD;
+        },&#xD;
+        {&#xD;
+            "index": 1,&#xD;
+            "codec_name": "aac",&#xD;
+            "codec_long_name": "AAC (Advanced Audio Coding)",&#xD;
+            "profile": "LC",&#xD;
+            "codec_type": "audio",&#xD;
+            "codec_tag_string": "mp4a",&#xD;
+            "codec_tag": "0x6134706d",&#xD;
+            "mime_codec_string": "mp4a.40.2",&#xD;
+            "sample_fmt": "fltp",&#xD;
+            "sample_rate": "48000",&#xD;
+            "channels": 1,&#xD;
+            "channel_layout": "mono",&#xD;
+            "bits_per_sample": 0,&#xD;
+            "initial_padding": 0,&#xD;
+            "id": "0x2",&#xD;
+            "r_frame_rate": "0/0",&#xD;
+            "avg_frame_rate": "0/0",&#xD;
+            "time_base": "1/48000",&#xD;
+            "start_pts": 0,&#xD;
+            "start_time": "0.000000",&#xD;
+            "duration_ts": 49024,&#xD;
+            "duration": "1.021333",&#xD;
+            "bit_rate": "70457",&#xD;
+            "extradata_size": 5,&#xD;
+            "disposition": {&#xD;
+                "default": 1,&#xD;
+                "dub": 0,&#xD;
+                "original": 0,&#xD;
+                "comment": 0,&#xD;
+                "lyrics": 0,&#xD;
+                "karaoke": 0,&#xD;
+                "forced": 0,&#xD;
+                "hearing_impaired": 0,&#xD;
+                "visual_impaired": 0,&#xD;
+                "clean_effects": 0,&#xD;
+                "attached_pic": 0,&#xD;
+                "timed_thumbnails": 0,&#xD;
+                "non_diegetic": 0,&#xD;
+                "captions": 0,&#xD;
+                "descriptions": 0,&#xD;
+                "metadata": 0,&#xD;
+                "dependent": 0,&#xD;
+                "still_image": 0,&#xD;
+                "multilayer": 0&#xD;
+            },&#xD;
+            "tags": {&#xD;
+                "language": "und",&#xD;
+                "handler_name": "SoundHandler"&#xD;
+            }&#xD;
+        }&#xD;
+    ],&#xD;
+    "format": {&#xD;
+        "filename": "C:\\Users\\ahmad\\.aside\\runtime\\tmp\\recording-review.partial.mp4\\619a70a3606d40f18d9e708c26d53698\\2b03b1c62b9b4967a9731da611bb6c26.mp4",&#xD;
+        "nb_streams": 2,&#xD;
+        "nb_programs": 0,&#xD;
+        "nb_stream_groups": 0,&#xD;
+        "format_name": "mov,mp4,m4a,3gp,3g2,mj2",&#xD;
+        "format_long_name": "QuickTime / MOV",&#xD;
+        "start_time": "0.000000",&#xD;
+        "duration": "1.021354",&#xD;
+        "size": "28011",&#xD;
+        "bit_rate": "219402",&#xD;
+        "probe_score": 100,&#xD;
+        "tags": {&#xD;
+            "major_brand": "isom",&#xD;
+            "minor_version": "512",&#xD;
+            "compatible_brands": "isomiso6iso2avc1mp41",&#xD;
+            "encoder": "Lavf62.12.100"&#xD;
+        }&#xD;
+    }&#xD;
+}&#xD;
+[xUnit.net 00:00:03.15]   Finished:    OpenClicky.Recording.Tests&#xD;
+</StdOut>
+    </Output>
+  </ResultSummary>
+</TestRun>

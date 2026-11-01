@@ -1,0 +1,317 @@
+--- COMMITS ---
+2436f12 feat: add validated local meeting records and extractive exports
+--- STAT ---
+ .../OpenClicky.Core/Meetings/MeetingExport.cs      | 24 +++++++
+ .../OpenClicky.Core/Meetings/MeetingSession.cs     | 58 ++++++++++++++++
+ .../OpenClicky.Core/Meetings/MeetingStore.cs       | 45 ++++++++++++
+ .../plans/2026-10-28-meeting-records-report.md     | 35 ++++++++++
+ .../plans/2026-10-28-meeting-records.md            | 29 ++++++++
+ .../Meetings/MeetingRecordsTests.cs                | 79 ++++++++++++++++++++++
+ 6 files changed, 270 insertions(+)
+--- DIFF ---
+diff --git a/apps/windows/OpenClicky.Core/Meetings/MeetingExport.cs b/apps/windows/OpenClicky.Core/Meetings/MeetingExport.cs
+new file mode 100644
+index 0000000..3b21e6b
+--- /dev/null
++++ b/apps/windows/OpenClicky.Core/Meetings/MeetingExport.cs
+@@ -0,0 +1,24 @@
++using System.Net;
++using System.Text;
++using System.Text.Json;
++namespace OpenClicky.Core.Meetings;
++public static class MeetingExport
++{
++ public static string Json(MeetingSession session,DateTimeOffset exportedAt) {
++ ArgumentNullException.ThrowIfNull(session);
++ return JsonSerializer.Serialize(new {schemaVersion=1, exportedAt, notice="Extractive notes and action candidates, not verified commitments", session},new JsonSerializerOptions{WriteIndented=true});
++ }
++ private static string Escape(string text) {
++ var s=WebUtility.HtmlEncode(text); var b=new StringBuilder();
++ foreach(var c in s) { if("\\`*_{}[]()#+-.!|>~".Contains(c)) b.Append('\\'); if(c=='\r') continue; if(c=='\n') b.Append("<br />"); else b.Append(c); }
++ return b.ToString();
++ }
++ public static string Markdown(MeetingSession session,DateTimeOffset exportedAt) {
++ ArgumentNullException.ThrowIfNull(session);
++ var b=new StringBuilder().AppendLine("# "+Escape(session.Title)).AppendLine().AppendLine("Exported: "+exportedAt.ToString("O")).AppendLine("Session: "+session.Id).AppendLine("Extractive notes and action candidates only. No inferred speakers, decisions, owners or due dates.").AppendLine();
++ foreach(var s in session.Segments) b.AppendLine($"<a id=\"segment-{s.Id}\"></a>").AppendLine($"[{s.Start:c} - {s.End:c}] {Escape(s.Text)}").AppendLine();
++ b.AppendLine("## Extractive notes");
++ foreach(var n in session.Notes) b.AppendLine($"- {(n.IsAction ? "Action candidate" : "Extract")}: {Escape(n.Text)} [source](#segment-{n.SegmentId})");
++ return b.ToString();
++ }
++}
+diff --git a/apps/windows/OpenClicky.Core/Meetings/MeetingSession.cs b/apps/windows/OpenClicky.Core/Meetings/MeetingSession.cs
+new file mode 100644
+index 0000000..3dca540
+--- /dev/null
++++ b/apps/windows/OpenClicky.Core/Meetings/MeetingSession.cs
+@@ -0,0 +1,58 @@
++namespace OpenClicky.Core.Meetings;
++public enum MeetingState { Draft, Recording, Completed }
++public sealed record MeetingConsent(DateTimeOffset GrantedAt, string Sources);
++public sealed record TranscriptSegment(string Id, TimeSpan Start, TimeSpan End, string Text);
++public sealed record MeetingNote(string Id, string SessionId, string SegmentId, string Text, bool IsAction);
++/// <summary>Immutable snapshot; notes are extracts, not verified commitments.</summary>
++public sealed class MeetingSession
++{
++ public string Id { get; }
++ public string Title { get; }
++ public DateTimeOffset CreatedAt { get; }
++ public DateTimeOffset? ExpiresAt { get; }
++ public MeetingState State { get; }
++ public MeetingConsent? Consent { get; }
++ public IReadOnlyList<TranscriptSegment> Segments { get; }
++ public IReadOnlyList<MeetingNote> Notes { get; }
++ public MeetingSession(string id, string title, DateTimeOffset createdAt, DateTimeOffset? expiresAt = null,
++ MeetingState state = MeetingState.Draft, MeetingConsent? consent = null,
++ IEnumerable<TranscriptSegment>? segments = null, IEnumerable<MeetingNote>? notes = null)
++ {
++ ValidateId(id); ValidateText(title,500);
++ if (!Enum.IsDefined(state) || expiresAt <= createdAt) throw new ArgumentException("Invalid state or retention time.");
++ if (state == MeetingState.Recording && consent is null) throw new ArgumentException("Recording requires explicit consent.");
++ if (consent is not null) { ValidateText(consent.Sources,2000); if(consent.GrantedAt < createdAt) throw new ArgumentException("Consent predates session."); }
++ var ss = (segments ?? []).Take(10001).ToArray(); var ns = (notes ?? []).Take(10001).ToArray();
++ if(ss.Length>10000 || ns.Length>10000) throw new ArgumentException("Snapshot exceeds bounds.");
++ var byId = new Dictionary<string,TranscriptSegment>(StringComparer.Ordinal);
++ foreach(var s in ss) {
++ if(s is null) throw new ArgumentException("Null segment."); ValidateId(s.Id); ValidateText(s.Text,16000);
++ if(s.Start<TimeSpan.Zero || s.End<=s.Start || s.End>TimeSpan.FromDays(7) || !byId.TryAdd(s.Id,s)) throw new ArgumentException("Invalid or duplicate segment.");
++ }
++ var ids = new HashSet<string>(StringComparer.Ordinal);
++ foreach(var n in ns) {
++ if(n is null) throw new ArgumentException("Null note."); ValidateId(n.Id);
++ if(!ids.Add(n.Id) || n.SessionId!=id || !byId.TryGetValue(n.SegmentId,out var s) || n.Text!=s.Text || n.IsAction!=IsActionText(n.Text)) throw new ArgumentException("Notes require same-session verbatim source and literal action marker.");
++ }
++ Id=id; Title=title; CreatedAt=createdAt; ExpiresAt=expiresAt; State=state; Consent=consent;
++ Segments=Array.AsReadOnly(ss); Notes=Array.AsReadOnly(ns);
++ }
++ internal static void ValidateId(string id) {
++ if(string.IsNullOrEmpty(id) || id.Length>100 || id.Any(c=>!(char.IsAsciiLetterOrDigit(c)||c=='-'||c=='_'))) throw new ArgumentException("Invalid identifier.");
++ }
++ internal static void ValidateText(string text,int max) {
++ if(string.IsNullOrWhiteSpace(text)||text.Length>max||text.Contains('\0')) throw new ArgumentException("Invalid or oversized text.");
++ }
++ private static bool IsActionText(string text)=>text.TrimStart().StartsWith("ACTION:",StringComparison.OrdinalIgnoreCase);
++ public MeetingSession StartRecording(MeetingConsent consent) {
++ ArgumentNullException.ThrowIfNull(consent);
++ if(State!=MeetingState.Draft) throw new InvalidOperationException("Only drafts can start recording.");
++ return new(Id,Title,CreatedAt,ExpiresAt,MeetingState.Recording,consent,Segments,Notes);
++ }
++ public MeetingSession ExtractNotes()=>new(Id,Title,CreatedAt,ExpiresAt,State,Consent,Segments,
++ Segments.Select((s,i)=>new MeetingNote("extract-"+i,Id,s.Id,s.Text,IsActionText(s.Text))));
++ public MeetingSession DeleteSource(string segmentId) {
++ ValidateId(segmentId);
++ return new(Id,Title,CreatedAt,ExpiresAt,State,Consent,Segments.Where(s=>s.Id!=segmentId),Notes.Where(n=>n.SegmentId!=segmentId));
++ }
++}
+diff --git a/apps/windows/OpenClicky.Core/Meetings/MeetingStore.cs b/apps/windows/OpenClicky.Core/Meetings/MeetingStore.cs
+new file mode 100644
+index 0000000..bcd3910
+--- /dev/null
++++ b/apps/windows/OpenClicky.Core/Meetings/MeetingStore.cs
+@@ -0,0 +1,45 @@
++using Microsoft.Data.Sqlite;
++using System.Text.Json;
++namespace OpenClicky.Core.Meetings;
++/// <summary>Transactional local snapshots; no held connection or hardware access.</summary>
++public sealed class MeetingStore
++{
++ private readonly string databasePath;
++ public MeetingStore(string databasePath) { ArgumentException.ThrowIfNullOrWhiteSpace(databasePath); this.databasePath=Path.GetFullPath(databasePath); }
++ private SqliteConnection Open() {
++ var c=LocalSqliteStore.Open(databasePath);
++ try { using var cmd=c.CreateCommand(); cmd.CommandText="CREATE TABLE IF NOT EXISTS meeting_records(id TEXT PRIMARY KEY, title TEXT NOT NULL, content TEXT NOT NULL, expires_at INTEGER NULL);"; cmd.ExecuteNonQuery(); return c; }
++ catch { c.Dispose(); throw; }
++ }
++ private sealed record Snapshot(string Id,string Title,DateTimeOffset CreatedAt,DateTimeOffset? ExpiresAt,MeetingState State,MeetingConsent? Consent,TranscriptSegment[] Segments,MeetingNote[] Notes);
++ private static string Encode(MeetingSession s)=>JsonSerializer.Serialize(new Snapshot(s.Id,s.Title,s.CreatedAt,s.ExpiresAt,s.State,s.Consent,s.Segments.ToArray(),s.Notes.ToArray()));
++ private static MeetingSession Decode(string json) {
++ var s=JsonSerializer.Deserialize<Snapshot>(json) ?? throw new InvalidDataException("Invalid meeting snapshot.");
++ return new(s.Id,s.Title,s.CreatedAt,s.ExpiresAt,s.State,s.Consent,s.Segments,s.Notes);
++ }
++ public void Save(MeetingSession session) {
++ ArgumentNullException.ThrowIfNull(session); var json=Encode(session);
++ using var c=Open(); using var tx=c.BeginTransaction(); using var cmd=c.CreateCommand(); cmd.Transaction=tx;
++ cmd.CommandText="INSERT INTO meeting_records(id,title,content,expires_at) VALUES($id,$title,$content,$expiry) ON CONFLICT(id) DO UPDATE SET title=excluded.title,content=excluded.content,expires_at=excluded.expires_at";
++ cmd.Parameters.AddWithValue("$id",session.Id); cmd.Parameters.AddWithValue("$title",session.Title); cmd.Parameters.AddWithValue("$content",json);
++ cmd.Parameters.AddWithValue("$expiry",session.ExpiresAt is {} at ? at.UtcTicks : DBNull.Value); cmd.ExecuteNonQuery(); tx.Commit();
++ }
++ public MeetingSession? Get(string id) {
++ MeetingSession.ValidateId(id); using var c=Open(); using var cmd=c.CreateCommand(); cmd.CommandText="SELECT content FROM meeting_records WHERE id=$id"; cmd.Parameters.AddWithValue("$id",id);
++ return cmd.ExecuteScalar() is string json ? Decode(json) : null;
++ }
++ public IReadOnlyList<MeetingSession> Search(string query,int limit=50) {
++ MeetingSession.ValidateText(query,500); if(limit<1||limit>100) throw new ArgumentOutOfRangeException(nameof(limit));
++ using var c=Open(); using var cmd=c.CreateCommand();
++ cmd.CommandText="SELECT content FROM meeting_records WHERE instr(lower(title),lower($query))>0 OR EXISTS(SELECT 1 FROM json_each(meeting_records.content, '$.Segments') AS segment WHERE instr(lower(json_extract(segment.value, '$.Text')),lower($query))>0) ORDER BY id LIMIT $limit";
++ cmd.Parameters.AddWithValue("$query",query); cmd.Parameters.AddWithValue("$limit",limit);
++ using var r=cmd.ExecuteReader(); var results=new List<MeetingSession>(); while(r.Read()) results.Add(Decode(r.GetString(0))); return results.AsReadOnly();
++ }
++ public bool Delete(string id) {
++ MeetingSession.ValidateId(id); using var c=Open(); using var cmd=c.CreateCommand(); cmd.CommandText="DELETE FROM meeting_records WHERE id=$id"; cmd.Parameters.AddWithValue("$id",id); return cmd.ExecuteNonQuery()>0;
++ }
++ public int PurgeExpired(DateTimeOffset now) {
++ using var c=Open(); using var cmd=c.CreateCommand(); cmd.CommandText="DELETE FROM meeting_records WHERE expires_at IS NOT NULL AND expires_at<=$now"; cmd.Parameters.AddWithValue("$now",now.UtcTicks); return cmd.ExecuteNonQuery();
++ }
++}
++
+diff --git a/docs/superpowers/plans/2026-10-28-meeting-records-report.md b/docs/superpowers/plans/2026-10-28-meeting-records-report.md
+new file mode 100644
+index 0000000..3a309fb
+--- /dev/null
++++ b/docs/superpowers/plans/2026-10-28-meeting-records-report.md
+@@ -0,0 +1,35 @@
++# Task 1 meeting records verification
++
++Status: DONE for nonvisual local foundation; parent review/integration remains required.
++Base: c769b53bb084b0109f023f7b5f64bea7d38d3060.
++Branch: aside/meeting-records-20261028.
++
++## Owned deliverables
++- Core/Meetings/MeetingSession.cs: immutable validated snapshots, consent gating, deterministic verbatim extraction, source-note cascade.
++- Core/Meetings/MeetingStore.cs: dedicated meeting_records table via unchanged LocalSqliteStore.Open, transactional upsert, durable read, literal title/transcript search, delete and explicit retention purge.
++- Core/Meetings/MeetingExport.cs: schema-versioned timestamped JSON and escaped timestamp/source-linked Markdown strings.
++- Core.Tests/Meetings/MeetingRecordsTests.cs: 13 focused tests, disposable synthetic SQLite fixtures.
++- Exact public signatures and constraints: sibling 2026-10-28-meeting-records.md.
++
++## Test evidence
++All logs and captured process exit files are in this worktree's ignored .codex-build/meeting-evidence/.
++- red.log / red.exit: 8 failed, 2 passed; exit 1. Throwing API skeleton compiled; expected missing-behavior failures. An earlier test-target typing compilation issue was corrected before behavioral red; no production behavior was added before red.
++- search-red.log / search-red.exit: 1 failed, 12 passed; exit 1. Demonstrated raw serialized JSON cannot support literal Unicode/quoted text search; fixed by querying decoded JSON segment text with SQLite json_each/json_extract.
++- green.log / green.exit: 13 passed, 0 failed, 0 skipped; exit 0.
++- full-core.log / full-core.exit: 2362 passed, 0 failed, 0 skipped; exit 0, Release configuration. Build output has no warnings/errors.
++- git diff --check: exit 0 before commit.
++Commands: dotnet test tests/OpenClicky.Core.Tests -c Release --filter FullyQualifiedName~Meetings; dotnet test tests/OpenClicky.Core.Tests -c Release.
++
++The rollback test installs a real BEFORE UPDATE trigger that raises SQLite ABORT; failed replacement preserves previous source ID. This is real local-database acceptance, not a provider mock.
++
++## Limits and semantics
++- No capture, transcription engine, UI/caller integration, remote API/model, memory promotion or cloud sync. Recording is a consent-gated record state, not evidence hardware started. StartRecording is draft-only; completion can be represented by constructing a Completed snapshot.
++- Consent is caller-attested source description and timestamp, not independently verified legal consent or device identity. End-to-end recorder consent must be wired by parent.
++- Source deletion removes the segment and referencing extracts from a returned snapshot; caller must Save it. Session Delete/PurgeExpired remove durable rows. Retention is explicit caller-invoked purge, not an autonomous scheduler. Exports/backups/WAL are not securely erased.
++- Export methods return content, not files. Caller owns destination selection, atomic file persistence and UI acceptance. Export timestamp is caller-supplied. JSON exports preserve source data verbatim; Markdown escapes user-supplied syntax and HTML.
++- Notes copy all source segments exactly; action candidates require a leading ACTION: marker after whitespace. No summaries, speaker names, owner assignments, due dates or decision labels are inferred. All extracted notes/actions remain unverified candidates.
++- Search is literal, ordered by session ID and bounded to 1..100 results; title and decoded transcript text only. SQLite lower() supplies ASCII case folding, not full Unicode case normalization. Search includes expired records until explicit purge.
++- Per-field and count bounds cap finite snapshot input, not total database growth. No encrypted-at-rest guarantee or protection against a maliciously replaced local SQLite file. Store uses a new dedicated table, no edits to shared schema helper.
++- Initial record DTOs are transport values; MeetingSession construction is the validation boundary, including duplicate IDs, references and exact extract text. Read-only defensive copies prevent later collection mutation.
++- Test fixtures were synthetic, temporary and disposed; persistent full logs/exits remain only in owned ignored evidence directory. No secrets read and no personal data or hardware accessed.
++- Parent owns independent spec/code review, shell wiring, final integration gates and release.
+diff --git a/docs/superpowers/plans/2026-10-28-meeting-records.md b/docs/superpowers/plans/2026-10-28-meeting-records.md
+new file mode 100644
+index 0000000..e586808
+--- /dev/null
++++ b/docs/superpowers/plans/2026-10-28-meeting-records.md
+@@ -0,0 +1,29 @@
++# Meeting Records Implementation Plan
++> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development. Assigned implementer runs TDD; parent reviews and integrates.
++
++**Goal:** Durable validated local meeting records, source-linked extractive notes/actions and export.
++**Architecture:** Immutable validated snapshots in dedicated SQLite rows, using LocalSqliteStore.Open unchanged. Atomic parameterized upsert and literal bounded search.
++**Tech Stack:** .NET 8, Microsoft.Data.Sqlite 8.0.31, xUnit.
++
++## Constraints
++Owned Meetings source/tests and this plan/report only. No cloud/model, hardware, UI, secrets or user data. No implicit memory promotion. Exports return strings, caller selects destination. Deletion is logical database deletion, not secure erasure or deletion of external exports.
++
++## Exact public API (OpenClicky.Core.Meetings)
++- enum MeetingState { Draft, Recording, Completed }
++- sealed record MeetingConsent(DateTimeOffset GrantedAt, string Sources)
++- sealed record TranscriptSegment(string Id, TimeSpan Start, TimeSpan End, string Text)
++- sealed record MeetingNote(string Id, string SessionId, string SegmentId, string Text, bool IsAction)
++- sealed class MeetingSession(string id, string title, DateTimeOffset createdAt, DateTimeOffset? expiresAt = null, MeetingState state = Draft, MeetingConsent? consent = null, IEnumerable<TranscriptSegment>? segments = null, IEnumerable<MeetingNote>? notes = null): read-only Id, Title, CreatedAt, ExpiresAt, State, Consent, IReadOnlyList<TranscriptSegment> Segments, IReadOnlyList<MeetingNote> Notes; MeetingSession StartRecording(MeetingConsent consent); MeetingSession ExtractNotes(); MeetingSession DeleteSource(string segmentId).
++- sealed class MeetingStore(string databasePath): void Save(MeetingSession session); MeetingSession? Get(string id); IReadOnlyList<MeetingSession> Search(string query, int limit = 50); bool Delete(string id); int PurgeExpired(DateTimeOffset now).
++- static class MeetingExport: string Json(MeetingSession session, DateTimeOffset exportedAt); string Markdown(MeetingSession session, DateTimeOffset exportedAt).
++
++Validation: IDs ASCII alphanumeric/-/_, 1..100; title 1..500; sources 1..2000; text 1..16000; <=10000 segments/notes; nonnegative ranges, end > start, <=7 days; unique IDs; same-session existing-source references with verbatim text. Expiry > creation. Recording requires consent >= creation. Actions only verbatim segments beginning ACTION:; no inferred owners, dates, speakers or decisions.
++
++### Task: validated records and persistence
++Create apps/windows/OpenClicky.Core/Meetings/MeetingSession.cs, MeetingStore.cs, MeetingExport.cs and tests/OpenClicky.Core.Tests/Meetings/MeetingRecordsTests.cs.
++- [x] Add tests using `Assert.Throws<ArgumentException>(() => new MeetingSession("s", "t", at, state: MeetingState.Recording))`, duplicate/invalid segments, reference integrity, input bounds, immutable copies, deterministic extraction, durable reopen/search, transactional failure, retention and escaping.
++- [x] Run `dotnet test tests/OpenClicky.Core.Tests -c Release --filter FullyQualifiedName~Meetings`; preserve full logs/exits in ignored .codex-build/meeting-evidence. Bootstrap missing types are not behavioral red; add throwing API skeleton and rerun before implementation.
++- [x] Implement constructor validation/defensive copies, deterministic notes, cascade source removal, transactional SQLite storage and timestamped JSON/Markdown with escaped text and explicit source anchors.
++- [x] Run focused then full `dotnet test tests/OpenClicky.Core.Tests -c Release`, retain logs/exits, inspect diff and owned paths.
++- [x] Commit owned files only and provide API/evidence/limitations report for parent review.
++
+diff --git a/tests/OpenClicky.Core.Tests/Meetings/MeetingRecordsTests.cs b/tests/OpenClicky.Core.Tests/Meetings/MeetingRecordsTests.cs
+new file mode 100644
+index 0000000..e3aa66f
+--- /dev/null
++++ b/tests/OpenClicky.Core.Tests/Meetings/MeetingRecordsTests.cs
+@@ -0,0 +1,79 @@
++using OpenClicky.Core.Meetings;
++namespace OpenClicky.Core.Tests.Meetings;
++public sealed class MeetingRecordsTests : IDisposable
++{
++ readonly string root = Path.Combine(Path.GetTempPath(), "meeting-" + Guid.NewGuid().ToString("N"));
++ static readonly DateTimeOffset At = DateTimeOffset.Parse("2026-10-28T00:00:00Z");
++ static TranscriptSegment Seg(string id = "seg", string text = "ACTION: Review fixture") => new(id, TimeSpan.Zero, TimeSpan.FromSeconds(2), text);
++ static MeetingSession Session(params TranscriptSegment[] segments) => new("session", "Fixture", At, segments: segments);
++ MeetingStore Store() => new(Path.Combine(root, "fixture.db"));
++ public void Dispose() { if (Directory.Exists(root)) Directory.Delete(root, true); }
++ [Fact] public void ConsentRequired() {
++ Assert.Throws<ArgumentException>(() => new MeetingSession("s", "t", At, state: MeetingState.Recording));
++ Assert.Throws<ArgumentException>(() => Session().StartRecording(new(At, "")));
++ Assert.Equal(MeetingState.Recording, Session().StartRecording(new(At, "Synthetic source")).State); }
++ [Fact] public void InvalidInputRejected() {
++ Assert.Throws<ArgumentException>(() => Session(Seg(), Seg()));
++ Assert.Throws<ArgumentException>(() => Session(Seg("../bad")));
++ Assert.Throws<ArgumentException>(() => Session(new TranscriptSegment("s", TimeSpan.FromSeconds(-1), TimeSpan.Zero, "text")));
++ Assert.Throws<ArgumentException>(() => Session(new TranscriptSegment("s", TimeSpan.Zero, TimeSpan.Zero, "text")));
++ Assert.Throws<ArgumentException>(() => Session(Seg(text: new string('a',16001))));
++ Assert.Throws<ArgumentException>(() => new MeetingSession("s", new string('a',501), At));
++ Assert.Throws<ArgumentException>(() => new MeetingSession("s", "t", At, At)); }
++ [Fact] public void ReferencesAreSameSessionExistingAndVerbatim() {
++ foreach(var note in new[] { new MeetingNote("n","other","seg","text",false), new("n","session","missing","text",false), new("n","session","seg","Invented owner",true) })
++ Assert.Throws<ArgumentException>(() => new MeetingSession("session","t",At,segments:new[]{Seg()},notes:new[]{note})); }
++ [Fact] public void ExtractionDefensiveDeterministicAndSourceDeletionCascades() {
++ var list = new List<TranscriptSegment>{Seg(),Seg("b","No decision inferred")};
++ var session = new MeetingSession("session","t",At,segments:list); list.Clear();
++ var extracted = session.ExtractNotes(); Assert.Equal(2,session.Segments.Count);
++ Assert.Equal(extracted.Notes,extracted.ExtractNotes().Notes);
++ Assert.True(extracted.Notes[0].IsAction); Assert.False(extracted.Notes[1].IsAction);
++ Assert.Single(extracted.DeleteSource("seg").Notes); }
++ [Fact] public void ReopenSearchDelete() {
++ Store().Save(Session(Seg()).ExtractNotes()); var store=Store();
++ Assert.Single(store.Get("session")!.Notes); Assert.Single(store.Search("Review"));
++ Assert.Empty(store.Search("%")); Assert.Throws<ArgumentException>(()=>store.Search(""));
++ Assert.Throws<ArgumentOutOfRangeException>(()=>store.Search("x",101));
++ Assert.True(store.Delete("session")); Assert.Null(Store().Get("session")); }
++ [Fact] public void Retention() {
++ var store=Store(); store.Save(new("old","old",At,At.AddDays(1))); store.Save(Session());
++ Assert.Equal(0,store.PurgeExpired(At)); Assert.Equal(1,store.PurgeExpired(At.AddDays(1))); Assert.NotNull(store.Get("session")); }
++ [Fact] public void SqliteFailurePreservesPreviousSnapshot() {
++ var store=Store(); store.Save(Session(Seg()));
++ using var c = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={Path.Combine(root,"fixture.db")};Pooling=False"); c.Open();
++ using var cmd=c.CreateCommand(); cmd.CommandText="CREATE TRIGGER reject_meeting_update BEFORE UPDATE ON meeting_records BEGIN SELECT RAISE(ABORT, 'fixture failure'); END;"; cmd.ExecuteNonQuery();
++ Assert.Throws<Microsoft.Data.Sqlite.SqliteException>(()=>store.Save(Session(Seg("replacement")))); Assert.Equal("seg",store.Get("session")!.Segments[0].Id); }
++ [Fact] public void ExportEscapesAndLinksSources() {
++ var s=Session(Seg(text:"<script>x</script> [link](javascript:x)\n# title")).ExtractNotes();
++ var md=MeetingExport.Markdown(s,At); Assert.Contains("Extractive",md); Assert.Contains("#segment-seg",md);
++ Assert.DoesNotContain("<script>",md); Assert.DoesNotContain("[link](javascript:",md); Assert.Contains(At.ToString("O"),md);
++ using var j=System.Text.Json.JsonDocument.Parse(MeetingExport.Json(s,At)); Assert.Equal(1,j.RootElement.GetProperty("schemaVersion").GetInt32()); }
++}
++
++
++
++public sealed class MeetingEdgeTests
++{
++ static readonly DateTimeOffset At = DateTimeOffset.Parse("2026-10-28T00:00:00Z");
++ [Fact] public void SearchFindsUnicodeAndQuotedSourceText() {
++ var root=Path.Combine(Path.GetTempPath(),"meeting-edge-"+Guid.NewGuid().ToString("N"));
++ try { var store=new MeetingStore(Path.Combine(root,"fixture.db"));
++ store.Save(new("s","fixture",At,segments:new[]{new TranscriptSegment("a",TimeSpan.Zero,TimeSpan.FromSeconds(1),"اردو \"quoted\" source")}));
++ Assert.Single(store.Search("اردو")); Assert.Single(store.Search("\"quoted\""));
++ } finally { if(Directory.Exists(root)) Directory.Delete(root,true); }
++ }
++ [Fact] public void RejectsInvalidLifecycleAndOverlongRanges() {
++ Assert.Throws<ArgumentException>(()=>new MeetingSession("s","t",At,consent:new(At.AddSeconds(-1),"fixture")));
++ Assert.Throws<ArgumentException>(()=>new MeetingSession("s","t",At,state:(MeetingState)999));
++ Assert.Throws<ArgumentException>(()=>new MeetingSession("s","t",At,segments:new[]{new TranscriptSegment("a",TimeSpan.Zero,TimeSpan.FromDays(8),"x")}));
++ var recording=new MeetingSession("s","t",At).StartRecording(new(At,"fixture"));
++ Assert.Throws<InvalidOperationException>(()=>recording.StartRecording(new(At,"fixture")));
++ }
++ [Fact] public void RejectsUnboundedSequencesAndDuplicateNotes() {
++ var seg=new TranscriptSegment("a",TimeSpan.Zero,TimeSpan.FromSeconds(1),"x");
++ Assert.Throws<ArgumentException>(()=>new MeetingSession("s","t",At,segments:Enumerable.Repeat(seg,10001)));
++ var note=new MeetingNote("n","s","a","x",false);
++ Assert.Throws<ArgumentException>(()=>new MeetingSession("s","t",At,segments:new[]{seg},notes:new[]{note,note}));
++ }
++}

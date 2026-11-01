@@ -1,0 +1,5 @@
+{
+  "exitCode": 0,
+  "revision": "f1b0c94b71603664efc516f0f75328e0c3e8b4e8",
+  "command": "dotnet build OpenClicky.sln -c Release -p:Platform=x64 --no-restore"
+}

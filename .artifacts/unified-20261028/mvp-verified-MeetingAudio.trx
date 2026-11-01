@@ -1,0 +1,160 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="2813e174-2da4-49a6-88ef-273f60f83797" name="@BUKHARI-LAPTOP 2026-10-28 15:37:11" runUser="BUKHARI-LAPTOP\ahmad" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Times creation="2026-10-28T15:37:11.0525276+05:00" queuing="2026-10-28T15:37:11.0525286+05:00" start="2026-10-28T15:37:10.4116345+05:00" finish="2026-10-28T15:37:11.3560030+05:00" />
+  <TestSettings name="default" id="f88f2ffd-cb72-4191-bba8-1ae3e70e3de7">
+    <Deployment runDeploymentRoot="_BUKHARI-LAPTOP_2026-10-28_15_37_11" />
+  </TestSettings>
+  <Results>
+    <UnitTestResult executionId="214a40b0-f832-453d-8496-895c592f216f" testId="c07a495b-3fbd-0b8d-581f-9273db98f9d0" testName="CaptureTests.MissingStopAcknowledgementIsUnknownNotStopped" computerName="BUKHARI-LAPTOP" duration="00:00:00.0437868" startTime="2026-10-28T15:37:11.3078708+05:00" endTime="2026-10-28T15:37:11.3078711+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="214a40b0-f832-453d-8496-895c592f216f" />
+    <UnitTestResult executionId="b3aeb23b-16b9-48c2-a957-f9a5e27489b7" testId="96ab7774-6eb3-06a5-a7dd-5e13fd23e018" testName="CaptureTests.CannotRestartOrStartAfterDisposal" computerName="BUKHARI-LAPTOP" duration="00:00:00.0018675" startTime="2026-10-28T15:37:11.0104962+05:00" endTime="2026-10-28T15:37:11.0104963+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="b3aeb23b-16b9-48c2-a957-f9a5e27489b7" />
+    <UnitTestResult executionId="dccea0e3-3850-4a09-b5bc-825a78340aff" testId="cc5ff082-cbb8-6551-5db2-b7bd16a3d75e" testName="CaptureTests.SourceSelectionIsCopiedAndConsentCannotSwapIt" computerName="BUKHARI-LAPTOP" duration="00:00:00.0056854" startTime="2026-10-28T15:37:10.9491491+05:00" endTime="2026-10-28T15:37:10.9491493+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="dccea0e3-3850-4a09-b5bc-825a78340aff" />
+    <UnitTestResult executionId="f5c413da-a981-4331-8c4e-cf53dbab2a10" testId="7aba5f57-cf82-57ab-4ba2-e08e272729b0" testName="CaptureTests.DurationBoundStopsIdleLoopbackWithoutPlayback" computerName="BUKHARI-LAPTOP" duration="00:00:00.1356204" startTime="2026-10-28T15:37:11.1535037+05:00" endTime="2026-10-28T15:37:11.1535046+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="f5c413da-a981-4331-8c4e-cf53dbab2a10" />
+    <UnitTestResult executionId="ff1f6b11-74f1-4ff8-82d1-2160367b9b1d" testId="4da516ca-91e8-8f1b-91cf-8a82871d3066" testName="CaptureTests.InvalidCallbackStopsWithoutWritingBadBytes" computerName="BUKHARI-LAPTOP" duration="00:00:00.0029103" startTime="2026-10-28T15:37:11.2524688+05:00" endTime="2026-10-28T15:37:11.2524689+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="ff1f6b11-74f1-4ff8-82d1-2160367b9b1d" />
+    <UnitTestResult executionId="e4a314ef-238b-4d6f-b8f2-426e6e5fe677" testId="35b3e3aa-66f3-848b-6837-f19c860a3a1d" testName="RedContract.InvalidConsentCannotOpenHardware" computerName="BUKHARI-LAPTOP" duration="00:00:00.0127613" startTime="2026-10-28T15:37:10.9379914+05:00" endTime="2026-10-28T15:37:10.9380060+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="e4a314ef-238b-4d6f-b8f2-426e6e5fe677" />
+    <UnitTestResult executionId="19ee13ed-92d6-49ba-9938-c267c83060e1" testId="d6f5e3f9-d068-5d38-7aac-506d2ac6754f" testName="CaptureTests.ShortCallbacksProduceDecodableAlignedWavAndLateCallbacksAreIgnored" computerName="BUKHARI-LAPTOP" duration="00:00:00.0112399" startTime="2026-10-28T15:37:11.1711120+05:00" endTime="2026-10-28T15:37:11.1711125+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="19ee13ed-92d6-49ba-9938-c267c83060e1" />
+    <UnitTestResult executionId="94504472-107f-4623-84ae-760641cff1b9" testId="28d48983-1621-021b-cca0-e35312fb5008" testName="CaptureTests.IdleGapHasMonotonicTimingButNoSynthesizedPlaybackOrSamples" computerName="BUKHARI-LAPTOP" duration="00:00:00.0482984" startTime="2026-10-28T15:37:10.9979356+05:00" endTime="2026-10-28T15:37:10.9979366+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="94504472-107f-4623-84ae-760641cff1b9" />
+    <UnitTestResult executionId="ebcd40ea-6fd9-43f3-9490-34da4431b5d9" testId="c4ed97bb-e1b2-6f6a-47b7-6146bb63ae59" testName="CaptureTests.PreCancelledHasNoFactoryOrFilesystemAccess" computerName="BUKHARI-LAPTOP" duration="00:00:00.0023234" startTime="2026-10-28T15:37:10.9412279+05:00" endTime="2026-10-28T15:37:10.9412280+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="ebcd40ea-6fd9-43f3-9490-34da4431b5d9" />
+    <UnitTestResult executionId="0971e3d4-0c6f-47d5-8287-5b7c84f25bbf" testId="678ebb8a-4a16-a6ca-e358-fad9d246df95" testName="CaptureTests.StopFailureIsUnknownButStillDisposes" computerName="BUKHARI-LAPTOP" duration="00:00:00.0034090" startTime="2026-10-28T15:37:11.0309463+05:00" endTime="2026-10-28T15:37:11.0309463+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="0971e3d4-0c6f-47d5-8287-5b7c84f25bbf" />
+    <UnitTestResult executionId="f35f6df8-f0f6-415d-a2a2-19c4575debd0" testId="5059c315-7914-676b-1e99-bcbc4ccad419" testName="CaptureTests.LateFactoryReturnAfterTimeoutNeverStarts" computerName="BUKHARI-LAPTOP" duration="00:00:00.0719547" startTime="2026-10-28T15:37:11.2461383+05:00" endTime="2026-10-28T15:37:11.2461387+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="f35f6df8-f0f6-415d-a2a2-19c4575debd0" />
+    <UnitTestResult executionId="723e7b18-6c73-47c2-bfdd-ec2a82ee0c0a" testId="2d975a5f-5756-d7cf-9321-2f57d6f7c4fc" testName="CaptureTests.StartFailureIsStoppedAndDisposed" computerName="BUKHARI-LAPTOP" duration="00:00:00.0027609" startTime="2026-10-28T15:37:11.2492466+05:00" endTime="2026-10-28T15:37:11.2492468+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="723e7b18-6c73-47c2-bfdd-ec2a82ee0c0a" />
+    <UnitTestResult executionId="d81ac019-3ae8-4995-87c8-1b9f00d3c2c5" testId="0decb089-2c95-3087-d7e3-433d3e57f71b" testName="CaptureTests.CancellationStopsBothSelectedTracks" computerName="BUKHARI-LAPTOP" duration="00:00:00.0039064" startTime="2026-10-28T15:37:11.1577462+05:00" endTime="2026-10-28T15:37:11.1577463+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="d81ac019-3ae8-4995-87c8-1b9f00d3c2c5" />
+    <UnitTestResult executionId="c02c7d6b-38cb-4ce8-9edf-af302a97f536" testId="c60962ef-0608-ee13-52fd-8b6c8249b382" testName="CaptureTests.LoopbackRequiresExplicitSystemScope" computerName="BUKHARI-LAPTOP" duration="00:00:00.0016560" startTime="2026-10-28T15:37:10.9431474+05:00" endTime="2026-10-28T15:37:10.9431475+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="c02c7d6b-38cb-4ce8-9edf-af302a97f536" />
+    <UnitTestResult executionId="4bddc257-f07c-40a4-b54d-903a336e4359" testId="ed4f1818-36a8-4c62-4845-7b535f9adba0" testName="CaptureTests.ArtifactBudgetBoundsTotalWavBytes" computerName="BUKHARI-LAPTOP" duration="00:00:00.0081870" startTime="2026-10-28T15:37:11.2610161+05:00" endTime="2026-10-28T15:37:11.2610163+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="4bddc257-f07c-40a4-b54d-903a336e4359" />
+    <UnitTestResult executionId="07dda42f-9b3a-4133-a4f6-867e0a7af6e4" testId="f739fa07-5aea-65dd-f33d-d31c5d4ee798" testName="CaptureTests.InvalidRootFailsBeforeAnyFactoryCall" computerName="BUKHARI-LAPTOP" duration="00:00:00.0040897" startTime="2026-10-28T15:37:11.0023440+05:00" endTime="2026-10-28T15:37:11.0023444+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="07dda42f-9b3a-4133-a4f6-867e0a7af6e4" />
+    <UnitTestResult executionId="81d1f7ac-b5ee-4e4b-bd80-0e12feac899c" testId="d4356a7b-f231-0e42-184d-4e47a80aed8a" testName="CaptureTests.NativeFailureEventStopsAllSources" computerName="BUKHARI-LAPTOP" duration="00:00:00.0053187" startTime="2026-10-28T15:37:11.0080783+05:00" endTime="2026-10-28T15:37:11.0080786+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="81d1f7ac-b5ee-4e4b-bd80-0e12feac899c" />
+    <UnitTestResult executionId="f2ae9fc4-cb6c-48e8-aa81-057f26433249" testId="723314fc-c09a-65b4-82bb-de9dd0ca6401" testName="CaptureTests.FactoryFailureDoesNotInventTrackOrStartHardware" computerName="BUKHARI-LAPTOP" duration="00:00:00.0023090" startTime="2026-10-28T15:37:11.1737421+05:00" endTime="2026-10-28T15:37:11.1737427+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="f2ae9fc4-cb6c-48e8-aa81-057f26433249" />
+    <UnitTestResult executionId="d56d739e-72c0-4838-8b93-92930383c614" testId="549b6ee4-e92c-4545-d740-4528ff57a935" testName="CaptureTests.ProductionTypeIsNotCompiledIntoTests" computerName="BUKHARI-LAPTOP" duration="00:00:00.0015544" startTime="2026-10-28T15:37:11.1593926+05:00" endTime="2026-10-28T15:37:11.1593927+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="d56d739e-72c0-4838-8b93-92930383c614" />
+    <UnitTestResult executionId="d3776a6e-6b5c-4ad6-bf34-a482a5054ebe" testId="f7b71a82-26f1-1a5d-d46d-0a98011a5209" testName="CaptureTests.ConstructorAndInvalidConsentHaveNoSideEffects" computerName="BUKHARI-LAPTOP" duration="00:00:00.0022222" startTime="2026-10-28T15:37:11.2635885+05:00" endTime="2026-10-28T15:37:11.2635887+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="d3776a6e-6b5c-4ad6-bf34-a482a5054ebe" />
+    <UnitTestResult executionId="5e532475-e315-4fc8-bb89-13e73484cac1" testId="cdfbbc97-c278-63a2-94e7-6d46138b1a84" testName="CaptureTests.WavCreationFailureCleansUpAcquiredSource" computerName="BUKHARI-LAPTOP" duration="00:00:00.0144223" startTime="2026-10-28T15:37:10.9396677+05:00" endTime="2026-10-28T15:37:10.9396678+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="5e532475-e315-4fc8-bb89-13e73484cac1" />
+    <UnitTestResult executionId="079545de-f1ab-4742-96ea-2b8bccafac5b" testId="0f958f12-a5d7-79a5-8091-32b12ebce5cd" testName="CaptureTests.LimitsAreBoundedAndDefaultsAreSafe" computerName="BUKHARI-LAPTOP" duration="00:00:00.0026789" startTime="2026-10-28T15:37:11.0308269+05:00" endTime="2026-10-28T15:37:11.0308271+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="079545de-f1ab-4742-96ea-2b8bccafac5b" />
+  </Results>
+  <TestDefinitions>
+    <UnitTest name="CaptureTests.CancellationStopsBothSelectedTracks" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.meetingaudio.tests\bin\release\net8.0-windows\openclicky.meetingaudio.tests.dll" id="0decb089-2c95-3087-d7e3-433d3e57f71b">
+      <Execution id="d81ac019-3ae8-4995-87c8-1b9f00d3c2c5" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.MeetingAudio.Tests\bin\Release\net8.0-windows\OpenClicky.MeetingAudio.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="CaptureTests" name="CancellationStopsBothSelectedTracks" />
+    </UnitTest>
+    <UnitTest name="CaptureTests.StartFailureIsStoppedAndDisposed" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.meetingaudio.tests\bin\release\net8.0-windows\openclicky.meetingaudio.tests.dll" id="2d975a5f-5756-d7cf-9321-2f57d6f7c4fc">
+      <Execution id="723e7b18-6c73-47c2-bfdd-ec2a82ee0c0a" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.MeetingAudio.Tests\bin\Release\net8.0-windows\OpenClicky.MeetingAudio.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="CaptureTests" name="StartFailureIsStoppedAndDisposed" />
+    </UnitTest>
+    <UnitTest name="CaptureTests.DurationBoundStopsIdleLoopbackWithoutPlayback" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.meetingaudio.tests\bin\release\net8.0-windows\openclicky.meetingaudio.tests.dll" id="7aba5f57-cf82-57ab-4ba2-e08e272729b0">
+      <Execution id="f5c413da-a981-4331-8c4e-cf53dbab2a10" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.MeetingAudio.Tests\bin\Release\net8.0-windows\OpenClicky.MeetingAudio.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="CaptureTests" name="DurationBoundStopsIdleLoopbackWithoutPlayback" />
+    </UnitTest>
+    <UnitTest name="CaptureTests.ProductionTypeIsNotCompiledIntoTests" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.meetingaudio.tests\bin\release\net8.0-windows\openclicky.meetingaudio.tests.dll" id="549b6ee4-e92c-4545-d740-4528ff57a935">
+      <Execution id="d56d739e-72c0-4838-8b93-92930383c614" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.MeetingAudio.Tests\bin\Release\net8.0-windows\OpenClicky.MeetingAudio.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="CaptureTests" name="ProductionTypeIsNotCompiledIntoTests" />
+    </UnitTest>
+    <UnitTest name="CaptureTests.ShortCallbacksProduceDecodableAlignedWavAndLateCallbacksAreIgnored" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.meetingaudio.tests\bin\release\net8.0-windows\openclicky.meetingaudio.tests.dll" id="d6f5e3f9-d068-5d38-7aac-506d2ac6754f">
+      <Execution id="19ee13ed-92d6-49ba-9938-c267c83060e1" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.MeetingAudio.Tests\bin\Release\net8.0-windows\OpenClicky.MeetingAudio.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="CaptureTests" name="ShortCallbacksProduceDecodableAlignedWavAndLateCallbacksAreIgnored" />
+    </UnitTest>
+    <UnitTest name="CaptureTests.ArtifactBudgetBoundsTotalWavBytes" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.meetingaudio.tests\bin\release\net8.0-windows\openclicky.meetingaudio.tests.dll" id="ed4f1818-36a8-4c62-4845-7b535f9adba0">
+      <Execution id="4bddc257-f07c-40a4-b54d-903a336e4359" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.MeetingAudio.Tests\bin\Release\net8.0-windows\OpenClicky.MeetingAudio.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="CaptureTests" name="ArtifactBudgetBoundsTotalWavBytes" />
+    </UnitTest>
+    <UnitTest name="CaptureTests.SourceSelectionIsCopiedAndConsentCannotSwapIt" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.meetingaudio.tests\bin\release\net8.0-windows\openclicky.meetingaudio.tests.dll" id="cc5ff082-cbb8-6551-5db2-b7bd16a3d75e">
+      <Execution id="dccea0e3-3850-4a09-b5bc-825a78340aff" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.MeetingAudio.Tests\bin\Release\net8.0-windows\OpenClicky.MeetingAudio.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="CaptureTests" name="SourceSelectionIsCopiedAndConsentCannotSwapIt" />
+    </UnitTest>
+    <UnitTest name="CaptureTests.WavCreationFailureCleansUpAcquiredSource" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.meetingaudio.tests\bin\release\net8.0-windows\openclicky.meetingaudio.tests.dll" id="cdfbbc97-c278-63a2-94e7-6d46138b1a84">
+      <Execution id="5e532475-e315-4fc8-bb89-13e73484cac1" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.MeetingAudio.Tests\bin\Release\net8.0-windows\OpenClicky.MeetingAudio.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="CaptureTests" name="WavCreationFailureCleansUpAcquiredSource" />
+    </UnitTest>
+    <UnitTest name="CaptureTests.LateFactoryReturnAfterTimeoutNeverStarts" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.meetingaudio.tests\bin\release\net8.0-windows\openclicky.meetingaudio.tests.dll" id="5059c315-7914-676b-1e99-bcbc4ccad419">
+      <Execution id="f35f6df8-f0f6-415d-a2a2-19c4575debd0" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.MeetingAudio.Tests\bin\Release\net8.0-windows\OpenClicky.MeetingAudio.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="CaptureTests" name="LateFactoryReturnAfterTimeoutNeverStarts" />
+    </UnitTest>
+    <UnitTest name="CaptureTests.NativeFailureEventStopsAllSources" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.meetingaudio.tests\bin\release\net8.0-windows\openclicky.meetingaudio.tests.dll" id="d4356a7b-f231-0e42-184d-4e47a80aed8a">
+      <Execution id="81d1f7ac-b5ee-4e4b-bd80-0e12feac899c" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.MeetingAudio.Tests\bin\Release\net8.0-windows\OpenClicky.MeetingAudio.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="CaptureTests" name="NativeFailureEventStopsAllSources" />
+    </UnitTest>
+    <UnitTest name="RedContract.InvalidConsentCannotOpenHardware" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.meetingaudio.tests\bin\release\net8.0-windows\openclicky.meetingaudio.tests.dll" id="35b3e3aa-66f3-848b-6837-f19c860a3a1d">
+      <Execution id="e4a314ef-238b-4d6f-b8f2-426e6e5fe677" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.MeetingAudio.Tests\bin\Release\net8.0-windows\OpenClicky.MeetingAudio.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="RedContract" name="InvalidConsentCannotOpenHardware" />
+    </UnitTest>
+    <UnitTest name="CaptureTests.CannotRestartOrStartAfterDisposal" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.meetingaudio.tests\bin\release\net8.0-windows\openclicky.meetingaudio.tests.dll" id="96ab7774-6eb3-06a5-a7dd-5e13fd23e018">
+      <Execution id="b3aeb23b-16b9-48c2-a957-f9a5e27489b7" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.MeetingAudio.Tests\bin\Release\net8.0-windows\OpenClicky.MeetingAudio.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="CaptureTests" name="CannotRestartOrStartAfterDisposal" />
+    </UnitTest>
+    <UnitTest name="CaptureTests.StopFailureIsUnknownButStillDisposes" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.meetingaudio.tests\bin\release\net8.0-windows\openclicky.meetingaudio.tests.dll" id="678ebb8a-4a16-a6ca-e358-fad9d246df95">
+      <Execution id="0971e3d4-0c6f-47d5-8287-5b7c84f25bbf" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.MeetingAudio.Tests\bin\Release\net8.0-windows\OpenClicky.MeetingAudio.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="CaptureTests" name="StopFailureIsUnknownButStillDisposes" />
+    </UnitTest>
+    <UnitTest name="CaptureTests.InvalidRootFailsBeforeAnyFactoryCall" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.meetingaudio.tests\bin\release\net8.0-windows\openclicky.meetingaudio.tests.dll" id="f739fa07-5aea-65dd-f33d-d31c5d4ee798">
+      <Execution id="07dda42f-9b3a-4133-a4f6-867e0a7af6e4" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.MeetingAudio.Tests\bin\Release\net8.0-windows\OpenClicky.MeetingAudio.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="CaptureTests" name="InvalidRootFailsBeforeAnyFactoryCall" />
+    </UnitTest>
+    <UnitTest name="CaptureTests.FactoryFailureDoesNotInventTrackOrStartHardware" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.meetingaudio.tests\bin\release\net8.0-windows\openclicky.meetingaudio.tests.dll" id="723314fc-c09a-65b4-82bb-de9dd0ca6401">
+      <Execution id="f2ae9fc4-cb6c-48e8-aa81-057f26433249" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.MeetingAudio.Tests\bin\Release\net8.0-windows\OpenClicky.MeetingAudio.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="CaptureTests" name="FactoryFailureDoesNotInventTrackOrStartHardware" />
+    </UnitTest>
+    <UnitTest name="CaptureTests.IdleGapHasMonotonicTimingButNoSynthesizedPlaybackOrSamples" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.meetingaudio.tests\bin\release\net8.0-windows\openclicky.meetingaudio.tests.dll" id="28d48983-1621-021b-cca0-e35312fb5008">
+      <Execution id="94504472-107f-4623-84ae-760641cff1b9" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.MeetingAudio.Tests\bin\Release\net8.0-windows\OpenClicky.MeetingAudio.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="CaptureTests" name="IdleGapHasMonotonicTimingButNoSynthesizedPlaybackOrSamples" />
+    </UnitTest>
+    <UnitTest name="CaptureTests.MissingStopAcknowledgementIsUnknownNotStopped" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.meetingaudio.tests\bin\release\net8.0-windows\openclicky.meetingaudio.tests.dll" id="c07a495b-3fbd-0b8d-581f-9273db98f9d0">
+      <Execution id="214a40b0-f832-453d-8496-895c592f216f" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.MeetingAudio.Tests\bin\Release\net8.0-windows\OpenClicky.MeetingAudio.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="CaptureTests" name="MissingStopAcknowledgementIsUnknownNotStopped" />
+    </UnitTest>
+    <UnitTest name="CaptureTests.InvalidCallbackStopsWithoutWritingBadBytes" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.meetingaudio.tests\bin\release\net8.0-windows\openclicky.meetingaudio.tests.dll" id="4da516ca-91e8-8f1b-91cf-8a82871d3066">
+      <Execution id="ff1f6b11-74f1-4ff8-82d1-2160367b9b1d" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.MeetingAudio.Tests\bin\Release\net8.0-windows\OpenClicky.MeetingAudio.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="CaptureTests" name="InvalidCallbackStopsWithoutWritingBadBytes" />
+    </UnitTest>
+    <UnitTest name="CaptureTests.ConstructorAndInvalidConsentHaveNoSideEffects" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.meetingaudio.tests\bin\release\net8.0-windows\openclicky.meetingaudio.tests.dll" id="f7b71a82-26f1-1a5d-d46d-0a98011a5209">
+      <Execution id="d3776a6e-6b5c-4ad6-bf34-a482a5054ebe" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.MeetingAudio.Tests\bin\Release\net8.0-windows\OpenClicky.MeetingAudio.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="CaptureTests" name="ConstructorAndInvalidConsentHaveNoSideEffects" />
+    </UnitTest>
+    <UnitTest name="CaptureTests.LimitsAreBoundedAndDefaultsAreSafe" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.meetingaudio.tests\bin\release\net8.0-windows\openclicky.meetingaudio.tests.dll" id="0f958f12-a5d7-79a5-8091-32b12ebce5cd">
+      <Execution id="079545de-f1ab-4742-96ea-2b8bccafac5b" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.MeetingAudio.Tests\bin\Release\net8.0-windows\OpenClicky.MeetingAudio.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="CaptureTests" name="LimitsAreBoundedAndDefaultsAreSafe" />
+    </UnitTest>
+    <UnitTest name="CaptureTests.LoopbackRequiresExplicitSystemScope" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.meetingaudio.tests\bin\release\net8.0-windows\openclicky.meetingaudio.tests.dll" id="c60962ef-0608-ee13-52fd-8b6c8249b382">
+      <Execution id="c02c7d6b-38cb-4ce8-9edf-af302a97f536" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.MeetingAudio.Tests\bin\Release\net8.0-windows\OpenClicky.MeetingAudio.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="CaptureTests" name="LoopbackRequiresExplicitSystemScope" />
+    </UnitTest>
+    <UnitTest name="CaptureTests.PreCancelledHasNoFactoryOrFilesystemAccess" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.meetingaudio.tests\bin\release\net8.0-windows\openclicky.meetingaudio.tests.dll" id="c4ed97bb-e1b2-6f6a-47b7-6146bb63ae59">
+      <Execution id="ebcd40ea-6fd9-43f3-9490-34da4431b5d9" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.MeetingAudio.Tests\bin\Release\net8.0-windows\OpenClicky.MeetingAudio.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="CaptureTests" name="PreCancelledHasNoFactoryOrFilesystemAccess" />
+    </UnitTest>
+  </TestDefinitions>
+  <TestEntries>
+    <TestEntry testId="c07a495b-3fbd-0b8d-581f-9273db98f9d0" executionId="214a40b0-f832-453d-8496-895c592f216f" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="96ab7774-6eb3-06a5-a7dd-5e13fd23e018" executionId="b3aeb23b-16b9-48c2-a957-f9a5e27489b7" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="cc5ff082-cbb8-6551-5db2-b7bd16a3d75e" executionId="dccea0e3-3850-4a09-b5bc-825a78340aff" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="7aba5f57-cf82-57ab-4ba2-e08e272729b0" executionId="f5c413da-a981-4331-8c4e-cf53dbab2a10" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="4da516ca-91e8-8f1b-91cf-8a82871d3066" executionId="ff1f6b11-74f1-4ff8-82d1-2160367b9b1d" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="35b3e3aa-66f3-848b-6837-f19c860a3a1d" executionId="e4a314ef-238b-4d6f-b8f2-426e6e5fe677" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="d6f5e3f9-d068-5d38-7aac-506d2ac6754f" executionId="19ee13ed-92d6-49ba-9938-c267c83060e1" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="28d48983-1621-021b-cca0-e35312fb5008" executionId="94504472-107f-4623-84ae-760641cff1b9" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="c4ed97bb-e1b2-6f6a-47b7-6146bb63ae59" executionId="ebcd40ea-6fd9-43f3-9490-34da4431b5d9" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="678ebb8a-4a16-a6ca-e358-fad9d246df95" executionId="0971e3d4-0c6f-47d5-8287-5b7c84f25bbf" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="5059c315-7914-676b-1e99-bcbc4ccad419" executionId="f35f6df8-f0f6-415d-a2a2-19c4575debd0" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="2d975a5f-5756-d7cf-9321-2f57d6f7c4fc" executionId="723e7b18-6c73-47c2-bfdd-ec2a82ee0c0a" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="0decb089-2c95-3087-d7e3-433d3e57f71b" executionId="d81ac019-3ae8-4995-87c8-1b9f00d3c2c5" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="c60962ef-0608-ee13-52fd-8b6c8249b382" executionId="c02c7d6b-38cb-4ce8-9edf-af302a97f536" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="ed4f1818-36a8-4c62-4845-7b535f9adba0" executionId="4bddc257-f07c-40a4-b54d-903a336e4359" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="f739fa07-5aea-65dd-f33d-d31c5d4ee798" executionId="07dda42f-9b3a-4133-a4f6-867e0a7af6e4" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="d4356a7b-f231-0e42-184d-4e47a80aed8a" executionId="81d1f7ac-b5ee-4e4b-bd80-0e12feac899c" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="723314fc-c09a-65b4-82bb-de9dd0ca6401" executionId="f2ae9fc4-cb6c-48e8-aa81-057f26433249" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="549b6ee4-e92c-4545-d740-4528ff57a935" executionId="d56d739e-72c0-4838-8b93-92930383c614" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="f7b71a82-26f1-1a5d-d46d-0a98011a5209" executionId="d3776a6e-6b5c-4ad6-bf34-a482a5054ebe" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="cdfbbc97-c278-63a2-94e7-6d46138b1a84" executionId="5e532475-e315-4fc8-bb89-13e73484cac1" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="0f958f12-a5d7-79a5-8091-32b12ebce5cd" executionId="079545de-f1ab-4742-96ea-2b8bccafac5b" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+  </TestEntries>
+  <TestLists>
+    <TestList name="Results Not in a List" id="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestList name="All Loaded Results" id="19431567-8539-422a-85d7-44ee4e166bda" />
+  </TestLists>
+  <ResultSummary outcome="Completed">
+    <Counters total="22" executed="22" passed="22" failed="0" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+    <Output>
+      <StdOut>[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v2.8.2+699d445a1a (64-bit .NET 8.0.14)&#xD;
+[xUnit.net 00:00:00.06]   Discovering: OpenClicky.MeetingAudio.Tests&#xD;
+[xUnit.net 00:00:00.08]   Discovered:  OpenClicky.MeetingAudio.Tests&#xD;
+[xUnit.net 00:00:00.08]   Starting:    OpenClicky.MeetingAudio.Tests&#xD;
+[xUnit.net 00:00:00.50]   Finished:    OpenClicky.MeetingAudio.Tests&#xD;
+</StdOut>
+    </Output>
+  </ResultSummary>
+</TestRun>

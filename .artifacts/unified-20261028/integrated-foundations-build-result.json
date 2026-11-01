@@ -1,0 +1,6 @@
+{
+  "log": "D:\\OpenClicky\\.artifacts\\unified-20261028\\integrated-foundations-build.log",
+  "commit": "a2c252c55621a3ef83a21ced7f59000f0d222381",
+  "exitCode": 0,
+  "command": "dotnet build OpenClicky.sln -c Release --no-restore"
+}

@@ -1,0 +1,57 @@
+{
+  "fullFeatureAcceptance": false,
+  "checkpointRevision": "2ade76d6df45e3337b8846cee8e21d6792e94df5",
+  "stagedCompositionSmoke": 0,
+  "automatedPassed": 3081,
+  "stagedSyntheticSpeechSmoke": 0,
+  "delivery": [
+    {
+      "FullName": "D:\\OpenClicky\\.artifacts\\unified-20261028\\MVP\\OpenClicky.App.exe",
+      "Length": 179200
+    },
+    {
+      "FullName": "D:\\OpenClicky\\.artifacts\\unified-20261028\\MVP\\START-MVP.cmd",
+      "Length": 235
+    },
+    {
+      "FullName": "D:\\OpenClicky\\.artifacts\\unified-20261028\\MVP\\README.md",
+      "Length": 5500
+    },
+    {
+      "FullName": "D:\\OpenClicky\\.artifacts\\unified-20261028\\MVP\\RECORDING-INCIDENT.md",
+      "Length": 1467
+    },
+    {
+      "FullName": "C:\\Users\\ahmad\\.aside\\u\\0\\sessions\\2026-10-26_Pm2QhgacjOhFyF8i\\artifacts\\Start-OpenClicky-MVP.cmd",
+      "Length": 235
+    }
+  ],
+  "nativeFollowupRoutine": null,
+  "visibleNativeUiReceiptPresent": true,
+  "sourceRevision": "103138428a66f69a26fb2de494d0a749eb7d16ec",
+  "dllSha256": "D6FA3CA7693687FF842CF6AA3B62CAD501317C1F07D903AEC3BE6C1FD331E192",
+  "nativeUiAcceptance": "DPI144 native toolbar visibly verified: 180px header and complete footer; canonical visible production-context idle lifetime fixture passed",
+  "nativeUiReceipt": "D:/OpenClicky/.artifacts/unified-20261028/native-gui-followup-fixed.json",
+  "nativeLayoutFindingOpen": false,
+  "isolatedAppRunningAtFinalCheck": false,
+  "nativeProcessLifetimeVerified": true,
+  "nativeFinalProcessReceipt": "D:/OpenClicky/.artifacts/unified-20261028/mvp-native-final-process-state.json",
+  "nativeHiddenDpiFixVerified": true,
+  "nativeLayoutVisualAcceptancePending": false,
+  "independentSourceReview": "unavailable",
+  "currentSpeechReceipt": "D:/OpenClicky/.artifacts/unified-20261028/mvp-verified-speech-result.json",
+  "visibleNativeUiAcceptancePending": false,
+  "readinessRoutine": null,
+  "latestSafety": "15:44 PKT fresh check rejected delayed readiness; no UI action",
+  "nativeProcessLifetimeScope": "Explicit visible production-context fixture; fresh synthetic profile, no capture/source enumeration or inference; not a long-duration stability test",
+  "nativeLifetimeReceipt": "D:/OpenClicky/.artifacts/unified-20261028/mvp-fixed-lifetime-result.json",
+  "remainingNativeTask": null,
+  "existingIsolatedCandidatePid": 16972,
+  "nextAction": "Prepared guarded tray-to-toolbar capture, no second launch or lifetime rerun",
+  "sourceCodeRevision": "103138428a66f69a26fb2de494d0a749eb7d16ec",
+  "nativeUiProof": "C:\\Users\\ahmad\\.aside\\u\\0\\sessions\\2026-10-26_Pm2QhgacjOhFyF8i\\tmp\\mvp-fixed-visible-toolbar.png",
+  "existingCandidateLeftRunning": true,
+  "verificationDocumentationRevision": "2ade76d6df45e3337b8846cee8e21d6792e94df5",
+  "nativeFollowupCompleted": true,
+  "activeNativeReadinessMonitors": 0
+}

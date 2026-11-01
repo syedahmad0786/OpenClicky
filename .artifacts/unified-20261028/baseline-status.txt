@@ -1,0 +1,3 @@
+ M apps/companion-workspace/tsconfig.app.tsbuildinfo
+ M apps/windows/OpenClicky.Overlay.Smoke/Program.cs
+?? .claude/

@@ -1,0 +1,46 @@
+[
+  {
+    "Window": "Recordings & meetings",
+    "Handle": 137050,
+    "Elements": [
+      {
+        "Offscreen": false,
+        "Bounds": "353,387,1078,704",
+        "Value": null,
+        "Enabled": true,
+        "Name": "about:blank",
+        "Type": "ControlType.Pane"
+      },
+      {
+        "Offscreen": false,
+        "Bounds": "353,387,1079,705",
+        "Value": null,
+        "Enabled": true,
+        "Name": "about:blank - Web content",
+        "Type": "ControlType.Pane"
+      }
+    ]
+  },
+  {
+    "Window": "OpenClicky browser",
+    "Handle": 268232,
+    "Elements": [
+      {
+        "Offscreen": false,
+        "Bounds": "315,349,1200,120",
+        "Value": null,
+        "Enabled": true,
+        "Name": "about:blank",
+        "Type": "ControlType.Pane"
+      },
+      {
+        "Offscreen": false,
+        "Bounds": "315,350,1200,120",
+        "Value": null,
+        "Enabled": true,
+        "Name": "about:blank - Web content",
+        "Type": "ControlType.Pane"
+      }
+    ]
+  }
+]

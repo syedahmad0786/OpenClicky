@@ -1,0 +1,9 @@
+{
+  "observedAt": "2026-10-28T15:44:42.4449802+05:00",
+  "idleMilliseconds": 7594,
+  "meetingIndicators": 0,
+  "ready": false,
+  "receivedReadinessObservation": "2026-10-28T10:30:12.4320342Z",
+  "staleSignalRejected": true,
+  "nativeUiActionsPerformed": false
+}

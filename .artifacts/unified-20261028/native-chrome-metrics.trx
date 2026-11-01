@@ -1,0 +1,82 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="b175fb44-570b-4ea1-8522-5757c07603f4" name="@BUKHARI-LAPTOP 2026-10-28 14:37:55" runUser="BUKHARI-LAPTOP\ahmad" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Times creation="2026-10-28T14:37:55.5239680+05:00" queuing="2026-10-28T14:37:55.5239681+05:00" start="2026-10-28T14:37:54.3228323+05:00" finish="2026-10-28T14:37:55.5295673+05:00" />
+  <TestSettings name="default" id="79514c7c-728f-439d-a07c-1386b2f8be66">
+    <Deployment runDeploymentRoot="_BUKHARI-LAPTOP_2026-10-28_14_37_55" />
+  </TestSettings>
+  <Results>
+    <UnitTestResult executionId="b36e2231-e9fb-43ba-b54f-b4b0f9f3f789" testId="c00b9d29-415b-4bde-9ff7-23edf3a51cd6" testName="OpenClicky.Core.Tests.OwnedBrowserChromeMetricsTests.ConvertsLogicalHeaderToDevicePixels(dpi: 168, expected: 210)" computerName="BUKHARI-LAPTOP" duration="00:00:00.0000060" startTime="2026-10-28T14:37:55.4301682+05:00" endTime="2026-10-28T14:37:55.4301683+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="b36e2231-e9fb-43ba-b54f-b4b0f9f3f789" />
+    <UnitTestResult executionId="2f4c7416-e957-4c87-9d6e-84a462c20430" testId="f8ff3fa5-19f1-1fdf-5ba1-4696ef5f51cb" testName="OpenClicky.Core.Tests.OwnedBrowserChromeMetricsTests.ConvertsLogicalHeaderToDevicePixels(dpi: 192, expected: 240)" computerName="BUKHARI-LAPTOP" duration="00:00:00.0000014" startTime="2026-10-28T14:37:55.4302125+05:00" endTime="2026-10-28T14:37:55.4302126+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="2f4c7416-e957-4c87-9d6e-84a462c20430" />
+    <UnitTestResult executionId="dd6ecc94-c52d-49c2-b8d1-ea9bfc38e9c4" testId="29a0154f-eec1-524d-1536-b45248216995" testName="OpenClicky.Core.Tests.OwnedBrowserChromeMetricsTests.ConvertsLogicalHeaderToDevicePixels(dpi: 144, expected: 180)" computerName="BUKHARI-LAPTOP" duration="00:00:00.0000015" startTime="2026-10-28T14:37:55.4302367+05:00" endTime="2026-10-28T14:37:55.4302367+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="dd6ecc94-c52d-49c2-b8d1-ea9bfc38e9c4" />
+    <UnitTestResult executionId="8a62ab96-90ee-474e-b206-d84667c51ba6" testId="4b48adf3-6498-e792-3e2a-b3d211dbd981" testName="OpenClicky.Core.Tests.OwnedBrowserChromeMetricsTests.RejectsInvalidDpi(dpi: 0)" computerName="BUKHARI-LAPTOP" duration="00:00:00.0010609" startTime="2026-10-28T14:37:55.4302746+05:00" endTime="2026-10-28T14:37:55.4302746+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="8a62ab96-90ee-474e-b206-d84667c51ba6" />
+    <UnitTestResult executionId="d5dfa353-081d-4a5f-b3a1-7aa8dd0c2e9c" testId="07bf6a5c-25a2-39b1-92f9-b4ad7a144e6e" testName="OpenClicky.Core.Tests.OwnedBrowserChromeMetricsTests.ConvertsLogicalHeaderToDevicePixels(dpi: 137, expected: 172)" computerName="BUKHARI-LAPTOP" duration="00:00:00.0000018" startTime="2026-10-28T14:37:55.4301927+05:00" endTime="2026-10-28T14:37:55.4301927+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="d5dfa353-081d-4a5f-b3a1-7aa8dd0c2e9c" />
+    <UnitTestResult executionId="de4dc39a-5e76-49ef-90b3-f560be36deb3" testId="a37152ea-2bed-b234-66bf-9567a16689f8" testName="OpenClicky.Core.Tests.OwnedBrowserChromeMetricsTests.RejectsInvalidDpi(dpi: -96)" computerName="BUKHARI-LAPTOP" duration="00:00:00.0004488" startTime="2026-10-28T14:37:55.4302948+05:00" endTime="2026-10-28T14:37:55.4302948+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="de4dc39a-5e76-49ef-90b3-f560be36deb3" />
+    <UnitTestResult executionId="4bc337fc-4d8a-4e98-a975-b982c6e0d968" testId="e51dd38c-e9c6-bfeb-d2a3-5053de0e25de" testName="OpenClicky.Core.Tests.OwnedBrowserChromeMetricsTests.ConvertsLogicalHeaderToDevicePixels(dpi: 96, expected: 120)" computerName="BUKHARI-LAPTOP" duration="00:00:00.0001856" startTime="2026-10-28T14:37:55.4299694+05:00" endTime="2026-10-28T14:37:55.4299695+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="4bc337fc-4d8a-4e98-a975-b982c6e0d968" />
+    <UnitTestResult executionId="b3d6fdb6-71c6-419a-878d-a59b6b3fe142" testId="15a7b481-e535-52df-1a1a-550b345c0089" testName="OpenClicky.Core.Tests.OwnedBrowserChromeMetricsTests.ConvertsLogicalHeaderToDevicePixels(dpi: 120, expected: 150)" computerName="BUKHARI-LAPTOP" duration="00:00:00.0077514" startTime="2026-10-28T14:37:55.4281268+05:00" endTime="2026-10-28T14:37:55.4281398+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="b3d6fdb6-71c6-419a-878d-a59b6b3fe142" />
+    <UnitTestResult executionId="9b145772-5759-42c8-8518-a8e0b8036767" testId="d954dfc2-2e23-57b5-7abb-ccc9108a4ccc" testName="OpenClicky.Core.Tests.OwnedBrowserChromeMetricsTests.RepeatedMonitorChangesUseAbsoluteCurrentDpiWithoutCumulativeGrowth" computerName="BUKHARI-LAPTOP" duration="00:00:00.0001547" startTime="2026-10-28T14:37:55.4303216+05:00" endTime="2026-10-28T14:37:55.4303217+05:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="9b145772-5759-42c8-8518-a8e0b8036767" />
+  </Results>
+  <TestDefinitions>
+    <UnitTest name="OpenClicky.Core.Tests.OwnedBrowserChromeMetricsTests.RejectsInvalidDpi(dpi: 0)" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.core.tests\bin\release\net8.0\openclicky.core.tests.dll" id="4b48adf3-6498-e792-3e2a-b3d211dbd981">
+      <Execution id="8a62ab96-90ee-474e-b206-d84667c51ba6" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.Core.Tests\bin\Release\net8.0\OpenClicky.Core.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="OpenClicky.Core.Tests.OwnedBrowserChromeMetricsTests" name="RejectsInvalidDpi" />
+    </UnitTest>
+    <UnitTest name="OpenClicky.Core.Tests.OwnedBrowserChromeMetricsTests.ConvertsLogicalHeaderToDevicePixels(dpi: 144, expected: 180)" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.core.tests\bin\release\net8.0\openclicky.core.tests.dll" id="29a0154f-eec1-524d-1536-b45248216995">
+      <Execution id="dd6ecc94-c52d-49c2-b8d1-ea9bfc38e9c4" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.Core.Tests\bin\Release\net8.0\OpenClicky.Core.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="OpenClicky.Core.Tests.OwnedBrowserChromeMetricsTests" name="ConvertsLogicalHeaderToDevicePixels" />
+    </UnitTest>
+    <UnitTest name="OpenClicky.Core.Tests.OwnedBrowserChromeMetricsTests.ConvertsLogicalHeaderToDevicePixels(dpi: 192, expected: 240)" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.core.tests\bin\release\net8.0\openclicky.core.tests.dll" id="f8ff3fa5-19f1-1fdf-5ba1-4696ef5f51cb">
+      <Execution id="2f4c7416-e957-4c87-9d6e-84a462c20430" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.Core.Tests\bin\Release\net8.0\OpenClicky.Core.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="OpenClicky.Core.Tests.OwnedBrowserChromeMetricsTests" name="ConvertsLogicalHeaderToDevicePixels" />
+    </UnitTest>
+    <UnitTest name="OpenClicky.Core.Tests.OwnedBrowserChromeMetricsTests.ConvertsLogicalHeaderToDevicePixels(dpi: 137, expected: 172)" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.core.tests\bin\release\net8.0\openclicky.core.tests.dll" id="07bf6a5c-25a2-39b1-92f9-b4ad7a144e6e">
+      <Execution id="d5dfa353-081d-4a5f-b3a1-7aa8dd0c2e9c" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.Core.Tests\bin\Release\net8.0\OpenClicky.Core.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="OpenClicky.Core.Tests.OwnedBrowserChromeMetricsTests" name="ConvertsLogicalHeaderToDevicePixels" />
+    </UnitTest>
+    <UnitTest name="OpenClicky.Core.Tests.OwnedBrowserChromeMetricsTests.RejectsInvalidDpi(dpi: -96)" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.core.tests\bin\release\net8.0\openclicky.core.tests.dll" id="a37152ea-2bed-b234-66bf-9567a16689f8">
+      <Execution id="de4dc39a-5e76-49ef-90b3-f560be36deb3" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.Core.Tests\bin\Release\net8.0\OpenClicky.Core.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="OpenClicky.Core.Tests.OwnedBrowserChromeMetricsTests" name="RejectsInvalidDpi" />
+    </UnitTest>
+    <UnitTest name="OpenClicky.Core.Tests.OwnedBrowserChromeMetricsTests.RepeatedMonitorChangesUseAbsoluteCurrentDpiWithoutCumulativeGrowth" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.core.tests\bin\release\net8.0\openclicky.core.tests.dll" id="d954dfc2-2e23-57b5-7abb-ccc9108a4ccc">
+      <Execution id="9b145772-5759-42c8-8518-a8e0b8036767" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.Core.Tests\bin\Release\net8.0\OpenClicky.Core.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="OpenClicky.Core.Tests.OwnedBrowserChromeMetricsTests" name="RepeatedMonitorChangesUseAbsoluteCurrentDpiWithoutCumulativeGrowth" />
+    </UnitTest>
+    <UnitTest name="OpenClicky.Core.Tests.OwnedBrowserChromeMetricsTests.ConvertsLogicalHeaderToDevicePixels(dpi: 120, expected: 150)" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.core.tests\bin\release\net8.0\openclicky.core.tests.dll" id="15a7b481-e535-52df-1a1a-550b345c0089">
+      <Execution id="b3d6fdb6-71c6-419a-878d-a59b6b3fe142" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.Core.Tests\bin\Release\net8.0\OpenClicky.Core.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="OpenClicky.Core.Tests.OwnedBrowserChromeMetricsTests" name="ConvertsLogicalHeaderToDevicePixels" />
+    </UnitTest>
+    <UnitTest name="OpenClicky.Core.Tests.OwnedBrowserChromeMetricsTests.ConvertsLogicalHeaderToDevicePixels(dpi: 96, expected: 120)" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.core.tests\bin\release\net8.0\openclicky.core.tests.dll" id="e51dd38c-e9c6-bfeb-d2a3-5053de0e25de">
+      <Execution id="4bc337fc-4d8a-4e98-a975-b982c6e0d968" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.Core.Tests\bin\Release\net8.0\OpenClicky.Core.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="OpenClicky.Core.Tests.OwnedBrowserChromeMetricsTests" name="ConvertsLogicalHeaderToDevicePixels" />
+    </UnitTest>
+    <UnitTest name="OpenClicky.Core.Tests.OwnedBrowserChromeMetricsTests.ConvertsLogicalHeaderToDevicePixels(dpi: 168, expected: 210)" storage="d:\openclicky\.codex-build\aside-unified-20261028\tests\openclicky.core.tests\bin\release\net8.0\openclicky.core.tests.dll" id="c00b9d29-415b-4bde-9ff7-23edf3a51cd6">
+      <Execution id="b36e2231-e9fb-43ba-b54f-b4b0f9f3f789" />
+      <TestMethod codeBase="D:\OpenClicky\.codex-build\aside-unified-20261028\tests\OpenClicky.Core.Tests\bin\Release\net8.0\OpenClicky.Core.Tests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="OpenClicky.Core.Tests.OwnedBrowserChromeMetricsTests" name="ConvertsLogicalHeaderToDevicePixels" />
+    </UnitTest>
+  </TestDefinitions>
+  <TestEntries>
+    <TestEntry testId="c00b9d29-415b-4bde-9ff7-23edf3a51cd6" executionId="b36e2231-e9fb-43ba-b54f-b4b0f9f3f789" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="f8ff3fa5-19f1-1fdf-5ba1-4696ef5f51cb" executionId="2f4c7416-e957-4c87-9d6e-84a462c20430" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="29a0154f-eec1-524d-1536-b45248216995" executionId="dd6ecc94-c52d-49c2-b8d1-ea9bfc38e9c4" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="4b48adf3-6498-e792-3e2a-b3d211dbd981" executionId="8a62ab96-90ee-474e-b206-d84667c51ba6" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="07bf6a5c-25a2-39b1-92f9-b4ad7a144e6e" executionId="d5dfa353-081d-4a5f-b3a1-7aa8dd0c2e9c" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="a37152ea-2bed-b234-66bf-9567a16689f8" executionId="de4dc39a-5e76-49ef-90b3-f560be36deb3" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="e51dd38c-e9c6-bfeb-d2a3-5053de0e25de" executionId="4bc337fc-4d8a-4e98-a975-b982c6e0d968" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="15a7b481-e535-52df-1a1a-550b345c0089" executionId="b3d6fdb6-71c6-419a-878d-a59b6b3fe142" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="d954dfc2-2e23-57b5-7abb-ccc9108a4ccc" executionId="9b145772-5759-42c8-8518-a8e0b8036767" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+  </TestEntries>
+  <TestLists>
+    <TestList name="Results Not in a List" id="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestList name="All Loaded Results" id="19431567-8539-422a-85d7-44ee4e166bda" />
+  </TestLists>
+  <ResultSummary outcome="Completed">
+    <Counters total="9" executed="9" passed="9" failed="0" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+    <Output>
+      <StdOut>[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v2.8.2+699d445a1a (64-bit .NET 8.0.14)&#xD;
+[xUnit.net 00:00:00.23]   Discovering: OpenClicky.Core.Tests&#xD;
+[xUnit.net 00:00:00.57]   Discovered:  OpenClicky.Core.Tests&#xD;
+[xUnit.net 00:00:00.58]   Starting:    OpenClicky.Core.Tests&#xD;
+[xUnit.net 00:00:00.62]   Finished:    OpenClicky.Core.Tests&#xD;
+</StdOut>
+    </Output>
+  </ResultSummary>
+</TestRun>
